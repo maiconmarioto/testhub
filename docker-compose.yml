@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: testhub
+      POSTGRES_PASSWORD: testhub
+      POSTGRES_DB: testhub
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: testhub
+      MINIO_ROOT_PASSWORD: testhubsecret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio:/data
+
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 testhub testhubsecret;
+      mc mb -p local/testhub || true;
+      exit 0;
+      "
+
+  api:
+    build: .
+    command: ["sh", "-lc", "node dist/db/migrate.js && node dist/cli.js server --port 4321"]
+    environment:
+      DATABASE_URL: postgres://testhub:testhub@postgres:5432/testhub
+      REDIS_URL: redis://redis:6379
+      TESTHUB_SECRET_KEY: change-me
+      S3_BUCKET: testhub
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: testhub
+      S3_SECRET_ACCESS_KEY: testhubsecret
+      S3_FORCE_PATH_STYLE: "true"
+    ports:
+      - "4321:4321"
+    depends_on:
+      - postgres
+      - redis
+      - minio
+      - createbuckets
+
+  worker:
+    build: .
+    command: ["node", "dist/worker.js"]
+    environment:
+      DATABASE_URL: postgres://testhub:testhub@postgres:5432/testhub
+      REDIS_URL: redis://redis:6379
+      TESTHUB_SECRET_KEY: change-me
+      S3_BUCKET: testhub
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: testhub
+      S3_SECRET_ACCESS_KEY: testhubsecret
+      S3_FORCE_PATH_STYLE: "true"
+    depends_on:
+      - api
+      - redis
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      NEXT_PUBLIC_TESTHUB_API_URL: http://localhost:4321
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  minio:

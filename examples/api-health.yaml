@@ -1,0 +1,34 @@
+version: 1
+type: api
+name: httpbin-health
+description: Smoke API publico para validar runner
+baseUrl: https://httpbin.org
+defaults:
+  timeoutMs: 10000
+tests:
+  - name: get status 200
+    tags: [smoke]
+    request:
+      method: GET
+      path: /status/200
+    expect:
+      status: 200
+      maxMs: 5000
+
+  - name: get json schema
+    tags: [contract]
+    request:
+      method: GET
+      path: /json
+    expect:
+      status: 200
+      jsonSchema:
+        type: object
+        required: [slideshow]
+        properties:
+          slideshow:
+            type: object
+            required: [title]
+            properties:
+              title:
+                type: string

@@ -1,0 +1,19 @@
+version: 1
+type: web
+name: example-web-smoke
+description: Exemplo publico simples
+baseUrl: https://example.com
+defaults:
+  timeoutMs: 10000
+  screenshotOnFailure: true
+  video: retain-on-failure
+  trace: retain-on-failure
+tests:
+  - name: homepage title visible
+    tags: [smoke]
+    steps:
+      - goto: /
+      - expectText: Example Domain
+      - expectVisible:
+          by: css
+          target: a

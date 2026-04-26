@@ -1,0 +1,29 @@
+version: 1
+type: api
+name: httpbin-chain
+baseUrl: https://httpbin.org
+defaults:
+  timeoutMs: 10000
+tests:
+  - name: extract header and reuse
+    request:
+      method: GET
+      path: /response-headers
+      query:
+        x-test-token: abc123
+    expect:
+      status: 200
+      bodyPathExists: [x-test-token]
+    extract:
+      TOKEN: body.x-test-token
+
+  - name: send extracted header
+    request:
+      method: GET
+      path: /headers
+      headers:
+        x-test-token: ${TOKEN}
+    expect:
+      status: 200
+      bodyPathMatches:
+        headers.X-Test-Token: abc123

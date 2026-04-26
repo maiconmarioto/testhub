@@ -1,0 +1,8 @@
+node_modules/
+dist/
+apps/web/.next/
+.testhub-runs*
+.testhub-data/
+playwright-report/
+test-results/
+.DS_Store

@@ -1,0 +1,57 @@
+{
+  "name": "testhub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "testhub": "./dist/cli.js",
+    "testhub-mcp": "./dist/mcp.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "server": "tsx src/server.ts",
+    "worker": "tsx src/worker.ts",
+    "mcp": "tsx src/mcp.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "web": "next dev apps/web -p 3000",
+    "web:build": "next build apps/web",
+    "test": "vitest run",
+    "validate": "tsx src/cli.ts validate",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test:api": "tsx src/cli.ts run examples/api-health.yaml --base-url https://httpbin.org --report-dir .testhub-runs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1037.0",
+    "@modelcontextprotocol/sdk": "^1.22.0",
+    "@playwright/test": "^1.53.0",
+    "ajv": "^8.17.1",
+    "bullmq": "^5.76.2",
+    "commander": "^12.1.0",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.8.5",
+    "ioredis": "^5.10.1",
+    "next": "^16.2.4",
+    "pg": "^8.20.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
+}
