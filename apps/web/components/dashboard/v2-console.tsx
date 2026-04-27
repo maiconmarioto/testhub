@@ -68,6 +68,8 @@ type ValidationResult = { valid: true; type: 'api' | 'web'; name: string; tests:
 type EvidenceTab = 'overview' | 'timeline' | 'artifacts' | 'payload';
 
 const apiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localhost:4321';
+const darkInputClass = 'border-transparent bg-[#111812]/85 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_0_10px_26px_rgba(0,0,0,0.18)] placeholder:text-[#8f9989] focus-visible:ring-[#c7d957]';
+const darkSelectClass = `h-11 min-w-56 ${darkInputClass}`;
 
 const templates = {
   api: {
@@ -336,7 +338,7 @@ export function V2Console() {
         </aside>
 
         <section className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)]">
-          <header className="border-b border-black/10 bg-[#f7f6f0]/95 px-5 py-4 text-[#151915] shadow-[0_18px_40px_rgba(0,0,0,0.12)] md:px-8">
+          <header className="border-b border-white/8 bg-[#111812]/96 px-5 py-4 text-[#f7f6f0] shadow-[0_18px_44px_rgba(0,0,0,0.24)] backdrop-blur md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="font-mono text-xs uppercase tracking-[0.32em] text-[#657059]">TestHub v2</p>
@@ -345,19 +347,19 @@ export function V2Console() {
               <div className="flex flex-wrap items-end gap-3">
                 <Field label="Projeto">
                   <Select value={projectId} onValueChange={setProjectId}>
-                    <SelectTrigger className="h-11 min-w-56 bg-[#fffdf7]"><SelectValue placeholder="Projeto" /></SelectTrigger>
+                    <SelectTrigger className={darkSelectClass}><SelectValue placeholder="Projeto" /></SelectTrigger>
                     <SelectContent>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
                 <Field label="Ambiente">
                   <Select value={environmentId} onValueChange={setEnvironmentId}>
-                    <SelectTrigger className="h-11 min-w-56 bg-[#fffdf7]"><SelectValue placeholder="Ambiente" /></SelectTrigger>
+                    <SelectTrigger className={darkSelectClass}><SelectValue placeholder="Ambiente" /></SelectTrigger>
                     <SelectContent>{projectEnvs.map((env) => <SelectItem key={env.id} value={env.id}>{env.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
                 <Field label="Suite">
                   <Select value={suiteId} onValueChange={setSuiteId}>
-                    <SelectTrigger className="h-11 min-w-56 bg-[#fffdf7]"><SelectValue placeholder="Suite" /></SelectTrigger>
+                    <SelectTrigger className={darkSelectClass}><SelectValue placeholder="Suite" /></SelectTrigger>
                     <SelectContent>{projectSuites.map((suite) => <SelectItem key={suite.id} value={suite.id}>{suite.name} ({suite.type})</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
@@ -410,7 +412,7 @@ export function V2Console() {
               stats={stats}
               tab={tab}
               setTab={setTab}
-              videos={videos}
+              videos={selectedSuite?.type === 'web' ? videos : []}
               payloads={payloads}
               artifacts={artifacts}
               onSelectRun={(run) => {
@@ -472,13 +474,13 @@ function ControlColumn(props: {
       <Panel title={props.envDraft.id ? 'Edit target' : 'New target'} icon={Database}>
         <div className="grid gap-3">
           <Field label="Nome">
-            <Input value={props.envDraft.name} onChange={(event) => props.setEnvDraft({ ...props.envDraft, name: event.target.value })} placeholder="hml" />
+            <Input className={darkInputClass} value={props.envDraft.name} onChange={(event) => props.setEnvDraft({ ...props.envDraft, name: event.target.value })} placeholder="hml" />
           </Field>
           <Field label="Base URL">
-            <Input value={props.envDraft.baseUrl} onChange={(event) => props.setEnvDraft({ ...props.envDraft, baseUrl: event.target.value })} placeholder="http://host.docker.internal:3000" />
+            <Input className={darkInputClass} value={props.envDraft.baseUrl} onChange={(event) => props.setEnvDraft({ ...props.envDraft, baseUrl: event.target.value })} placeholder="http://host.docker.internal:3000" />
           </Field>
           <Field label="Variables">
-            <Textarea value={props.envDraft.variables} onChange={(event) => props.setEnvDraft({ ...props.envDraft, variables: event.target.value })} className="min-h-28 font-mono text-xs" placeholder="TOKEN=abc" />
+            <Textarea value={props.envDraft.variables} onChange={(event) => props.setEnvDraft({ ...props.envDraft, variables: event.target.value })} className={cn('min-h-28 font-mono text-xs', darkInputClass)} placeholder="TOKEN=abc" />
           </Field>
           <div className="grid grid-cols-2 gap-2">
             <Button onClick={props.onSaveEnv} disabled={props.busy || !props.envDraft.name || !props.envDraft.baseUrl}>
@@ -495,7 +497,7 @@ function ControlColumn(props: {
       <Panel title="Retention" icon={Scissors}>
         <div className="grid gap-3">
           <Field label="Dias">
-            <Input type="number" min={1} value={props.cleanupDays} onChange={(event) => props.setCleanupDays(Number(event.target.value))} />
+            <Input className={darkInputClass} type="number" min={1} value={props.cleanupDays} onChange={(event) => props.setCleanupDays(Number(event.target.value))} />
           </Field>
           <Button variant="secondary" onClick={props.onCleanup} disabled={props.busy}>
             <Trash2 className="h-4 w-4" />
@@ -558,11 +560,11 @@ function SuiteColumn(props: {
           <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_auto_auto] md:items-end">
               <Field label="Nome">
-                <Input value={props.suiteDraft.name} onChange={(event) => props.setSuiteDraft({ ...props.suiteDraft, name: event.target.value })} placeholder="login-smoke" />
+                <Input className={darkInputClass} value={props.suiteDraft.name} onChange={(event) => props.setSuiteDraft({ ...props.suiteDraft, name: event.target.value })} placeholder="login-smoke" />
               </Field>
               <Field label="Tipo">
                 <Select value={props.suiteDraft.type} onValueChange={(value) => props.setSuiteDraft({ ...props.suiteDraft, type: value as 'api' | 'web' })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className={darkInputClass}><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="api">api</SelectItem>
                     <SelectItem value="web">web</SelectItem>
@@ -643,12 +645,12 @@ function EvidenceColumn(props: {
             </div>
           </ScrollArea>
 
-          <div className="grid gap-3 rounded-xl bg-[#f7f6f0] p-4 text-[#151915] shadow-[inset_0_0_0_1px_rgba(21,25,21,0.10),0_16px_38px_rgba(0,0,0,0.18)]">
+          <div className="grid gap-3 rounded-xl bg-[#151d16]/82 p-4 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),0_16px_38px_rgba(0,0,0,0.22)]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <Status status={props.selectedRun?.status ?? 'queued'} />
                 <h2 className="mt-3 text-2xl font-black">{props.selectedSuite?.name ?? 'Sem run'}</h2>
-                <p className="break-all font-mono text-xs text-[#657059]">{props.selectedEnv?.baseUrl ?? 'target ausente'}</p>
+                <p className="break-all font-mono text-xs text-[#a9b19d]">{props.selectedEnv?.baseUrl ?? 'target ausente'}</p>
               </div>
               {props.selectedRun && ['queued', 'running'].includes(props.selectedRun.status) ? (
                 <Button variant="destructive" size="sm" onClick={() => props.onCancel(props.selectedRun!)}>
@@ -663,7 +665,7 @@ function EvidenceColumn(props: {
                   key={item}
                   type="button"
                   onClick={() => props.setTab(item)}
-                  className={cn('h-9 cursor-pointer rounded-lg border text-xs font-bold uppercase tracking-wider transition', props.tab === item ? 'border-[#151915]/80 bg-[#151915] text-[#f7f6f0]' : 'border-black/15 bg-transparent text-[#151915] hover:bg-[#ece8dc]')}
+                  className={cn('h-9 cursor-pointer rounded-lg text-xs font-bold uppercase tracking-wider transition', props.tab === item ? 'bg-[#c7d957] text-[#151915] shadow-[0_8px_18px_rgba(199,217,87,0.14)]' : 'bg-[#0f1510]/70 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-[#192219]/80')}
                 >
                   {item}
                 </button>
