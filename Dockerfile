@@ -10,4 +10,4 @@ COPY src ./src
 COPY examples ./examples
 RUN npm run build
 
-ENTRYPOINT ["node", "dist/cli.js"]
+CMD ["node", "dist/cli.js", "server", "--port", "4321"]

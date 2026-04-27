@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { z } from 'zod';
 import { createStore } from './store-factory.js';
@@ -16,6 +17,8 @@ export function createApp() {
   const store = createStore();
   const runQueue = createRunQueue();
   const app = Fastify({ logger: true });
+
+app.register(cors, { origin: true });
 
 app.addHook('preHandler', async (req, reply) => {
   const token = process.env.TESTHUB_TOKEN;

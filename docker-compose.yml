@@ -53,6 +53,8 @@ services:
       S3_FORCE_PATH_STYLE: "true"
     ports:
       - "4321:4321"
+    volumes:
+      - testhub-data:/app/.testhub-data
     depends_on:
       - postgres
       - redis
@@ -71,6 +73,8 @@ services:
       S3_ACCESS_KEY_ID: testhub
       S3_SECRET_ACCESS_KEY: testhubsecret
       S3_FORCE_PATH_STYLE: "true"
+    volumes:
+      - testhub-data:/app/.testhub-data
     depends_on:
       - api
       - redis
@@ -89,3 +93,4 @@ services:
 volumes:
   pgdata:
   minio:
+  testhub-data:
