@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import Link from 'next/link';
 import {
@@ -581,11 +581,9 @@ function SuiteColumn(props: {
               </Button>
             </div>
 
-            <Textarea
+            <YamlEditor
               value={props.suiteDraft.specContent}
-              onChange={(event) => props.setSuiteDraft({ ...props.suiteDraft, specContent: event.target.value })}
-              spellCheck={false}
-              className="min-h-[460px] resize-none rounded-xl border-transparent bg-[#0b100c]/95 font-mono text-xs leading-5 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_16px_42px_rgba(0,0,0,0.28)] focus-visible:ring-[#c7d957] min-[1900px]:min-h-[540px]"
+              onChange={(specContent) => props.setSuiteDraft({ ...props.suiteDraft, specContent })}
             />
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-3">
@@ -783,6 +781,88 @@ function PayloadCard({ artifact }: { artifact: Artifact }) {
       <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs leading-5 text-[#f7f6f0]">{payload ? JSON.stringify(payload, null, 2) : 'loading...'}</pre>
     </div>
   );
+}
+
+function YamlEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [scroll, setScroll] = useState({ top: 0, left: 0 });
+
+  return (
+    <div className="relative min-h-[460px] overflow-hidden rounded-xl bg-[#0b100c]/95 font-mono text-xs leading-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_16px_42px_rgba(0,0,0,0.28)] focus-within:ring-2 focus-within:ring-[#c7d957] min-[1900px]:min-h-[540px]">
+      <pre
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words p-3 text-[#d8e0d2]"
+        style={{ transform: `translate(${-scroll.left}px, ${-scroll.top}px)` }}
+      >
+        {highlightYaml(value || ' ')}
+      </pre>
+      <textarea
+        aria-label="YAML da suite"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onScroll={(event) => setScroll({ top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft })}
+        spellCheck={false}
+        className="absolute inset-0 h-full w-full resize-none overflow-auto rounded-xl border-0 bg-transparent p-3 font-mono text-xs leading-5 text-transparent caret-[#c7d957] outline-none selection:bg-[#c7d957]/25"
+      />
+    </div>
+  );
+}
+
+function highlightYaml(value: string): React.ReactNode[] {
+  return value.split('\n').map((line, lineIndex) => (
+    <Fragment key={`${lineIndex}:${line}`}>
+      {highlightYamlLine(line, lineIndex)}
+      {'\n'}
+    </Fragment>
+  ));
+}
+
+function highlightYamlLine(line: string, lineIndex: number): React.ReactNode[] {
+  const commentIndex = line.indexOf('#');
+  const code = commentIndex >= 0 ? line.slice(0, commentIndex) : line;
+  const comment = commentIndex >= 0 ? line.slice(commentIndex) : '';
+  const match = code.match(/^(\s*)(-\s*)?([^:\n]+:)(.*)$/);
+
+  if (!match) {
+    return [
+      <span key={`${lineIndex}:text`} className="text-[#d8e0d2]">{code}</span>,
+      comment ? <span key={`${lineIndex}:comment`} className="text-[#6f7b68]">{comment}</span> : null,
+    ].filter(Boolean) as React.ReactNode[];
+  }
+
+  const [, indent, dash = '', key, rest] = match;
+  return [
+    indent ? <span key={`${lineIndex}:indent`} className="text-[#73806f]">{indent}</span> : null,
+    dash ? <span key={`${lineIndex}:dash`} className="text-[#f5c542]">{dash}</span> : null,
+    <span key={`${lineIndex}:key`} className="text-[#c7d957]">{key}</span>,
+    <Fragment key={`${lineIndex}:value`}>{highlightYamlValue(rest)}</Fragment>,
+    comment ? <span key={`${lineIndex}:comment`} className="text-[#6f7b68]">{comment}</span> : null,
+  ].filter(Boolean) as React.ReactNode[];
+}
+
+function highlightYamlValue(value: string): React.ReactNode {
+  const leading = value.match(/^\s*/)?.[0] ?? '';
+  const raw = value.slice(leading.length);
+  if (!raw) return leading;
+
+  const token = raw.trim();
+  const trailing = raw.slice(token.length);
+  const color = yamlValueColor(token);
+  return (
+    <>
+      {leading}
+      <span className={color}>{token}</span>
+      {trailing}
+    </>
+  );
+}
+
+function yamlValueColor(token: string): string {
+  if (/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/i.test(token)) return 'text-[#79d7ff]';
+  if (/^(true|false|null|on|off)$/i.test(token)) return 'text-[#d5a7ff]';
+  if (/^-?\d+(\.\d+)?$/.test(token)) return 'text-[#f5c542]';
+  if (/^['"].*['"]$/.test(token)) return 'text-[#9de6b8]';
+  if (/^\/|^https?:\/\//.test(token)) return 'text-[#9de6b8]';
+  return 'text-[#f7f6f0]';
 }
 
 function Panel({ title, icon: Icon, className, children }: { title: string; icon: LucideIcon; className?: string; children: React.ReactNode }) {
