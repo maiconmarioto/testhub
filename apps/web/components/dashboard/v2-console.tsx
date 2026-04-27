@@ -338,7 +338,7 @@ export function V2Console() {
         </aside>
 
         <section className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)]">
-          <header className="border-b border-white/8 bg-[#111812]/96 px-5 py-4 text-[#f7f6f0] shadow-[0_18px_44px_rgba(0,0,0,0.24)] backdrop-blur md:px-8">
+          <header className="border-b border-black/10 bg-[#f7f6f0]/95 px-5 py-4 text-[#151915] shadow-[0_18px_40px_rgba(0,0,0,0.12)] backdrop-blur md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="font-mono text-xs uppercase tracking-[0.32em] text-[#657059]">TestHub v2</p>
