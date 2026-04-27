@@ -4,7 +4,7 @@ import { Ajv } from 'ajv';
 import type { ApiRequestStep, ApiSpec, Artifact, TestResult } from '../../shared/src/types.js';
 import { ensureDir, sanitizeFilename, writeJson } from '../../shared/src/fs-utils.js';
 import { redactDeep } from '../../shared/src/redact.js';
-import { resolveVariablesWithContext } from '../../spec/src/spec.js';
+import { MissingVariableError, resolveVariablesWithContext } from '../../spec/src/spec.js';
 
 export async function runApiSpec(spec: ApiSpec, runDir: string): Promise<TestResult[]> {
   const results: TestResult[] = [];
@@ -48,7 +48,7 @@ export async function runApiSpec(spec: ApiSpec, runDir: string): Promise<TestRes
     } catch (error) {
       results.push({
         name: test.name,
-        status: 'failed',
+        status: isApiRuntimeError(error) ? 'error' : 'failed',
         durationMs: Date.now() - started,
         error: error instanceof Error ? error.message : String(error),
         artifacts,
@@ -94,6 +94,8 @@ async function executeApiStep(input: {
       },
       body: requestBody,
       signal: controller.signal,
+    }).catch((error: unknown) => {
+      throw new ApiRuntimeError(error instanceof Error ? error.message : String(error));
     });
     clearTimeout(timeout);
 
@@ -144,6 +146,17 @@ async function executeApiStep(input: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+class ApiRuntimeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApiRuntimeError';
+  }
+}
+
+function isApiRuntimeError(error: unknown): boolean {
+  return error instanceof ApiRuntimeError || error instanceof MissingVariableError;
 }
 
 function parseResponseBody(rawText: string, contentType: string): unknown {

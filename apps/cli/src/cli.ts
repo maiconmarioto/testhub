@@ -77,14 +77,14 @@ program
 
 program
   .command('cleanup')
-  .description('Remove runs antigos da store e artifacts locais')
+  .description('Arquiva runs antigas sem apagar registros ou artifacts')
   .option('--days <days>', 'Idade minima em dias', '30')
   .action(async (options: { days: string }) => {
     try {
       const result = await cleanupOldRuns(createStore(), Number(options.days));
       console.log(`Cutoff: ${result.cutoffIso}`);
-      console.log(`Runs removidas: ${result.deletedRuns}`);
-      console.log(`Diretorios removidos: ${result.deletedDirectories}`);
+      console.log(`Runs arquivadas: ${result.archivedRuns}`);
+      console.log(`Artifacts preservados: ${result.retainedArtifacts ? 'sim' : 'nao'}`);
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(3);

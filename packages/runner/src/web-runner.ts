@@ -31,7 +31,7 @@ export async function runWebSpec(
       try {
         const retries = test.retries ?? spec.defaults?.retries ?? 0;
         await runWithRetries(retries, async () => {
-        const videoMode = spec.defaults?.video ?? 'retain-on-failure';
+        const videoMode = spec.defaults?.video ?? 'on';
         context = await browser!.newContext({
           recordVideo: shouldRecord(videoMode) ? { dir: testDir } : undefined,
         });
@@ -108,8 +108,6 @@ export async function runWebSpec(
             await context.tracing.stop({ path: tracePath });
             if (traceMode === true || traceMode === 'on' || status !== 'passed') {
               artifacts.push({ type: 'trace', path: tracePath, label: 'Playwright trace' });
-            } else if (fs.existsSync(tracePath)) {
-              fs.rmSync(tracePath);
             }
           }
 
@@ -120,11 +118,7 @@ export async function runWebSpec(
             : [];
           for (const file of videoFiles) {
             const videoPath = path.join(testDir, file);
-            if (status === 'passed' && (spec.defaults?.video ?? 'retain-on-failure') === 'retain-on-failure') {
-              fs.rmSync(videoPath);
-            } else {
-              artifacts.push({ type: 'video', path: videoPath, label: 'Playwright video' });
-            }
+            artifacts.push({ type: 'video', path: videoPath, label: 'Playwright video' });
           }
         }
       }
@@ -234,6 +228,8 @@ async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep
 
 function locator(page: Page, input: SelectorInput): Locator {
   if (typeof input === 'string') return page.locator(input);
+  if (input.selector) return page.locator(input.selector);
+  if (input.text) return page.getByText(input.text, { exact: input.exact });
   const target = input.target ?? input.name ?? input.value;
   switch (input.by) {
     case 'label':
@@ -255,6 +251,7 @@ function locator(page: Page, input: SelectorInput): Locator {
       if (!target) throw new Error('selector placeholder requer target');
       return page.getByPlaceholder(target, { exact: input.exact });
   }
+  throw new Error('selector requer selector, text ou by');
 }
 
 function describeStep(step: WebStep): string {

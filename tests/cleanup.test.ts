@@ -6,7 +6,7 @@ import { cleanupOldRuns } from '../packages/db/src/cleanup.js';
 import { JsonStore } from '../packages/db/src/store.js';
 
 describe('cleanup', () => {
-  it('removes old run records and artifact directories', async () => {
+  it('archives old run records and keeps artifact directories', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-cleanup-'));
     const store = new JsonStore(root);
     const project = store.createProject({ name: 'CRM' });
@@ -22,8 +22,9 @@ describe('cleanup', () => {
     store.write(db);
 
     const result = await cleanupOldRuns(store, 1);
-    expect(result.deletedRuns).toBe(1);
-    expect(fs.existsSync(runDir)).toBe(false);
-    expect(store.read().runs).toHaveLength(0);
+    expect(result.archivedRuns).toBe(1);
+    expect(result.retainedArtifacts).toBe(true);
+    expect(fs.existsSync(runDir)).toBe(true);
+    expect(store.read().runs[0]?.status).toBe('deleted');
   });
 });

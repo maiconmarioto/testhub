@@ -15,6 +15,8 @@ beforeAll(async () => {
     res.end(`<html><body>
       <h1>TestHub</h1>
       <input aria-label="Email" value="qa@example.com" />
+      <input type="password" />
+      <button type="submit">Login</button>
       <button data-testid="submit" disabled="disabled">Entrar</button>
       <ul><li class="item">A</li><li class="item">B</li></ul>
     </body></html>`);
@@ -44,6 +46,9 @@ describe('web runner', () => {
           steps: [
             { goto: '/' },
             { expectText: 'TestHub' },
+            { fill: { selector: 'input[type="password"]', value: 'secret' } },
+            { click: 'button[type="submit"]' },
+            { expectText: { text: 'TestHub' } },
             { expectValue: { by: 'label', target: 'Email', value: 'qa@example.com' } },
             { expectAttribute: { by: 'testId', target: 'submit', attribute: 'disabled', value: 'disabled' } },
             { expectCount: { by: 'css', target: '.item', count: 2 } },

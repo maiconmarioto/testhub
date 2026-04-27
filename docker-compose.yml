@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: testhub
       POSTGRES_DB: testhub
     ports:
-      - "5432:5432"
+      - "55432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -85,8 +85,9 @@ services:
       dockerfile: Dockerfile.web
     environment:
       NEXT_PUBLIC_TESTHUB_API_URL: http://localhost:4321
+      PORT: 3333
     ports:
-      - "3000:3000"
+      - "3333:3333"
     depends_on:
       - api
 

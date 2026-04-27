@@ -38,6 +38,11 @@ const openApiDocument = {
       get: { tags: ['projects'], summary: 'List projects', responses: { '200': { description: 'OK' } } },
       post: { tags: ['projects'], summary: 'Create project', responses: { '201': { description: 'Created' } } },
     },
+    '/api/projects/{id}': {
+      get: { tags: ['projects'], summary: 'Get project', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      put: { tags: ['projects'], summary: 'Update project', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      delete: { tags: ['projects'], summary: 'Soft delete project and child records', responses: { '204': { description: 'Archived' }, '404': { description: 'Not found' } } },
+    },
     '/api/environments': {
       get: { tags: ['environments'], summary: 'List environments', responses: { '200': { description: 'OK' } } },
       post: { tags: ['environments'], summary: 'Create environment', responses: { '201': { description: 'Created' } } },
@@ -45,6 +50,10 @@ const openApiDocument = {
     '/api/suites': {
       get: { tags: ['suites'], summary: 'List suites', responses: { '200': { description: 'OK' } } },
       post: { tags: ['suites'], summary: 'Create suite', responses: { '201': { description: 'Created' } } },
+    },
+    '/api/suites/{id}': {
+      get: { tags: ['suites'], summary: 'Get suite with spec content', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      put: { tags: ['suites'], summary: 'Update suite spec content', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
     },
     '/api/import/openapi': { post: { tags: ['suites'], summary: 'Import OpenAPI as API suite', responses: { '201': { description: 'Created' } } } },
     '/api/runs': {
@@ -69,7 +78,10 @@ export function createApp() {
   const runQueue = createRunQueue();
   const app = Fastify({ logger: true });
 
-  app.register(cors, { origin: true });
+  app.register(cors, {
+    origin: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
   app.register(swagger, {
     mode: 'static',
     specification: {
@@ -107,7 +119,7 @@ export function createApp() {
     docs: '/docs',
     openapi: '/openapi.json',
     health: '/api/health',
-    dashboard: process.env.TESTHUB_WEB_URL ?? 'http://localhost:3000',
+    dashboard: process.env.TESTHUB_WEB_URL ?? 'http://localhost:3333',
   }));
 
   app.get('/openapi.json', {
@@ -124,17 +136,42 @@ export function createApp() {
     },
   }, async () => ({ ok: true }));
 
-  app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async () => (await store.read()).projects);
+  app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async () => (await store.read()).projects.filter((project) => project.status !== 'inactive'));
   app.post('/api/projects', { schema: { tags: ['projects'], summary: 'Create project' } }, async (req, reply) => {
     const input = z.object({ name: z.string().min(1), description: z.string().optional() }).parse(req.body);
     return reply.code(201).send(await store.createProject(input));
+  });
+  app.get('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Get project' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const project = await store.getProject(params.id);
+    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    return project;
+  });
+  app.put('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Update project' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const input = z.object({ name: z.string().min(1), description: z.string().optional() }).parse(req.body);
+    const project = await store.updateProject(params.id, input);
+    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    return project;
+  });
+  app.delete('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Soft delete project and child records' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const archived = await store.archiveProject(params.id);
+    if (!archived) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    return reply.code(204).send();
   });
 
   app.get('/api/environments', { schema: { tags: ['environments'], summary: 'List environments' } }, async (req) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query);
     return (await store.read()).environments
-      .filter((environment) => !query.projectId || environment.projectId === query.projectId)
+      .filter((environment) => environment.status !== 'inactive' && (!query.projectId || environment.projectId === query.projectId))
       .map((environment) => ({ ...environment, variables: maskVariables(environment.variables) }));
+  });
+  app.get('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Get environment' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const environment = (await store.read()).environments.find((item) => item.id === params.id && item.status !== 'inactive');
+    if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    return { ...environment, variables: maskVariables(environment.variables) };
   });
   app.post('/api/environments', { schema: { tags: ['environments'], summary: 'Create environment' } }, async (req, reply) => {
     const input = z.object({
@@ -148,7 +185,13 @@ export function createApp() {
 
   app.get('/api/suites', { schema: { tags: ['suites'], summary: 'List suites' } }, async (req) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query);
-    return (await store.read()).suites.filter((suite) => !query.projectId || suite.projectId === query.projectId);
+    return (await store.read()).suites.filter((suite) => suite.status !== 'inactive' && (!query.projectId || suite.projectId === query.projectId));
+  });
+  app.get('/api/suites/:id', { schema: { tags: ['suites'], summary: 'Get suite with spec content' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const suite = await store.getSuiteContent(params.id);
+    if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    return suite;
   });
   app.post('/api/suites', { schema: { tags: ['suites'], summary: 'Create suite' } }, async (req, reply) => {
     const input = z.object({
@@ -158,6 +201,17 @@ export function createApp() {
       specContent: z.string().min(1),
     }).parse(req.body);
     return reply.code(201).send(await store.createSuite(input));
+  });
+  app.put('/api/suites/:id', { schema: { tags: ['suites'], summary: 'Update suite spec content' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const input = z.object({
+      name: z.string().min(1),
+      type: z.enum(['web', 'api']),
+      specContent: z.string().min(1),
+    }).parse(req.body);
+    const suite = await store.updateSuite(params.id, input);
+    if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    return suite;
   });
 
   app.post('/api/import/openapi', { schema: { tags: ['suites'], summary: 'Import OpenAPI as API suite' } }, async (req, reply) => {
@@ -172,12 +226,12 @@ export function createApp() {
 
   app.get('/api/runs', { schema: { tags: ['runs'], summary: 'List runs' } }, async (req) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query);
-    return (await store.read()).runs.filter((run) => !query.projectId || run.projectId === query.projectId);
+    return (await store.read()).runs.filter((run) => run.status !== 'deleted' && (!query.projectId || run.projectId === query.projectId));
   });
   app.get('/api/runs/:id', { schema: { tags: ['runs'], summary: 'Get run' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const run = (await store.read()).runs.find((item) => item.id === params.id);
-    if (!run) return reply.code(404).send({ error: 'Run nao encontrada' });
+    if (!run || run.status === 'deleted') return reply.code(404).send({ error: 'Run nao encontrada' });
     return run;
   });
   app.post('/api/runs', { schema: { tags: ['runs'], summary: 'Create run' } }, async (req, reply) => {
@@ -185,7 +239,7 @@ export function createApp() {
     const db = await store.read();
     const environment = db.environments.find((item) => item.id === input.environmentId);
     const suite = db.suites.find((item) => item.id === input.suiteId);
-    if (!environment || !suite) return reply.code(400).send({ error: 'Environment ou suite invalido' });
+    if (!environment || !suite || environment.status === 'inactive' || suite.status === 'inactive') return reply.code(400).send({ error: 'Environment ou suite invalido' });
     const createdRun = await store.createRun(input);
     if (runQueue) await runQueue.add('run', { runId: createdRun.id });
     else void executeRun(store, createdRun.id);
@@ -195,7 +249,7 @@ export function createApp() {
     const params = z.object({ id: z.string() }).parse(req.params);
     const db = await store.read();
     const run = db.runs.find((item) => item.id === params.id);
-    if (!run) return reply.code(404).send({ error: 'Run nao encontrada' });
+    if (!run || run.status === 'deleted') return reply.code(404).send({ error: 'Run nao encontrada' });
     if (!['queued', 'running'].includes(run.status)) return run;
     if (runQueue) {
       const jobs = await runQueue.getJobs(['waiting', 'delayed', 'prioritized']);
@@ -206,7 +260,7 @@ export function createApp() {
   app.get('/api/runs/:id/report', { schema: { tags: ['runs'], summary: 'Get run JSON report' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const run = (await store.read()).runs.find((item) => item.id === params.id);
-    if (!run?.reportPath || !fs.existsSync(run.reportPath)) return reply.code(404).send({ error: 'Report nao encontrado' });
+    if (!run?.reportPath || run.status === 'deleted' || !fs.existsSync(run.reportPath)) return reply.code(404).send({ error: 'Report nao encontrado' });
     return JSON.parse(fs.readFileSync(run.reportPath, 'utf8'));
   });
 
@@ -221,6 +275,8 @@ export function createApp() {
     const allowedRoots = [path.resolve('.testhub-runs'), path.resolve(store.rootDir)];
     if (!allowedRoots.some((root) => requested.startsWith(root))) return reply.code(403).send({ error: 'Artifact fora de area permitida' });
     if (!fs.existsSync(requested)) return reply.code(404).send({ error: 'Artifact nao encontrado' });
+    const contentType = contentTypeFor(requested);
+    if (contentType) reply.type(contentType);
     return reply.send(fs.createReadStream(requested));
   });
 
@@ -254,6 +310,16 @@ export function createApp() {
   });
 
   return app;
+}
+
+function contentTypeFor(filePath: string): string | undefined {
+  if (filePath.endsWith('.webm')) return 'video/webm';
+  if (filePath.endsWith('.json')) return 'application/json; charset=utf-8';
+  if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
+  if (filePath.endsWith('.xml')) return 'application/xml; charset=utf-8';
+  if (filePath.endsWith('.png')) return 'image/png';
+  if (filePath.endsWith('.log')) return 'text/plain; charset=utf-8';
+  return undefined;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

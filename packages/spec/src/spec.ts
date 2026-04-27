@@ -8,12 +8,14 @@ const selectorSchema = z.union([
   z.string(),
   z
     .object({
-      by: z.enum(['label', 'text', 'role', 'testId', 'css', 'placeholder']),
+      by: z.enum(['label', 'text', 'role', 'testId', 'css', 'placeholder']).optional(),
       target: z.string().optional(),
       value: z.string().optional(),
       role: z.string().optional(),
       name: z.string().optional(),
       exact: z.boolean().optional(),
+      selector: z.string().optional(),
+      text: z.string().optional(),
     })
     .passthrough(),
 ]);

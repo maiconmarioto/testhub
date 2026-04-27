@@ -63,4 +63,40 @@ describe('api runner', () => {
     const results = await runApiSpec(spec, runDir);
     expect(results.map((result) => result.status)).toEqual(['passed', 'passed']);
   });
+
+  it('classifies assertions as failed and runtime problems as error', async () => {
+    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-api-status-'));
+    const assertionSpec: ApiSpec = {
+      version: 1,
+      type: 'api',
+      name: 'api',
+      baseUrl,
+      tests: [
+        {
+          name: 'wrong status',
+          request: { method: 'GET', path: '/me' },
+          expect: { status: 201 },
+        },
+      ],
+    };
+    const missingVarSpec: ApiSpec = {
+      version: 1,
+      type: 'api',
+      name: 'api',
+      baseUrl,
+      tests: [
+        {
+          name: 'missing variable',
+          request: { method: 'GET', path: '/me', headers: { Authorization: 'Bearer ${MISSING_TOKEN}' } },
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const assertionResults = await runApiSpec(assertionSpec, runDir);
+    const missingVarResults = await runApiSpec(missingVarSpec, runDir);
+
+    expect(assertionResults[0]?.status).toBe('failed');
+    expect(missingVarResults[0]?.status).toBe('error');
+  });
 });

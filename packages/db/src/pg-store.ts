@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt, ne } from 'drizzle-orm';
 import { ensureDir } from '../../shared/src/fs-utils.js';
 import { aiConnections, environments, projects, runs, suites } from './schema.js';
 import type { AiConnection, Database, Environment, Project, RunRecord, Store, Suite } from './store.js';
@@ -49,11 +49,34 @@ export class PgStore implements Store {
     };
   }
 
+  async getProject(id: string): Promise<Project | undefined> {
+    const [project] = await this.db.select().from(projects).where(and(eq(projects.id, id), ne(projects.status, 'inactive')));
+    return project ? rowToProject(project) : undefined;
+  }
+
   async createProject(input: { name: string; description?: string }): Promise<Project> {
     const now = new Date();
     const project = { id: randomUUID(), name: input.name, description: input.description ?? null, status: 'active', createdAt: now, updatedAt: now };
     await this.db.insert(projects).values(project);
     return rowToProject(project);
+  }
+
+  async updateProject(id: string, input: { name: string; description?: string }): Promise<Project | undefined> {
+    const [project] = await this.db.update(projects)
+      .set({ name: input.name, description: input.description ?? null, updatedAt: new Date() })
+      .where(and(eq(projects.id, id), ne(projects.status, 'inactive')))
+      .returning();
+    return project ? rowToProject(project) : undefined;
+  }
+
+  async archiveProject(id: string): Promise<boolean> {
+    const now = new Date();
+    const archived = await this.db.update(projects).set({ status: 'inactive', updatedAt: now }).where(and(eq(projects.id, id), ne(projects.status, 'inactive'))).returning({ id: projects.id });
+    if (archived.length === 0) return false;
+    await this.db.update(environments).set({ status: 'inactive', updatedAt: now }).where(eq(environments.projectId, id));
+    await this.db.update(suites).set({ status: 'inactive', updatedAt: now }).where(eq(suites.projectId, id));
+    await this.db.update(runs).set({ status: 'deleted', finishedAt: now }).where(eq(runs.projectId, id));
+    return true;
   }
 
   async createEnvironment(input: { projectId: string; name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment> {
@@ -81,6 +104,26 @@ export class PgStore implements Store {
     return rowToSuite(suite);
   }
 
+  async getSuiteContent(id: string): Promise<(Suite & { specContent: string }) | undefined> {
+    const [suite] = await this.db.select().from(suites).where(and(eq(suites.id, id), ne(suites.status, 'inactive')));
+    if (!suite) return undefined;
+    return {
+      ...rowToSuite(suite),
+      specContent: fs.existsSync(suite.specPath) ? fs.readFileSync(suite.specPath, 'utf8') : '',
+    };
+  }
+
+  async updateSuite(id: string, input: { name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite | undefined> {
+    const [current] = await this.db.select().from(suites).where(and(eq(suites.id, id), ne(suites.status, 'inactive')));
+    if (!current) return undefined;
+    fs.writeFileSync(current.specPath, input.specContent, 'utf8');
+    const [suite] = await this.db.update(suites)
+      .set({ name: input.name, type: input.type, updatedAt: new Date() })
+      .where(eq(suites.id, id))
+      .returning();
+    return suite ? rowToSuite(suite) : undefined;
+  }
+
   async createRun(input: { projectId: string; environmentId: string; suiteId: string }): Promise<RunRecord> {
     const now = new Date();
     const run = { id: randomUUID(), projectId: input.projectId, environmentId: input.environmentId, suiteId: input.suiteId, status: 'queued', createdAt: now };
@@ -102,8 +145,8 @@ export class PgStore implements Store {
     return rowToRun(row);
   }
 
-  async deleteRunsBefore(cutoffIso: string): Promise<number> {
-    const rows = await this.db.delete(runs).where(lt(runs.createdAt, new Date(cutoffIso))).returning({ id: runs.id });
+  async archiveRunsBefore(cutoffIso: string): Promise<number> {
+    const rows = await this.db.update(runs).set({ status: 'deleted', finishedAt: new Date() }).where(and(lt(runs.createdAt, new Date(cutoffIso)), ne(runs.status, 'deleted'))).returning({ id: runs.id });
     return rows.length;
   }
 

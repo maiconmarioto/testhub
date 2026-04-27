@@ -25,6 +25,27 @@ tests:
     const value = resolveVariables({ url: '${BASE_URL}', nested: ['${TOKEN}'] }, { BASE_URL: 'https://x', TOKEN: 'abc' });
     expect(value).toEqual({ url: 'https://x', nested: ['abc'] });
   });
+
+  it('parses web selector/text object steps used by MCP docs', () => {
+    const file = tempFile(`
+version: 1
+type: web
+name: web
+tests:
+  - name: form
+    steps:
+      - goto: /login
+      - fill:
+          selector: input[type="email"]
+          value: qa@example.com
+      - click: button[type="submit"]
+      - expectText:
+          text: Invalid email or password
+`);
+    const spec = parseSpecFile(file);
+    expect(spec.type).toBe('web');
+    expect(spec.tests[0]?.steps).toHaveLength(4);
+  });
 });
 
 function tempFile(content: string): string {

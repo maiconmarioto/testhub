@@ -5,7 +5,7 @@ import { ensureDir, writeJson } from '../../shared/src/fs-utils.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 
 export type EntityStatus = 'active' | 'inactive';
-export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled';
+export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
 
 export interface Project {
   id: string;
@@ -78,12 +78,17 @@ export interface Store {
   suitesDir: string;
   runsDir: string;
   read(): Promise<Database> | Database;
+  getProject(id: string): Promise<Project | undefined> | Project | undefined;
   createProject(input: { name: string; description?: string }): Promise<Project> | Project;
+  updateProject(id: string, input: { name: string; description?: string }): Promise<Project | undefined> | Project | undefined;
+  archiveProject(id: string): Promise<boolean> | boolean;
   createEnvironment(input: { projectId: string; name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment> | Environment;
   createSuite(input: { projectId: string; name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite> | Suite;
+  getSuiteContent(id: string): Promise<(Suite & { specContent: string }) | undefined> | (Suite & { specContent: string }) | undefined;
+  updateSuite(id: string, input: { name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite | undefined> | Suite | undefined;
   createRun(input: { projectId: string; environmentId: string; suiteId: string }): Promise<RunRecord> | RunRecord;
   updateRun(id: string, patch: Partial<RunRecord>): Promise<RunRecord> | RunRecord;
-  deleteRunsBefore?(cutoffIso: string): Promise<number> | number;
+  archiveRunsBefore?(cutoffIso: string): Promise<number> | number;
   upsertAiConnection(input: Omit<AiConnection, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<AiConnection> | AiConnection;
   getEnvironmentVariables(environmentId: string): Promise<Record<string, string>> | Record<string, string>;
   getAiConnection(connectionId?: string): Promise<AiConnection | undefined> | AiConnection | undefined;
@@ -126,6 +131,10 @@ export class JsonStore {
     writeJson(this.dbPath, db);
   }
 
+  getProject(id: string): Project | undefined {
+    return this.read().projects.find((project) => project.id === id && project.status !== 'inactive');
+  }
+
   createProject(input: { name: string; description?: string }): Project {
     const db = this.read();
     const now = nowIso();
@@ -140,6 +149,34 @@ export class JsonStore {
     db.projects.push(project);
     this.write(db);
     return project;
+  }
+
+  updateProject(id: string, input: { name: string; description?: string }): Project | undefined {
+    const db = this.read();
+    const index = db.projects.findIndex((project) => project.id === id && project.status !== 'inactive');
+    if (index === -1) return undefined;
+    const project: Project = {
+      ...db.projects[index],
+      name: input.name,
+      description: input.description,
+      updatedAt: nowIso(),
+    };
+    db.projects[index] = project;
+    this.write(db);
+    return project;
+  }
+
+  archiveProject(id: string): boolean {
+    const db = this.read();
+    const project = db.projects.find((item) => item.id === id && item.status !== 'inactive');
+    if (!project) return false;
+    const now = nowIso();
+    db.projects = db.projects.map((item) => item.id === id ? { ...item, status: 'inactive', updatedAt: now } : item);
+    db.environments = db.environments.map((item) => item.projectId === id ? { ...item, status: 'inactive', updatedAt: now } : item);
+    db.suites = db.suites.map((item) => item.projectId === id ? { ...item, status: 'inactive', updatedAt: now } : item);
+    db.runs = db.runs.map((item) => item.projectId === id ? { ...item, status: 'deleted', finishedAt: item.finishedAt ?? now } : item);
+    this.write(db);
+    return true;
   }
 
   createEnvironment(input: { projectId: string; name: string; baseUrl: string; variables?: Record<string, string> }): Environment {
@@ -179,6 +216,32 @@ export class JsonStore {
     return suite;
   }
 
+  getSuiteContent(id: string): (Suite & { specContent: string }) | undefined {
+    const suite = this.read().suites.find((item) => item.id === id && item.status !== 'inactive');
+    if (!suite) return undefined;
+    return {
+      ...suite,
+      specContent: fs.existsSync(suite.specPath) ? fs.readFileSync(suite.specPath, 'utf8') : '',
+    };
+  }
+
+  updateSuite(id: string, input: { name: string; type: 'web' | 'api'; specContent: string }): Suite | undefined {
+    const db = this.read();
+    const index = db.suites.findIndex((suite) => suite.id === id && suite.status !== 'inactive');
+    if (index === -1) return undefined;
+    const current = db.suites[index];
+    const suite: Suite = {
+      ...current,
+      name: input.name,
+      type: input.type,
+      updatedAt: nowIso(),
+    };
+    fs.writeFileSync(suite.specPath, input.specContent, 'utf8');
+    db.suites[index] = suite;
+    this.write(db);
+    return suite;
+  }
+
   createRun(input: { projectId: string; environmentId: string; suiteId: string }): RunRecord {
     const db = this.read();
     const run: RunRecord = {
@@ -203,12 +266,16 @@ export class JsonStore {
     return db.runs[index];
   }
 
-  deleteRunsBefore(cutoffIso: string): number {
+  archiveRunsBefore(cutoffIso: string): number {
     const db = this.read();
-    const before = db.runs.length;
-    db.runs = db.runs.filter((run) => run.createdAt >= cutoffIso);
+    let archived = 0;
+    db.runs = db.runs.map((run) => {
+      if (run.createdAt >= cutoffIso || run.status === 'deleted') return run;
+      archived += 1;
+      return { ...run, status: 'deleted', finishedAt: run.finishedAt ?? nowIso() };
+    });
     this.write(db);
-    return before - db.runs.length;
+    return archived;
   }
 
   upsertAiConnection(input: Omit<AiConnection, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): AiConnection {

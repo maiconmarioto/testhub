@@ -22,5 +22,5 @@ COPY apps/web ./apps/web
 RUN npm run web:build
 
 WORKDIR /app/apps/web
-EXPOSE 3000
-CMD ["npm", "run", "start"]
+EXPOSE 3333
+CMD ["npm", "run", "start", "--", "-p", "3333"]

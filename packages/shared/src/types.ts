@@ -63,12 +63,14 @@ export interface RunReport {
 export type SelectorInput =
   | string
   | {
-      by: 'label' | 'text' | 'role' | 'testId' | 'css' | 'placeholder';
+      by?: 'label' | 'text' | 'role' | 'testId' | 'css' | 'placeholder';
       target?: string;
       value?: string;
       role?: string;
       name?: string;
       exact?: boolean;
+      selector?: string;
+      text?: string;
     };
 
 export interface WebSpec {

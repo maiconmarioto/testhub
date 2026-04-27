@@ -96,6 +96,8 @@ Web:
 - `expectCount`
 - `uploadFile`
 
+Runs web gravam video Playwright por padrao. O artifact `.webm` aparece no report e no dashboard de runs.
+
 API:
 
 - status, headers, body path, body contains
@@ -141,7 +143,7 @@ npm run web
 Abrir:
 
 ```text
-http://localhost:3000
+http://localhost:3333
 ```
 
 Build:
@@ -161,7 +163,7 @@ docker compose up --build
 Migrar DB manualmente:
 
 ```bash
-DATABASE_URL=postgres://testhub:testhub@localhost:5432/testhub npm run migrate
+DATABASE_URL=postgres://testhub:testhub@localhost:55432/testhub npm run migrate
 ```
 
 Variaveis principais:
@@ -196,6 +198,8 @@ Operacoes uteis:
 curl -X POST http://localhost:4321/api/runs/<run-id>/cancel
 curl -X POST http://localhost:4321/api/cleanup -H 'content-type: application/json' -d '{"days":30}'
 ```
+
+Delete de entidades e cleanup usam soft delete/archive. Registros e artifacts sao preservados; a UI/API apenas ocultam itens arquivados.
 
 Timeout e concorrencia:
 
@@ -260,13 +264,66 @@ TESTHUB_URL=http://localhost:4321 npx testhub-mcp
 
 Tools:
 
+- `testhub_help`
+- `testhub_get_test_context`
 - `testhub_list_projects`
+- `testhub_get_project`
+- `testhub_create_project`
+- `testhub_update_project`
+- `testhub_archive_project`
 - `testhub_list_environments`
+- `testhub_list_envs`
+- `testhub_create_environment`
+- `testhub_create_env`
+- `testhub_get_environment`
+- `list_environments`
+- `create_environment`
+- `get_environment`
 - `testhub_list_suites`
+- `testhub_get_suite`
+- `testhub_create_suite`
+- `testhub_update_suite`
 - `testhub_import_openapi`
+- `testhub_list_runs`
 - `testhub_run_suite`
 - `testhub_get_run_status`
+- `testhub_wait_run`
 - `testhub_get_run_report`
+- `testhub_get_artifacts`
 - `testhub_cancel_run`
-- `testhub_cleanup`
+- `testhub_list_ai_connections`
+- `testhub_upsert_ai_connection`
 - `testhub_explain_failure`
+- `testhub_cleanup`
+
+Resources:
+
+- `testhub://guide` - guia operacional para agentes entenderem o fluxo correto antes de alterar/rodar testes.
+
+Prompts:
+
+- `testhub_operator` - instrucoes para agentes trabalharem com TestHub sem adivinhar estado, com fluxo project -> environment -> suite -> run -> report -> artifacts.
+
+## Docker e apps locais
+
+Quando TestHub roda em container, `localhost` aponta para o proprio container do runner, nao para sua maquina host. Para testar uma aplicacao local que esta rodando fora do container, configure o environment com `host.docker.internal`.
+
+Exemplos:
+
+```text
+Web local no host: http://host.docker.internal:3000
+API local no host: http://host.docker.internal:4000
+```
+
+Se TestHub e a aplicacao alvo rodam no mesmo `docker-compose`, prefira o nome do servico na rede Docker:
+
+```text
+http://api:4000
+http://web:3000
+```
+
+Regra pratica:
+
+- TestHub fora do Docker -> use `http://localhost:<porta>`.
+- TestHub dentro do Docker e app no host -> use `http://host.docker.internal:<porta>`.
+- TestHub dentro do Docker e app em outro container da mesma rede -> use `http://<service-name>:<porta>`.

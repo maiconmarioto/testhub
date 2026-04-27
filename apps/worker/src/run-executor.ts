@@ -8,10 +8,10 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
   const db = await store.read();
   const run = db.runs.find((item) => item.id === runId);
   if (!run) return;
-  if (run.status === 'canceled') return;
+  if (run.status === 'canceled' || run.status === 'deleted') return;
   const environment = db.environments.find((item) => item.id === run.environmentId);
   const suite = db.suites.find((item) => item.id === run.suiteId);
-  if (!environment || !suite) {
+  if (!environment || !suite || environment.status === 'inactive' || suite.status === 'inactive') {
     await store.updateRun(runId, { status: 'error', error: 'Environment ou suite nao encontrado', finishedAt: new Date().toISOString() });
     return;
   }
@@ -28,11 +28,11 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
       junit: true,
     }));
     const latest = (await store.read()).runs.find((item) => item.id === runId);
-    if (latest?.status === 'canceled') return;
-    const failed = report.summary.failed + report.summary.error;
+    if (latest?.status === 'canceled' || latest?.status === 'deleted') return;
+    const status = report.summary.error > 0 ? 'error' : report.summary.failed > 0 ? 'failed' : 'passed';
     const uploadedArtifacts = await uploadRunArtifacts(path.join(store.runsDir, runId, report.id));
     await store.updateRun(runId, {
-      status: failed > 0 ? 'failed' : 'passed',
+      status,
       finishedAt: new Date().toISOString(),
       reportPath: path.join(store.runsDir, runId, report.id, 'report.json'),
       reportHtmlPath: path.join(store.runsDir, runId, report.id, 'report.html'),

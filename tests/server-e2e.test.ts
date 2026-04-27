@@ -48,4 +48,24 @@ describe('server e2e', () => {
     const runResponse = await app.inject({ method: 'POST', url: '/api/runs', payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id } });
     expect(runResponse.statusCode).toBe(202);
   });
+
+  it('updates and soft deletes projects', async () => {
+    const createdResponse = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'CRUD draft', description: 'old' } });
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json() as { id: string };
+
+    const updatedResponse = await app.inject({ method: 'PUT', url: `/api/projects/${created.id}`, payload: { name: 'CRUD final', description: 'new' } });
+    expect(updatedResponse.statusCode).toBe(200);
+    expect(updatedResponse.json()).toMatchObject({ id: created.id, name: 'CRUD final', description: 'new', status: 'active' });
+
+    const getResponse = await app.inject({ method: 'GET', url: `/api/projects/${created.id}` });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({ id: created.id, name: 'CRUD final' });
+
+    const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/projects/${created.id}` });
+    expect(deleteResponse.statusCode).toBe(204);
+
+    const deletedGetResponse = await app.inject({ method: 'GET', url: `/api/projects/${created.id}` });
+    expect(deletedGetResponse.statusCode).toBe(404);
+  });
 });

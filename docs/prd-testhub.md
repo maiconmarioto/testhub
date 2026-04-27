@@ -604,7 +604,7 @@ suggestions:
       - fill: { by: label, target: Email, value: usuario_invalido }
       - fill: { by: label, target: Senha, value: senha_invalida }
       - click: { by: role, role: button, name: Entrar }
-      - expectText: Credenciais invalidas
+      - expectText: Invalid email or password
 ```
 
 ## 15.4 Guardrails IA
@@ -786,4 +786,3 @@ Mitigacao: IA opcional, connections plugaveis, fallback sem IA.
 | D-008 | IA opcional | IA core | Sem dependencia externa |
 | D-009 | MCP futuro | MCP MVP | Evita distracao |
 | D-010 | Connections OpenRouter/Anthropic/OpenAI | provider unico | Evita lock-in |
-

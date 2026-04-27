@@ -18,7 +18,7 @@
     "worker": "tsx apps/worker/src/worker.ts",
     "mcp": "tsx apps/mcp/src/mcp.ts",
     "migrate": "tsx packages/db/src/migrate.ts",
-    "web": "next dev apps/web -p 3000",
+    "web": "next dev apps/web -p 3333",
     "web:build": "next build apps/web",
     "test": "vitest run",
     "validate": "tsx apps/cli/src/cli.ts validate",
