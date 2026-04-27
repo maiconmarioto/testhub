@@ -159,6 +159,10 @@ export function loadEnvFile(envFile?: string): Record<string, string> {
 export function parseSpecFile(specPath: string): TestHubSpec {
   const absolute = path.resolve(specPath);
   const raw = fs.readFileSync(absolute, 'utf8');
+  return parseSpecContent(raw);
+}
+
+export function parseSpecContent(raw: string): TestHubSpec {
   const parsed = YAML.parse(raw) as unknown;
   const result = specSchema.safeParse(parsed);
   if (!result.success) {

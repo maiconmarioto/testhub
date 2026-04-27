@@ -83,6 +83,8 @@ export interface Store {
   updateProject(id: string, input: { name: string; description?: string }): Promise<Project | undefined> | Project | undefined;
   archiveProject(id: string): Promise<boolean> | boolean;
   createEnvironment(input: { projectId: string; name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment> | Environment;
+  updateEnvironment(id: string, input: { name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment | undefined> | Environment | undefined;
+  archiveEnvironment(id: string): Promise<boolean> | boolean;
   createSuite(input: { projectId: string; name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite> | Suite;
   getSuiteContent(id: string): Promise<(Suite & { specContent: string }) | undefined> | (Suite & { specContent: string }) | undefined;
   updateSuite(id: string, input: { name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite | undefined> | Suite | undefined;
@@ -195,6 +197,33 @@ export class JsonStore {
     db.environments.push(environment);
     this.write(db);
     return { ...environment, variables: maskVariables(environment.variables) };
+  }
+
+  updateEnvironment(id: string, input: { name: string; baseUrl: string; variables?: Record<string, string> }): Environment | undefined {
+    const db = this.read();
+    const index = db.environments.findIndex((environment) => environment.id === id && environment.status !== 'inactive');
+    if (index === -1) return undefined;
+    const environment: Environment = {
+      ...db.environments[index],
+      name: input.name,
+      baseUrl: input.baseUrl,
+      variables: encryptVariables(input.variables),
+      updatedAt: nowIso(),
+    };
+    db.environments[index] = environment;
+    this.write(db);
+    return { ...environment, variables: maskVariables(environment.variables) };
+  }
+
+  archiveEnvironment(id: string): boolean {
+    const db = this.read();
+    const environment = db.environments.find((item) => item.id === id && item.status !== 'inactive');
+    if (!environment) return false;
+    const now = nowIso();
+    db.environments = db.environments.map((item) => item.id === id ? { ...item, status: 'inactive', updatedAt: now } : item);
+    db.runs = db.runs.map((item) => item.environmentId === id ? { ...item, status: 'deleted', finishedAt: item.finishedAt ?? now } : item);
+    this.write(db);
+    return true;
   }
 
   createSuite(input: { projectId: string; name: string; type: 'web' | 'api'; specContent: string }): Suite {

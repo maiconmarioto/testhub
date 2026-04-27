@@ -20,8 +20,8 @@ const server = new McpServer({
 
 const commandCatalog = {
   project: ['testhub_list_projects', 'testhub_create_project', 'testhub_get_project', 'testhub_update_project', 'testhub_archive_project'],
-  environment: ['testhub_list_environments', 'testhub_create_environment', 'testhub_get_environment', 'testhub_list_envs', 'testhub_create_env', 'list_environments', 'create_environment', 'get_environment'],
-  suite: ['testhub_list_suites', 'testhub_create_suite', 'testhub_get_suite', 'testhub_update_suite', 'testhub_import_openapi'],
+  environment: ['testhub_list_environments', 'testhub_create_environment', 'testhub_update_environment', 'testhub_archive_environment', 'testhub_get_environment', 'testhub_list_envs', 'testhub_create_env', 'list_environments', 'create_environment', 'get_environment'],
+  suite: ['testhub_list_suites', 'testhub_create_suite', 'testhub_get_suite', 'testhub_update_suite', 'testhub_validate_spec', 'testhub_import_openapi'],
   run: ['testhub_get_test_context', 'testhub_list_runs', 'testhub_run_suite', 'testhub_get_run_status', 'testhub_wait_run', 'testhub_get_run_report', 'testhub_get_artifacts', 'testhub_cancel_run'],
   ai: ['testhub_list_ai_connections', 'testhub_upsert_ai_connection', 'testhub_explain_failure'],
   maintenance: ['testhub_cleanup'],
@@ -35,18 +35,20 @@ Use TestHub as a test-management and execution platform. Do not guess state. Alw
 1. Call testhub_list_projects.
 2. Pick existing project by name, or create one with testhub_create_project.
 3. Call testhub_list_environments with projectId. Aliases also exist: list_environments and testhub_list_envs.
-4. Pick/create environment. If unsure, call testhub_get_test_context with projectId to get projects, environments, suites, and recent runs with IDs in one response.
+4. Pick/create/update environment. If unsure, call testhub_get_test_context with projectId to get projects, environments, suites, and recent runs with IDs in one response.
 5. Environment baseUrl is target app URL. Variables are secrets/config used by specs.
 6. Call testhub_list_suites with projectId.
 7. For an existing suite: call testhub_get_suite before editing.
-8. For a new suite: create YAML spec with testhub_create_suite.
-9. Run with testhub_run_suite using projectId, suiteId, and environmentId. If environmentId is missing, testhub_run_suite will first match environmentName, then use the first project environment, or create one when baseUrl is provided.
-10. Poll with testhub_wait_run. Use timeoutMs large enough for web tests.
-11. Fetch testhub_get_run_report.
-12. Fetch testhub_get_artifacts. For web runs, look for video/webm, screenshot/png, trace/report. For API runs, inspect request/response JSON.
+8. Validate YAML with testhub_validate_spec before create/update when possible.
+9. For a new suite: create YAML spec with testhub_create_suite.
+10. Run with testhub_run_suite using projectId, suiteId, and environmentId. If environmentId is missing, testhub_run_suite will first match environmentName, then use the first project environment, or create one when baseUrl is provided.
+11. Poll with testhub_wait_run. Use timeoutMs large enough for web tests.
+12. Fetch testhub_get_run_report.
+13. Fetch testhub_get_artifacts. For web runs, look for video/webm, screenshot/png, trace/report. For API runs, inspect request/response JSON.
 
 ## Rules
 - Never hard delete. testhub_archive_project is soft delete, but still destructive to visible workspace. Ask user before using it unless archiving your own temporary smoke data.
+- Never hard delete environments. testhub_archive_environment is soft delete and hides linked runs.
 - Never recreate a suite just because update is needed. Use testhub_get_suite then testhub_update_suite.
 - Do not run tests without confirming project, environment, and suite match the target.
 - API assertion failures should be treated as failed. Infra/config/runtime issues should be treated as error.
@@ -215,6 +217,22 @@ server.tool('testhub_get_environment', 'Busca environment/ambiente ativo por ID'
   return text(await getEnvironment(environmentId));
 });
 
+server.tool('testhub_update_environment', 'Atualiza ambiente ativo. Use para trocar baseUrl/variaveis sem recriar suite.', {
+  environmentId: z.string(),
+  name: z.string(),
+  baseUrl: z.string().url(),
+  variables: z.record(z.string()).optional(),
+}, async ({ environmentId, ...input }) => {
+  return text(await api(`/api/environments/${encodeURIComponent(environmentId)}`, { method: 'PUT', body: JSON.stringify(input) }));
+});
+
+server.tool('testhub_archive_environment', 'Arquiva ambiente por soft delete e oculta runs vinculadas', {
+  environmentId: z.string(),
+}, async ({ environmentId }) => {
+  await api(`/api/environments/${encodeURIComponent(environmentId)}`, { method: 'DELETE' });
+  return text({ archived: true, environmentId });
+});
+
 server.tool('testhub_list_envs', 'Alias de testhub_list_environments. Lista environments/ambientes e retorna environmentId', {
   projectId: z.string().optional(),
 }, async ({ projectId }) => {
@@ -279,6 +297,12 @@ server.tool('testhub_update_suite', 'Atualiza nome, tipo e YAML de suite ativa',
   specContent: z.string(),
 }, async ({ suiteId, ...input }) => {
   return text(await api(`/api/suites/${encodeURIComponent(suiteId)}`, { method: 'PUT', body: JSON.stringify(input) }));
+});
+
+server.tool('testhub_validate_spec', 'Valida YAML TestHub sem salvar suite', {
+  specContent: z.string(),
+}, async (input) => {
+  return text(await api('/api/spec/validate', { method: 'POST', body: JSON.stringify(input) }));
 });
 
 server.tool('testhub_import_openapi', 'Importa OpenAPI JSON como suite API basica', {
@@ -423,10 +447,7 @@ async function createEnvironment(input: {
 }
 
 async function getEnvironment(environmentId: string): Promise<EnvironmentSummary> {
-  const environments = await listEnvironments();
-  const environment = environments.find((item) => item.id === environmentId);
-  if (!environment) throw new Error(`Environment nao encontrado: ${environmentId}`);
-  return environment;
+  return await api(`/api/environments/${encodeURIComponent(environmentId)}`) as EnvironmentSummary;
 }
 
 async function resolveEnvironmentId(input: {

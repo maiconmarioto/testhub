@@ -95,6 +95,30 @@ export class PgStore implements Store {
     return rowToEnvironmentSafe(environment);
   }
 
+  async updateEnvironment(id: string, input: { name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment | undefined> {
+    const [environment] = await this.db.update(environments)
+      .set({
+        name: input.name,
+        baseUrl: input.baseUrl,
+        variables: encryptVariables(input.variables),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(environments.id, id), ne(environments.status, 'inactive')))
+      .returning();
+    return environment ? rowToEnvironmentSafe(environment) : undefined;
+  }
+
+  async archiveEnvironment(id: string): Promise<boolean> {
+    const now = new Date();
+    const archived = await this.db.update(environments)
+      .set({ status: 'inactive', updatedAt: now })
+      .where(and(eq(environments.id, id), ne(environments.status, 'inactive')))
+      .returning({ id: environments.id });
+    if (archived.length === 0) return false;
+    await this.db.update(runs).set({ status: 'deleted', finishedAt: now }).where(eq(runs.environmentId, id));
+    return true;
+  }
+
   async createSuite(input: { projectId: string; name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite> {
     const now = new Date();
     const specPath = path.join(this.suitesDir, `${input.name.replace(/[^a-zA-Z0-9._-]/g, '_')}-${Date.now()}.yaml`);

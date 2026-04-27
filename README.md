@@ -275,6 +275,8 @@ Tools:
 - `testhub_list_envs`
 - `testhub_create_environment`
 - `testhub_create_env`
+- `testhub_update_environment`
+- `testhub_archive_environment`
 - `testhub_get_environment`
 - `list_environments`
 - `create_environment`
@@ -283,6 +285,7 @@ Tools:
 - `testhub_get_suite`
 - `testhub_create_suite`
 - `testhub_update_suite`
+- `testhub_validate_spec`
 - `testhub_import_openapi`
 - `testhub_list_runs`
 - `testhub_run_suite`

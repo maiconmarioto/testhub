@@ -1,0 +1,19 @@
+version: 1
+type: web
+name: testhub-dogfood-web
+description: Smoke do dashboard TestHub v2.
+baseUrl: http://localhost:3333
+defaults:
+  timeoutMs: 15000
+  video: on
+  trace: retain-on-failure
+tests:
+  - name: v2 command deck renders
+    steps:
+      - goto: /v2
+      - expectText:
+          text: Run Command Deck
+      - expectText:
+          text: Spec Forge
+      - expectText:
+          text: Evidence

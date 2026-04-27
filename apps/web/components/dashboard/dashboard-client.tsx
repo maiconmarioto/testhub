@@ -252,6 +252,7 @@ const navItems = [
   { id: 'projects', label: 'Projects', href: '/projects', icon: FolderKanban },
   { id: 'suites', label: 'Suites', href: '/suites', icon: FileCode2 },
   { id: 'runs', label: 'Runs', href: '/runs', icon: Activity },
+  { id: 'v2', label: 'V2 Console', href: '/v2', icon: TerminalSquare },
   { id: 'docs', label: 'Docs', href: '/docs', icon: BookOpen },
   { id: 'settings', label: 'Settings', href: '/settings', icon: Settings2 },
 ] as const;

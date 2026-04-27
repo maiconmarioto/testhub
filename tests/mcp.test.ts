@@ -52,7 +52,10 @@ describe('mcp server', () => {
       expect(toolNames).toEqual(expect.arrayContaining([
         'testhub_list_environments',
         'testhub_create_environment',
+        'testhub_update_environment',
+        'testhub_archive_environment',
         'testhub_get_environment',
+        'testhub_validate_spec',
         'list_environments',
         'create_environment',
         'get_environment',
@@ -91,10 +94,32 @@ describe('mcp server', () => {
       const listed = await callToolJson<Array<{ id: string; name: string }>>(client, 'list_environments', { projectId: project.project.id });
       expect(listed.map((env) => env.id)).toEqual([webEnv.id, apiEnv.id]);
 
+      const updatedEnv = await callToolJson<{ id: string; name: string; baseUrl: string }>(client, 'testhub_update_environment', {
+        environmentId: apiEnv.id,
+        name: 'local-api-renamed',
+        baseUrl: 'https://httpbin.org',
+      });
+      expect(updatedEnv).toMatchObject({ id: apiEnv.id, name: 'local-api-renamed' });
+
+      const validation = await callToolJson<{ valid: true; type: string; tests: number }>(client, 'testhub_validate_spec', {
+        specContent: [
+          'version: 1',
+          'type: api',
+          'name: api-health',
+          'tests:',
+          '  - name: status 200',
+          '    request:',
+          '      method: GET',
+          '      path: /status/200',
+          '',
+        ].join('\n'),
+      });
+      expect(validation).toMatchObject({ valid: true, type: 'api', tests: 1 });
+
       const run = await callToolJson<{ environmentId: string }>(client, 'testhub_run_suite', {
         projectId: project.project.id,
         suiteId: suite.id,
-        environmentName: 'local-api',
+        environmentName: 'local-api-renamed',
       });
       expect(run.environmentId).toBe(apiEnv.id);
     } finally {

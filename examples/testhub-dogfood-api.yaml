@@ -1,0 +1,31 @@
+version: 1
+type: api
+name: testhub-dogfood-api
+description: Smoke da propria API TestHub.
+baseUrl: http://localhost:4321
+tests:
+  - name: service metadata
+    request:
+      method: GET
+      path: /
+    expect:
+      status: 200
+      bodyPathMatches:
+        service: testhub-api
+
+  - name: health
+    request:
+      method: GET
+      path: /api/health
+    expect:
+      status: 200
+      bodyPathMatches:
+        ok: "true"
+
+  - name: openapi
+    request:
+      method: GET
+      path: /openapi.json
+    expect:
+      status: 200
+      bodyPathExists: [openapi, info]

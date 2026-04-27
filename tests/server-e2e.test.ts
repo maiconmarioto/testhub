@@ -49,6 +49,45 @@ describe('server e2e', () => {
     expect(runResponse.statusCode).toBe(202);
   });
 
+  it('updates and soft deletes environments', async () => {
+    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Env CRUD' } });
+    const project = projectResponse.json() as { id: string };
+
+    const createdResponse = await app.inject({ method: 'POST', url: '/api/environments', payload: { projectId: project.id, name: 'hml', baseUrl: 'https://example.com', variables: { TOKEN: 'abc' } } });
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json() as { id: string };
+    expect(created).toMatchObject({ name: 'hml', baseUrl: 'https://example.com', variables: { TOKEN: '[REDACTED]' } });
+
+    const updatedResponse = await app.inject({ method: 'PUT', url: `/api/environments/${created.id}`, payload: { name: 'prod', baseUrl: 'https://httpbin.org', variables: { TOKEN: 'def' } } });
+    expect(updatedResponse.statusCode).toBe(200);
+    expect(updatedResponse.json()).toMatchObject({ id: created.id, name: 'prod', baseUrl: 'https://httpbin.org', variables: { TOKEN: '[REDACTED]' } });
+
+    const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/environments/${created.id}` });
+    expect(deleteResponse.statusCode).toBe(204);
+
+    const listResponse = await app.inject({ method: 'GET', url: `/api/environments?projectId=${project.id}` });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toEqual([]);
+  });
+
+  it('validates specs without saving them', async () => {
+    const validResponse = await app.inject({
+      method: 'POST',
+      url: '/api/spec/validate',
+      payload: { specContent: 'version: 1\ntype: api\nname: valid\ntests:\n  - name: ok\n    request:\n      method: GET\n      path: /health\n' },
+    });
+    expect(validResponse.statusCode).toBe(200);
+    expect(validResponse.json()).toMatchObject({ valid: true, type: 'api', name: 'valid', tests: 1 });
+
+    const invalidResponse = await app.inject({
+      method: 'POST',
+      url: '/api/spec/validate',
+      payload: { specContent: 'version: 1\ntype: web\nname: broken\ntests: []\n' },
+    });
+    expect(invalidResponse.statusCode).toBe(400);
+    expect(invalidResponse.json()).toMatchObject({ valid: false });
+  });
+
   it('updates and soft deletes projects', async () => {
     const createdResponse = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'CRUD draft', description: 'old' } });
     expect(createdResponse.statusCode).toBe(201);

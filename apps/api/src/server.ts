@@ -10,6 +10,7 @@ import { buildFailurePrompt, buildFixPrompt, buildTestSuggestionPrompt, callAi }
 import { cleanupOldRuns } from '../../../packages/db/src/cleanup.js';
 import { createRunQueue } from '../../../packages/shared/src/jobs.js';
 import { openApiToSuite } from '../../../packages/spec/src/openapi-import.js';
+import { parseSpecContent, SpecValidationError } from '../../../packages/spec/src/spec.js';
 import { redactDeep } from '../../../packages/shared/src/redact.js';
 import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
@@ -47,6 +48,11 @@ const openApiDocument = {
       get: { tags: ['environments'], summary: 'List environments', responses: { '200': { description: 'OK' } } },
       post: { tags: ['environments'], summary: 'Create environment', responses: { '201': { description: 'Created' } } },
     },
+    '/api/environments/{id}': {
+      get: { tags: ['environments'], summary: 'Get environment', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      put: { tags: ['environments'], summary: 'Update environment', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      delete: { tags: ['environments'], summary: 'Soft delete environment and child runs', responses: { '204': { description: 'Archived' }, '404': { description: 'Not found' } } },
+    },
     '/api/suites': {
       get: { tags: ['suites'], summary: 'List suites', responses: { '200': { description: 'OK' } } },
       post: { tags: ['suites'], summary: 'Create suite', responses: { '201': { description: 'Created' } } },
@@ -56,6 +62,7 @@ const openApiDocument = {
       put: { tags: ['suites'], summary: 'Update suite spec content', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
     },
     '/api/import/openapi': { post: { tags: ['suites'], summary: 'Import OpenAPI as API suite', responses: { '201': { description: 'Created' } } } },
+    '/api/spec/validate': { post: { tags: ['suites'], summary: 'Validate TestHub YAML spec', responses: { '200': { description: 'Valid' }, '400': { description: 'Invalid' } } } },
     '/api/runs': {
       get: { tags: ['runs'], summary: 'List runs', responses: { '200': { description: 'OK' } } },
       post: { tags: ['runs'], summary: 'Create run', responses: { '202': { description: 'Queued' } } },
@@ -182,6 +189,23 @@ export function createApp() {
     }).parse(req.body);
     return reply.code(201).send(await store.createEnvironment(input));
   });
+  app.put('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Update environment' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const input = z.object({
+      name: z.string().min(1),
+      baseUrl: z.string().url(),
+      variables: z.record(z.string()).optional(),
+    }).parse(req.body);
+    const environment = await store.updateEnvironment(params.id, input);
+    if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    return environment;
+  });
+  app.delete('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Soft delete environment and child runs' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const archived = await store.archiveEnvironment(params.id);
+    if (!archived) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    return reply.code(204).send();
+  });
 
   app.get('/api/suites', { schema: { tags: ['suites'], summary: 'List suites' } }, async (req) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query);
@@ -212,6 +236,24 @@ export function createApp() {
     const suite = await store.updateSuite(params.id, input);
     if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
     return suite;
+  });
+
+  app.post('/api/spec/validate', { schema: { tags: ['suites'], summary: 'Validate TestHub YAML spec' } }, async (req, reply) => {
+    const input = z.object({ specContent: z.string().min(1) }).parse(req.body);
+    try {
+      const spec = parseSpecContent(input.specContent);
+      return {
+        valid: true,
+        type: spec.type,
+        name: spec.name,
+        tests: spec.tests.length,
+      };
+    } catch (error) {
+      if (error instanceof SpecValidationError) {
+        return reply.code(400).send({ valid: false, error: error.message });
+      }
+      throw error;
+    }
   });
 
   app.post('/api/import/openapi', { schema: { tags: ['suites'], summary: 'Import OpenAPI as API suite' } }, async (req, reply) => {
