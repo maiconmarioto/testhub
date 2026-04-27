@@ -6,6 +6,8 @@ COPY package*.json ./
 COPY apps/web/package.json ./apps/web/package.json
 RUN npm ci
 
+COPY postcss.config.mjs ./
+COPY components.json ./
 COPY apps/web ./apps/web
 RUN npm run web:build
 

@@ -1,24 +1,80 @@
-* { box-sizing: border-box; }
-body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #17202a; }
-main { min-height: 100vh; display: grid; grid-template-columns: 360px minmax(0, 1fr); }
-aside { background: #111827; color: white; padding: 20px; overflow: auto; }
-h1 { margin: 0 0 18px; font-size: 28px; }
-h2 { margin: 0 0 12px; font-size: 16px; }
-h3 { margin: 18px 0 10px; font-size: 14px; }
-.content { padding: 24px; overflow: auto; }
-.panel { background: white; color: #17202a; border: 1px solid #d8dee8; border-radius: 8px; padding: 16px; margin-bottom: 14px; }
-aside .panel { background: #1f2937; border-color: #374151; color: white; }
-input, select, textarea, button { width: 100%; padding: 9px 10px; margin: 4px 0 10px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; }
-textarea.code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
-button { border: 0; background: #2563eb; color: white; font-weight: 700; cursor: pointer; }
-button.secondary { margin-top: 8px; background: #475569; }
-button.danger { margin-top: 8px; background: #b91c1c; }
-.controls { display: grid; grid-template-columns: 1fr 1fr 140px; gap: 12px; align-items: end; }
-table { width: 100%; border-collapse: collapse; }
-th, td { border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; vertical-align: top; }
-pre { margin: 0; white-space: pre-wrap; overflow: auto; max-width: 620px; background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 6px; }
-.passed { color: #047857; font-weight: 800; }
-.failed, .error { color: #b91c1c; font-weight: 800; }
-.running, .queued { color: #b45309; font-weight: 800; }
-a { color: #2563eb; font-weight: 700; }
-@media (max-width: 900px) { main { grid-template-columns: 1fr; } .controls { grid-template-columns: 1fr; } }
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --font-sans: "Public Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: #f7f6f0;
+  --foreground: #151915;
+  --card: #fffdf7;
+  --card-foreground: #151915;
+  --popover: #fffdf7;
+  --popover-foreground: #151915;
+  --primary: #1d4f3a;
+  --primary-foreground: #f8fff8;
+  --secondary: #e6e1d1;
+  --secondary-foreground: #202318;
+  --muted: #ece8dc;
+  --muted-foreground: #6e6a5d;
+  --accent: #c7d957;
+  --accent-foreground: #151915;
+  --destructive: #b42318;
+  --destructive-foreground: #fff7f5;
+  --border: #d8d2c1;
+  --input: #d1cab8;
+  --ring: #1d4f3a;
+}
+
+* { border-color: var(--border); }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(21, 25, 21, 0.035) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(0deg, rgba(21, 25, 21, 0.025) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+code,
+pre,
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}

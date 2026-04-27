@@ -12,6 +12,17 @@ afterAll(async () => {
 });
 
 describe('server e2e', () => {
+  it('exposes api metadata and openapi document without serving a dashboard', async () => {
+    const root = await app.inject({ method: 'GET', url: '/' });
+    expect(root.statusCode).toBe(200);
+    expect(root.json()).toMatchObject({ service: 'testhub-api', status: 'ok', docs: '/docs' });
+    expect(root.payload).not.toContain('<html');
+
+    const openapi = await app.inject({ method: 'GET', url: '/openapi.json' });
+    expect(openapi.statusCode).toBe(200);
+    expect(openapi.json()).toMatchObject({ openapi: '3.0.3' });
+  });
+
   it('creates project, env, suite and run', async () => {
     const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'E2E' } });
     expect(projectResponse.statusCode).toBe(201);
