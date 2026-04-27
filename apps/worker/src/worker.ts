@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Worker } from 'bullmq';
-import { RUN_QUEUE_NAME } from './jobs.js';
-import { createStore } from './store-factory.js';
+import { RUN_QUEUE_NAME } from '../../../packages/shared/src/jobs.js';
+import { createStore } from '../../../packages/db/src/store-factory.js';
 import { executeRun } from './run-executor.js';
 
 if (!process.env.REDIS_URL) throw new Error('REDIS_URL obrigatorio para worker BullMQ');

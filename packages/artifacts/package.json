@@ -1,0 +1,5 @@
+{
+  "name": "@testhub/artifacts",
+  "private": true,
+  "type": "module"
+}

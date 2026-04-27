@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Store } from './store.js';
-import { runSpec } from './runner.js';
-import { uploadRunArtifacts } from './artifact-store.js';
+import type { Store } from '../../../packages/db/src/store.js';
+import { runSpec } from '../../../packages/runner/src/runner.js';
+import { uploadRunArtifacts } from '../../../packages/artifacts/src/artifact-store.js';
 
 export async function executeRun(store: Store, runId: string): Promise<void> {
   const db = await store.read();

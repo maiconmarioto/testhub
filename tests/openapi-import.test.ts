@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseSpecFile } from '../src/spec.js';
-import { openApiToSuite } from '../src/openapi-import.js';
+import { parseSpecFile } from '../packages/spec/src/spec.js';
+import { openApiToSuite } from '../packages/spec/src/openapi-import.js';
 
 describe('openapi import', () => {
   it('converts paths into an api suite', () => {

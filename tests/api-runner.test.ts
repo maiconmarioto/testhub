@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { runApiSpec } from '../src/api-runner.js';
-import type { ApiSpec } from '../src/types.js';
+import { runApiSpec } from '../packages/runner/src/api-runner.js';
+import type { ApiSpec } from '../packages/shared/src/types.js';
 
 let server: http.Server;
 let baseUrl: string;

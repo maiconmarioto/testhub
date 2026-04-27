@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import type { Artifact, RunReport, TestHubSpec, TestResult } from './types.js';
-import { ensureDir, writeJson } from './fs-utils.js';
+import type { Artifact, RunReport, TestHubSpec, TestResult } from '../../shared/src/types.js';
+import { ensureDir, writeJson } from '../../shared/src/fs-utils.js';
 
 export function createRunReport(input: {
   id: string;

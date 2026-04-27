@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../src/server.js';
+import { createApp } from '../apps/api/src/server.js';
 
 const app = createApp();
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { redactDeep } from '../src/redact.js';
+import { redactDeep } from '../packages/shared/src/redact.js';
 
 describe('redaction', () => {
   it('redacts common secret fields', () => {

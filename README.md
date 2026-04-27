@@ -2,6 +2,20 @@
 
 Runner local para specs `web` e `api`.
 
+## Estrutura
+
+- `apps/web`: unica UI oficial, dashboard Next.js.
+- `apps/api`: Fastify REST, health/status, artifacts e Swagger/OpenAPI.
+- `apps/worker`: worker BullMQ, apenas executa runs.
+- `apps/cli`: CLI para validar, executar, servir API e limpeza.
+- `apps/mcp`: servidor MCP opcional.
+- `packages/runner`: execucao de specs API/web e reports.
+- `packages/spec`: parser, validacao e import OpenAPI.
+- `packages/db`: stores, Drizzle/Postgres, secrets e migrations.
+- `packages/shared`: tipos, jobs, filesystem e redaction.
+- `packages/ai`: prompts/adapters de AI opcionais.
+- `packages/artifacts`: upload/localizacao de artifacts.
+
 ## Setup
 
 ```bash
@@ -18,20 +32,20 @@ npx playwright install chromium
 ## Validar spec
 
 ```bash
-npx tsx src/cli.ts validate examples/api-health.yaml
+npx tsx apps/cli/src/cli.ts validate examples/api-health.yaml
 ```
 
 ## Rodar API
 
 ```bash
-npx tsx src/cli.ts run examples/api-health.yaml --report-dir .testhub-runs
-npx tsx src/cli.ts run examples/api-chain.yaml --report-dir .testhub-runs --junit
+npx tsx apps/cli/src/cli.ts run examples/api-health.yaml --report-dir .testhub-runs
+npx tsx apps/cli/src/cli.ts run examples/api-chain.yaml --report-dir .testhub-runs --junit
 ```
 
 ## Rodar Web
 
 ```bash
-npx tsx src/cli.ts run examples/web-example.yaml --report-dir .testhub-runs
+npx tsx apps/cli/src/cli.ts run examples/web-example.yaml --report-dir .testhub-runs
 ```
 
 ## Variaveis
@@ -39,7 +53,7 @@ npx tsx src/cli.ts run examples/web-example.yaml --report-dir .testhub-runs
 Specs podem usar `${VAR}`. Valores vêm do ambiente ou `--env-file`.
 
 ```bash
-BASE_URL=https://crm-hml.local npx tsx src/cli.ts run tests/web/login.yaml
+BASE_URL=https://crm-hml.local npx tsx apps/cli/src/cli.ts run tests/web/login.yaml
 ```
 
 `.env` simples:
@@ -51,7 +65,7 @@ CRM_PASS=secret
 ```
 
 ```bash
-npx tsx src/cli.ts run tests/web/login.yaml --env-file .env
+npx tsx apps/cli/src/cli.ts run tests/web/login.yaml --env-file .env
 ```
 
 ## Exit Codes
@@ -101,17 +115,19 @@ Comum:
 - `--tag`
 - `--junit`
 
-## Server + Dashboard
+## API
 
 ```bash
 npm run build
-node dist/cli.js server --port 4321
+node dist/apps/cli/src/cli.js server --port 4321
 ```
 
 Abrir:
 
 ```text
 http://localhost:4321
+http://localhost:4321/docs
+http://localhost:4321/openapi.json
 ```
 
 ## Next.js Dashboard
@@ -170,7 +186,7 @@ curl http://localhost:4321/api/health
 Auth opcional:
 
 ```bash
-TESTHUB_TOKEN=secret node dist/cli.js server
+TESTHUB_TOKEN=secret node dist/apps/cli/src/cli.js server
 curl -H "authorization: Bearer secret" http://localhost:4321/api/projects
 ```
 
@@ -199,7 +215,7 @@ curl -X POST http://localhost:4321/api/import/openapi \\
 CLI cleanup:
 
 ```bash
-npx tsx src/cli.ts cleanup --days 30
+npx tsx apps/cli/src/cli.ts cleanup --days 30
 ```
 
 ## AI Connections

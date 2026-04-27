@@ -1,0 +1,5 @@
+{
+  "name": "@testhub/cli",
+  "private": true,
+  "type": "module"
+}

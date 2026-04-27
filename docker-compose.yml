@@ -41,7 +41,7 @@ services:
 
   api:
     build: .
-    command: ["sh", "-lc", "node dist/db/migrate.js && node dist/cli.js server --port 4321"]
+    command: ["sh", "-lc", "node dist/packages/db/src/migrate.js && node dist/apps/cli/src/cli.js server --port 4321"]
     environment:
       DATABASE_URL: postgres://testhub:testhub@postgres:5432/testhub
       REDIS_URL: redis://redis:6379
@@ -63,7 +63,7 @@ services:
 
   worker:
     build: .
-    command: ["node", "dist/worker.js"]
+    command: ["node", "dist/apps/worker/src/worker.js"]
     environment:
       DATABASE_URL: postgres://testhub:testhub@postgres:5432/testhub
       REDIS_URL: redis://redis:6379

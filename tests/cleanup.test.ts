@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cleanupOldRuns } from '../src/cleanup.js';
-import { JsonStore } from '../src/store.js';
+import { cleanupOldRuns } from '../packages/db/src/cleanup.js';
+import { JsonStore } from '../packages/db/src/store.js';
 
 describe('cleanup', () => {
   it('removes old run records and artifact directories', async () => {

@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Ajv } from 'ajv';
-import type { ApiRequestStep, ApiSpec, Artifact, TestResult } from './types.js';
-import { ensureDir, sanitizeFilename, writeJson } from './fs-utils.js';
-import { redactDeep } from './redact.js';
-import { resolveVariablesWithContext } from './spec.js';
+import type { ApiRequestStep, ApiSpec, Artifact, TestResult } from '../../shared/src/types.js';
+import { ensureDir, sanitizeFilename, writeJson } from '../../shared/src/fs-utils.js';
+import { redactDeep } from '../../shared/src/redact.js';
+import { resolveVariablesWithContext } from '../../spec/src/spec.js';
 
 export async function runApiSpec(spec: ApiSpec, runDir: string): Promise<TestResult[]> {
   const results: TestResult[] = [];

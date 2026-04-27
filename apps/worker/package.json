@@ -1,0 +1,5 @@
+{
+  "name": "@testhub/worker",
+  "private": true,
+  "type": "module"
+}

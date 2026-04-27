@@ -2,24 +2,28 @@
   "name": "testhub",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "type": "module",
   "bin": {
-    "testhub": "./dist/cli.js",
-    "testhub-mcp": "./dist/mcp.js"
+    "testhub": "./dist/apps/cli/src/cli.js",
+    "testhub-mcp": "./dist/apps/mcp/src/mcp.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/cli.ts",
-    "server": "tsx src/server.ts",
-    "worker": "tsx src/worker.ts",
-    "mcp": "tsx src/mcp.ts",
-    "migrate": "tsx src/db/migrate.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "dev": "tsx apps/cli/src/cli.ts",
+    "server": "tsx apps/api/src/server.ts",
+    "worker": "tsx apps/worker/src/worker.ts",
+    "mcp": "tsx apps/mcp/src/mcp.ts",
+    "migrate": "tsx packages/db/src/migrate.ts",
     "web": "next dev apps/web -p 3000",
     "web:build": "next build apps/web",
     "test": "vitest run",
-    "validate": "tsx src/cli.ts validate",
+    "validate": "tsx apps/cli/src/cli.ts validate",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test:api": "tsx src/cli.ts run examples/api-health.yaml --base-url https://httpbin.org --report-dir .testhub-runs",
+    "test:api": "tsx apps/cli/src/cli.ts run examples/api-health.yaml --base-url https://httpbin.org --report-dir .testhub-runs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

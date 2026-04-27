@@ -1,0 +1,5 @@
+{
+  "name": "@testhub/shared",
+  "private": true,
+  "type": "module"
+}

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { getExitCodeForError, runSpec, validateSpec } from './runner.js';
-import { cleanupOldRuns } from './cleanup.js';
-import { createStore } from './store-factory.js';
+import { getExitCodeForError, runSpec, validateSpec } from '../../../packages/runner/src/runner.js';
+import { cleanupOldRuns } from '../../../packages/db/src/cleanup.js';
+import { createStore } from '../../../packages/db/src/store-factory.js';
 
 const program = new Command();
 
@@ -69,7 +69,7 @@ program
   .option('--port <port>', 'Porta HTTP', '4321')
   .action(async (options: { port: string }) => {
     process.env.PORT = options.port;
-    const { createApp } = await import('./server.js');
+    const { createApp } = await import('../../api/src/server.js');
     const app = createApp();
     await app.listen({ port: Number(options.port), host: '0.0.0.0' });
     console.log(`TestHub server: http://localhost:${options.port}`);

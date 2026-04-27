@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, expect, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import type { Artifact, SelectorInput, StepResult, TestResult, WebSpec, WebStep } from './types.js';
-import { ensureDir, sanitizeFilename } from './fs-utils.js';
+import type { Artifact, SelectorInput, StepResult, TestResult, WebSpec, WebStep } from '../../shared/src/types.js';
+import { ensureDir, sanitizeFilename } from '../../shared/src/fs-utils.js';
 
 export async function runWebSpec(
   spec: WebSpec,

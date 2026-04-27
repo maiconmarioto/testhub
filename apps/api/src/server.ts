@@ -5,15 +5,15 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify from 'fastify';
-import { z } from 'zod';
-import { buildFailurePrompt, buildFixPrompt, buildTestSuggestionPrompt, callAi } from './ai.js';
-import { cleanupOldRuns } from './cleanup.js';
-import { createRunQueue } from './jobs.js';
-import { openApiToSuite } from './openapi-import.js';
-import { redactDeep } from './redact.js';
-import { executeRun } from './run-executor.js';
-import { maskVariables } from './secrets.js';
-import { createStore } from './store-factory.js';
+import { z, ZodError } from 'zod';
+import { buildFailurePrompt, buildFixPrompt, buildTestSuggestionPrompt, callAi } from '../../../packages/ai/src/ai.js';
+import { cleanupOldRuns } from '../../../packages/db/src/cleanup.js';
+import { createRunQueue } from '../../../packages/shared/src/jobs.js';
+import { openApiToSuite } from '../../../packages/spec/src/openapi-import.js';
+import { redactDeep } from '../../../packages/shared/src/redact.js';
+import { executeRun } from '../../worker/src/run-executor.js';
+import { maskVariables } from '../../../packages/db/src/secrets.js';
+import { createStore } from '../../../packages/db/src/store-factory.js';
 
 const openApiDocument = {
   openapi: '3.0.3',
@@ -77,6 +77,16 @@ export function createApp() {
     },
   });
   app.register(swaggerUi, { routePrefix: '/docs' });
+
+  app.setErrorHandler((error, _req, reply) => {
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        error: 'ValidationError',
+        issues: error.issues,
+      });
+    }
+    return reply.send(error);
+  });
 
   app.addHook('preHandler', async (req, reply) => {
     const token = process.env.TESTHUB_TOKEN;

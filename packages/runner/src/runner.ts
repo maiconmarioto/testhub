@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { RunOptions, RunReport, TestHubSpec } from './types.js';
-import { ensureDir } from './fs-utils.js';
-import { loadEnvFile, MissingVariableError, parseSpecFile, resolveVariables, SpecValidationError } from './spec.js';
+import type { RunOptions, RunReport, TestHubSpec } from '../../shared/src/types.js';
+import { ensureDir } from '../../shared/src/fs-utils.js';
+import { loadEnvFile, MissingVariableError, parseSpecFile, resolveVariables, SpecValidationError } from '../../spec/src/spec.js';
 import { runApiSpec } from './api-runner.js';
 import { runWebSpec } from './web-runner.js';
 import { createRunReport } from './reporter.js';

@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { desc, eq, lt } from 'drizzle-orm';
-import { ensureDir } from './fs-utils.js';
-import { aiConnections, environments, projects, runs, suites } from './db/schema.js';
+import { ensureDir } from '../../shared/src/fs-utils.js';
+import { aiConnections, environments, projects, runs, suites } from './schema.js';
 import type { AiConnection, Database, Environment, Project, RunRecord, Store, Suite } from './store.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 

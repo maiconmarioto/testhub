@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ensureDir, writeJson } from './fs-utils.js';
+import { ensureDir, writeJson } from '../../shared/src/fs-utils.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 
 export type EntityStatus = 'active' | 'inactive';

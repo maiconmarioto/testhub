@@ -1,4 +1,4 @@
-import type { AiConnection } from './store.js';
+import type { AiConnection } from '../../db/src/store.js';
 
 export interface AiResult {
   provider: string;

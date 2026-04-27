@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseSpecFile, resolveVariables } from '../src/spec.js';
+import { parseSpecFile, resolveVariables } from '../packages/spec/src/spec.js';
 
 describe('spec parser', () => {
   it('parses valid api spec', () => {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { z } from 'zod';
-import type { TestHubSpec } from './types.js';
+import type { TestHubSpec } from '../../shared/src/types.js';
 
 const selectorSchema = z.union([
   z.string(),

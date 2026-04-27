@@ -8,9 +8,20 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "declaration": true,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "apps/api/src/**/*.ts",
+    "apps/cli/src/**/*.ts",
+    "apps/mcp/src/**/*.ts",
+    "apps/worker/src/**/*.ts",
+    "packages/**/*.ts"
+  ],
+  "exclude": [
+    "apps/web",
+    "node_modules",
+    "dist"
+  ]
 }
