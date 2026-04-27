@@ -316,10 +316,10 @@ export function V2Console() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(199,217,87,0.08),transparent_34%),linear-gradient(135deg,#0b100c_0%,#111812_48%,#0a0e0b_100%)] text-[#f7f6f0]">
       <div className="grid min-h-screen xl:grid-cols-[84px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-[#2b332a]/70 bg-[#111812]/80 backdrop-blur xl:block">
+        <aside className="hidden border-r border-white/8 bg-[#111812]/80 backdrop-blur xl:block">
           <div className="flex h-screen flex-col items-center justify-between py-5">
             <div className="grid gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-xl border border-[#c7d957]/50 bg-[#c7d957] text-[#090d0a] shadow-[0_12px_28px_rgba(199,217,87,0.18)]">
+              <div className="grid h-12 w-12 place-items-center rounded-xl border border-[#c7d957]/35 bg-[#c7d957] text-[#090d0a] shadow-[0_12px_28px_rgba(199,217,87,0.18)]">
                 <TerminalSquare className="h-6 w-6" />
               </div>
               <RailIcon icon={Play} active />
@@ -327,7 +327,7 @@ export function V2Console() {
               <RailIcon icon={Database} />
               <RailIcon icon={Video} />
             </div>
-            <Button asChild variant="outline" size="icon" className="rounded-xl border-[#3d463c]/70 bg-transparent text-[#f7f6f0] hover:bg-[#1b241b]">
+            <Button asChild variant="outline" size="icon" className="rounded-xl border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1b241b]">
               <Link href="/overview" aria-label="Voltar para v1">
                 <ChevronRight className="h-4 w-4 rotate-180" />
               </Link>
@@ -336,7 +336,7 @@ export function V2Console() {
         </aside>
 
         <section className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)]">
-          <header className="border-b border-[#ded8c7] bg-[#f7f6f0]/95 px-5 py-4 text-[#151915] shadow-[0_18px_40px_rgba(0,0,0,0.12)] md:px-8">
+          <header className="border-b border-black/10 bg-[#f7f6f0]/95 px-5 py-4 text-[#151915] shadow-[0_18px_40px_rgba(0,0,0,0.12)] md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="font-mono text-xs uppercase tracking-[0.32em] text-[#657059]">TestHub v2</p>
@@ -446,7 +446,7 @@ function ControlColumn(props: {
               key={env.id}
               type="button"
               onClick={() => props.setEnvDraft({ id: env.id, name: env.name, baseUrl: env.baseUrl, variables: '' })}
-              className="grid cursor-pointer gap-2 rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 p-3 text-left shadow-[0_10px_24px_rgba(0,0,0,0.12)] transition hover:border-[#c7d957]/40 hover:bg-[#192219]/80"
+              className="grid cursor-pointer gap-2 rounded-xl bg-[#151d16]/70 p-3 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_12px_28px_rgba(0,0,0,0.18)] transition hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_18px_36px_rgba(0,0,0,0.22)]"
             >
               <div className="flex items-center justify-between gap-3">
                 <span className="font-semibold">{env.name}</span>
@@ -454,7 +454,7 @@ function ControlColumn(props: {
               </div>
               <span className="break-all font-mono text-xs text-[#a9b19d]">{env.baseUrl}</span>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" className="rounded-lg border-[#3d463c]/70 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80">
+                <Button size="sm" variant="outline" className="rounded-lg border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80">
                   <Pencil className="h-3.5 w-3.5" />
                   Editar
                 </Button>
@@ -485,7 +485,7 @@ function ControlColumn(props: {
               <Save className="h-4 w-4" />
               Salvar
             </Button>
-            <Button variant="outline" className="rounded-lg border-[#3d463c]/70 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80" onClick={() => props.setEnvDraft({ id: '', name: '', baseUrl: '', variables: '' })}>
+            <Button variant="outline" className="rounded-lg border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80" onClick={() => props.setEnvDraft({ id: '', name: '', baseUrl: '', variables: '' })}>
               Limpar
             </Button>
           </div>
@@ -523,7 +523,7 @@ function SuiteColumn(props: {
     <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
       <div className="grid gap-3 xl:grid-cols-3">
         {Object.entries(templates).map(([key, template]) => (
-          <button key={key} type="button" onClick={() => props.onTemplate(key as keyof typeof templates)} className="cursor-pointer rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 p-4 text-left shadow-[0_12px_28px_rgba(0,0,0,0.14)] transition hover:border-[#c7d957]/45 hover:bg-[#192219]/80">
+          <button key={key} type="button" onClick={() => props.onTemplate(key as keyof typeof templates)} className="cursor-pointer rounded-xl bg-[#151d16]/70 p-4 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_12px_28px_rgba(0,0,0,0.18)] transition hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_18px_36px_rgba(0,0,0,0.22)]">
             <div className="mb-3 flex items-center justify-between">
               <Code2 className="h-4 w-4 text-[#c7d957]" />
               <Badge variant={template.type === 'api' ? 'secondary' : 'outline'}>{template.type}</Badge>
@@ -542,7 +542,7 @@ function SuiteColumn(props: {
                   key={suite.id}
                   type="button"
                   onClick={() => props.onLoadSuite(suite)}
-                  className={cn('cursor-pointer rounded-xl border p-3 text-left transition hover:border-[#c7d957]/45', props.selectedSuiteId === suite.id ? 'border-[#c7d957]/60 bg-[#1a241b]/80 shadow-[0_0_0_1px_rgba(199,217,87,0.08)]' : 'border-[#2b352d]/60 bg-[#111812]/70')}
+                  className={cn('cursor-pointer rounded-xl p-3 text-left transition', props.selectedSuiteId === suite.id ? 'bg-[#1a241b]/80 shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_14px_30px_rgba(0,0,0,0.18)]' : 'bg-[#111812]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.22)]')}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold">{suite.name}</span>
@@ -569,7 +569,7 @@ function SuiteColumn(props: {
                   </SelectContent>
                 </Select>
               </Field>
-              <Button variant="outline" className="rounded-lg border-[#3d463c]/70 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80" onClick={props.onValidate}>
+              <Button variant="outline" className="rounded-lg border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80" onClick={props.onValidate}>
                 <ShieldCheck className="h-4 w-4" />
                 Validar
               </Button>
@@ -583,10 +583,10 @@ function SuiteColumn(props: {
               value={props.suiteDraft.specContent}
               onChange={(event) => props.setSuiteDraft({ ...props.suiteDraft, specContent: event.target.value })}
               spellCheck={false}
-              className="min-h-[460px] resize-none rounded-xl border-[#2b352d]/60 bg-[#0b100c]/95 font-mono text-xs leading-5 text-[#f7f6f0] shadow-inner focus-visible:ring-[#c7d957] min-[1900px]:min-h-[540px]"
+              className="min-h-[460px] resize-none rounded-xl border-transparent bg-[#0b100c]/95 font-mono text-xs leading-5 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_16px_42px_rgba(0,0,0,0.28)] focus-visible:ring-[#c7d957] min-[1900px]:min-h-[540px]"
             />
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2b352d]/70 pt-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-3">
               <ValidationBadge validation={props.validation} />
               <span className="font-mono text-xs text-[#a9b19d]">{props.suiteDraft.specContent.split(/\r?\n/).length} lines</span>
             </div>
@@ -614,7 +614,7 @@ function EvidenceColumn(props: {
 }) {
   return (
     <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
-      <div className="grid grid-cols-4 overflow-hidden rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 shadow-[0_12px_28px_rgba(0,0,0,0.14)]">
+      <div className="grid grid-cols-4 overflow-hidden rounded-xl bg-[#151d16]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_16px_36px_rgba(0,0,0,0.2)]">
         <Score label="Pass" value={props.stats.passed} tone="good" />
         <Score label="Fail" value={props.stats.failed} tone="bad" />
         <Score label="Error" value={props.stats.error} tone="bad" />
@@ -623,14 +623,14 @@ function EvidenceColumn(props: {
 
       <Panel title="Evidence" icon={ClipboardCheck} className="min-h-0">
         <div className="grid min-h-0 grid-rows-[230px_auto_minmax(0,1fr)] gap-4">
-          <ScrollArea className="rounded-xl border border-[#2b352d]/60 bg-[#0f1510]/70">
+          <ScrollArea className="rounded-xl bg-[#0f1510]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),inset_0_18px_42px_rgba(0,0,0,0.18)]">
             <div className="grid gap-2 p-3">
               {props.runs.map((run) => (
                 <button
                   key={run.id}
                   type="button"
                   onClick={() => props.onSelectRun(run)}
-                  className={cn('grid cursor-pointer gap-2 rounded-xl border p-3 text-left transition hover:border-[#c7d957]/45', props.selectedRun?.id === run.id ? 'border-[#c7d957]/60 bg-[#1a241b]/80 shadow-[0_0_0_1px_rgba(199,217,87,0.08)]' : 'border-[#2b352d]/60 bg-[#111812]/70')}
+                  className={cn('grid cursor-pointer gap-2 rounded-xl p-3 text-left transition', props.selectedRun?.id === run.id ? 'bg-[#1a241b]/80 shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_14px_30px_rgba(0,0,0,0.18)]' : 'bg-[#111812]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.22)]')}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <Status status={run.status} />
@@ -643,7 +643,7 @@ function EvidenceColumn(props: {
             </div>
           </ScrollArea>
 
-          <div className="grid gap-3 rounded-xl border border-[#ded8c7] bg-[#f7f6f0] p-4 text-[#151915] shadow-[0_14px_34px_rgba(0,0,0,0.16)]">
+          <div className="grid gap-3 rounded-xl bg-[#f7f6f0] p-4 text-[#151915] shadow-[inset_0_0_0_1px_rgba(21,25,21,0.10),0_16px_38px_rgba(0,0,0,0.18)]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <Status status={props.selectedRun?.status ?? 'queued'} />
@@ -663,7 +663,7 @@ function EvidenceColumn(props: {
                   key={item}
                   type="button"
                   onClick={() => props.setTab(item)}
-                  className={cn('h-9 cursor-pointer rounded-lg border text-xs font-bold uppercase tracking-wider transition', props.tab === item ? 'border-[#151915] bg-[#151915] text-[#f7f6f0]' : 'border-[#d8d2c1] bg-transparent text-[#151915] hover:bg-[#ece8dc]')}
+                  className={cn('h-9 cursor-pointer rounded-lg border text-xs font-bold uppercase tracking-wider transition', props.tab === item ? 'border-[#151915]/80 bg-[#151915] text-[#f7f6f0]' : 'border-black/15 bg-transparent text-[#151915] hover:bg-[#ece8dc]')}
                 >
                   {item}
                 </button>
@@ -687,20 +687,20 @@ function OverviewEvidence({ run, report, videos }: { run?: Run; report: RunRepor
   if (!run) return <DarkEmpty text="Selecione uma run." />;
   return (
     <div className="grid gap-4">
-      <div className="rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.14)]">
+      <div className="rounded-xl bg-[#151d16]/70 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_14px_32px_rgba(0,0,0,0.18)]">
         <p className="font-mono text-xs uppercase tracking-[0.24em] text-[#a9b19d]">Run</p>
         <p className="mt-3 text-lg font-black">{run.status.toUpperCase()}</p>
         <p className="mt-2 text-sm text-[#c6cdbd]">{runSummary(run)}</p>
         {run.error ? <pre className="mt-3 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{run.error}</pre> : null}
       </div>
       {videos[0] ? (
-        <div className="overflow-hidden rounded-xl border border-[#2b352d]/60 bg-black">
+        <div className="overflow-hidden rounded-xl bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_18px_38px_rgba(0,0,0,0.22)]">
           <video className="aspect-video w-full bg-black" src={artifactUrl(videos[0].path)} controls preload="metadata" />
         </div>
       ) : null}
       <div className="grid gap-2">
         {(report?.results ?? []).slice(0, 4).map((result) => (
-          <div key={result.name} className="flex items-center justify-between gap-3 rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 p-3">
+          <div key={result.name} className="flex items-center justify-between gap-3 rounded-xl bg-[#151d16]/70 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
             <span className="font-semibold">{result.name}</span>
             <Status status={result.status} />
           </div>
@@ -716,7 +716,7 @@ function TimelineEvidence({ report }: { report: RunReport | null }) {
   return (
     <div className="grid gap-3">
       {results.map((result) => (
-        <div key={result.name} className="rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.14)]">
+        <div key={result.name} className="rounded-xl bg-[#151d16]/70 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_14px_32px_rgba(0,0,0,0.18)]">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-bold">{result.name}</h3>
             <Status status={result.status} />
@@ -724,7 +724,7 @@ function TimelineEvidence({ report }: { report: RunReport | null }) {
           {result.error ? <pre className="mt-3 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{result.error}</pre> : null}
           <div className="mt-3 grid gap-2">
             {(result.steps ?? []).map((step) => (
-              <div key={`${result.name}:${step.index}`} className="grid gap-2 rounded-lg border border-[#2b352d]/60 bg-[#0f1510]/70 p-2 md:grid-cols-[84px_minmax(0,1fr)_70px]">
+              <div key={`${result.name}:${step.index}`} className="grid gap-2 rounded-lg bg-[#0f1510]/70 p-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] md:grid-cols-[84px_minmax(0,1fr)_70px]">
                 <Status status={step.status} />
                 <span className="break-words font-mono text-xs text-[#c6cdbd]">{step.name}</span>
                 <span className="font-mono text-xs text-[#a9b19d] md:text-right">{step.durationMs ?? 0}ms</span>
@@ -772,7 +772,7 @@ function PayloadCard({ artifact }: { artifact: Artifact }) {
     return () => { active = false; };
   }, [artifact.path]);
   return (
-    <div className="rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.14)]">
+    <div className="rounded-xl bg-[#151d16]/70 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_14px_32px_rgba(0,0,0,0.18)]">
       <div className="flex items-center justify-between gap-3">
         <span className="font-bold">{artifact.label ?? artifact.type}</span>
         <Badge variant={artifact.type === 'response' ? 'secondary' : 'outline'}>{artifact.type}</Badge>
@@ -785,8 +785,8 @@ function PayloadCard({ artifact }: { artifact: Artifact }) {
 
 function Panel({ title, icon: Icon, className, children }: { title: string; icon: LucideIcon; className?: string; children: React.ReactNode }) {
   return (
-    <section className={cn('rounded-2xl border border-[#2b352d]/60 bg-[#111812]/78 p-4 shadow-[0_18px_46px_rgba(0,0,0,0.24)] backdrop-blur', className)}>
-      <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#2b352d]/50 pb-3">
+    <section className={cn('rounded-2xl bg-[#111812]/78 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.055),inset_0_1px_0_rgba(255,255,255,0.08),0_22px_52px_rgba(0,0,0,0.26)] backdrop-blur', className)}>
+      <div className="mb-4 flex items-center justify-between gap-3 border-b border-white/8 pb-3">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 text-[#c7d957]" />
           <h2 className="font-mono text-xs font-bold uppercase tracking-[0.26em] text-[#f7f6f0]">{title}</h2>
@@ -820,7 +820,7 @@ function Status({ status }: { status: RunStatus }) {
 
 function Score({ label, value, tone }: { label: string; value: number; tone: 'good' | 'bad' | 'warn' }) {
   return (
-    <div className="border-r border-[#2b352d]/50 p-3 last:border-r-0">
+    <div className="border-r border-white/8 p-3 last:border-r-0">
       <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#a9b19d]">{label}</p>
       <p className={cn('mt-2 text-2xl font-black', tone === 'good' && 'text-[#31c48d]', tone === 'bad' && 'text-[#ff7a66]', tone === 'warn' && 'text-[#f5c542]')}>{value}</p>
     </div>
@@ -839,7 +839,7 @@ function ValidationBadge({ validation }: { validation: ValidationResult | null }
 
 function ArtifactLink({ label, path, type }: { label: string; path: string; type: string }) {
   return (
-    <a className="flex items-center justify-between gap-3 rounded-xl border border-[#2b352d]/60 bg-[#151d16]/70 p-3 text-sm transition hover:border-[#c7d957]/45 hover:bg-[#192219]/80" href={artifactUrl(path)} target="_blank">
+    <a className="flex items-center justify-between gap-3 rounded-xl bg-[#151d16]/70 p-3 text-sm shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.22)]" href={artifactUrl(path)} target="_blank">
       <span className="min-w-0 truncate font-semibold">{label}</span>
       <Badge variant="outline">{type}</Badge>
     </a>
@@ -847,11 +847,11 @@ function ArtifactLink({ label, path, type }: { label: string; path: string; type
 }
 
 function RailIcon({ icon: Icon, active }: { icon: LucideIcon; active?: boolean }) {
-  return <div className={cn('grid h-11 w-11 place-items-center rounded-xl border transition', active ? 'border-[#c7d957]/50 bg-[#1a241b]/80 text-[#c7d957]' : 'border-[#2b352d]/60 text-[#a9b19d]')}><Icon className="h-5 w-5" /></div>;
+  return <div className={cn('grid h-11 w-11 place-items-center rounded-xl transition', active ? 'bg-[#1a241b]/80 text-[#c7d957] shadow-[inset_0_0_0_1px_rgba(199,217,87,0.24),0_10px_24px_rgba(0,0,0,0.16)]' : 'text-[#a9b19d] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]')}><Icon className="h-5 w-5" /></div>;
 }
 
 function DarkEmpty({ text }: { text: string }) {
-  return <div className="rounded-xl border border-dashed border-[#2b352d]/60 bg-[#0f1510]/70 p-6 text-center text-sm text-[#a9b19d]">{text}</div>;
+  return <div className="rounded-xl border border-dashed border-white/10 bg-[#0f1510]/70 p-6 text-center text-sm text-[#a9b19d]">{text}</div>;
 }
 
 function summarize(runs: Run[]) {
