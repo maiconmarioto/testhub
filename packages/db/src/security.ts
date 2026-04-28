@@ -12,6 +12,8 @@ export type Permission =
 
 export interface AuthActor {
   id: string;
+  userId?: string;
+  organizationId?: string;
   name?: string;
   email?: string;
   role: RbacRole;
@@ -75,12 +77,13 @@ export function systemSecurityStatus() {
   };
 }
 
-export function authMode(): 'off' | 'token' | 'oidc' {
+export function authMode(): 'off' | 'token' | 'oidc' | 'local' {
   const value = (process.env.TESTHUB_AUTH_MODE ?? '').toLowerCase();
-  if (value === 'off' || value === 'token' || value === 'oidc') return value;
+  if (value === 'off') return process.env.NODE_ENV === 'production' ? 'local' : 'off';
+  if (value === 'token' || value === 'oidc' || value === 'local') return value;
   if (oidcIssuerUrl() && process.env.AUTH_OIDC_CLIENT_ID) return 'oidc';
   if (process.env.TESTHUB_TOKEN) return 'token';
-  return 'off';
+  return 'local';
 }
 
 export function fallbackRole(): RbacRole {

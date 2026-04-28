@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../apps/api/src/server.js';
 
+const originalAuthMode = process.env.TESTHUB_AUTH_MODE;
+process.env.TESTHUB_AUTH_MODE = 'off';
 const app = createApp();
 
 beforeAll(async () => {
@@ -9,6 +11,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
+  if (originalAuthMode === undefined) delete process.env.TESTHUB_AUTH_MODE;
+  else process.env.TESTHUB_AUTH_MODE = originalAuthMode;
 });
 
 describe('server e2e', () => {

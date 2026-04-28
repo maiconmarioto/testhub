@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { buildFailurePrompt, buildFixPrompt, buildTestSuggestionPrompt, callAi } from '../../../packages/ai/src/ai.js';
+import { createResetToken, createSessionToken, hashPassword, hashToken, resetExpiresAt, sessionExpiresAt, verifyPassword } from '../../../packages/db/src/auth.js';
 import { cleanupOldRuns } from '../../../packages/db/src/cleanup.js';
 import { auditCsv, readAudit, writeAudit } from '../../../packages/db/src/audit.js';
 import { createRunQueue } from '../../../packages/shared/src/jobs.js';
@@ -15,8 +17,12 @@ import { parseSpecContent, SpecValidationError } from '../../../packages/spec/sr
 import { redactDeep } from '../../../packages/shared/src/redact.js';
 import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
-import { actorFromAuthorization, actorLabel, hasPermission, isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus, type AuthActor, type Permission } from '../../../packages/db/src/security.js';
+import { actorFromAuthorization, actorLabel, authMode, hasPermission, isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus, type AuthActor, type Permission } from '../../../packages/db/src/security.js';
 import { createStore } from '../../../packages/db/src/store-factory.js';
+import type { User } from '../../../packages/db/src/store.js';
+
+const sessionCookieName = 'testhub_session';
+const passwordSchema = z.string().min(8).max(200);
 
 const openApiDocument = {
   openapi: '3.0.3',
@@ -89,6 +95,7 @@ export function createApp() {
   const runQueue = createRunQueue();
   const app = Fastify({ logger: true });
 
+  app.register(cookie);
   app.register(cors, {
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -111,9 +118,32 @@ export function createApp() {
     return reply.send(error);
   });
 
+  async function actorFromRequest(req: FastifyRequest): Promise<AuthActor | null> {
+    if (authMode() !== 'local') return actorFromAuthorization(req.headers.authorization);
+    const token = tokenFromRequest(req);
+    if (!token) return null;
+    const session = await store.findSessionByTokenHash(hashToken(token));
+    if (!session) return null;
+    const user = await store.findUserById(session.userId);
+    const membership = user ? await store.findMembership(user.id, session.organizationId) : undefined;
+    if (!user || !membership) return null;
+    return {
+      id: user.id,
+      userId: user.id,
+      organizationId: session.organizationId,
+      email: user.email,
+      name: user.name,
+      role: membership.role,
+      source: 'local',
+    };
+  }
+
   app.addHook('preHandler', async (req, reply) => {
-    if (req.url === '/' || req.url.startsWith('/api/health') || req.url.startsWith('/docs') || req.url.startsWith('/openapi.json')) return;
-    const actor = await actorFromAuthorization(req.headers.authorization);
+    if (isPublicRoute(req.url)) return;
+    if (authMode() === 'local' && (await store.read()).users.length === 0) {
+      return reply.code(401).send({ error: 'SetupRequired', setupRequired: true });
+    }
+    const actor = await actorFromRequest(req);
     if (!actor) return reply.code(401).send({ error: 'Unauthorized' });
     req.actor = actor;
     const permission = permissionFor(req.method, req.url);
@@ -171,6 +201,95 @@ export function createApp() {
   }, async () => ({ ok: true }));
 
   app.get('/api/system/security', { schema: { tags: ['system'], summary: 'Security status' } }, async () => systemSecurityStatus());
+
+  app.post('/api/auth/register', { schema: { tags: ['system'], summary: 'Register local account' } }, async (req, reply) => {
+    const input = z.object({
+      email: z.string().email(),
+      name: z.string().min(1).max(200).optional(),
+      password: passwordSchema,
+      organizationName: z.string().min(1).max(200),
+    }).parse(req.body);
+    const existing = await store.findUserByEmail(input.email);
+    if (existing) return reply.code(409).send({ error: 'Email ja cadastrado' });
+
+    const user = await store.createUser({
+      email: input.email,
+      name: input.name,
+      passwordHash: await hashPassword(input.password),
+    });
+    const organization = await store.createOrganization({ name: input.organizationName });
+    const membership = await store.createMembership({ userId: user.id, organizationId: organization.id, role: 'admin' });
+    const token = createSessionToken();
+    const expiresAt = sessionExpiresAt();
+    await store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: hashToken(token), expiresAt });
+    setSessionCookie(reply, token, expiresAt);
+    return reply.code(201).send({ user: publicUser(user), organization, membership, token });
+  });
+
+  app.post('/api/auth/login', { schema: { tags: ['system'], summary: 'Login local account' } }, async (req, reply) => {
+    const input = z.object({
+      email: z.string().email(),
+      password: passwordSchema,
+    }).parse(req.body);
+    const user = await store.findUserByEmail(input.email);
+    if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+    const memberships = await store.listMembershipsForUser(user.id);
+    const membership = memberships[0];
+    if (!membership) return reply.code(403).send({ error: 'Usuario sem organizacao' });
+    const token = createSessionToken();
+    const expiresAt = sessionExpiresAt();
+    await store.createSession({ userId: user.id, organizationId: membership.organizationId, tokenHash: hashToken(token), expiresAt });
+    setSessionCookie(reply, token, expiresAt);
+    return { user: publicUser(user), membership, token };
+  });
+
+  app.get('/api/auth/me', { schema: { tags: ['system'], summary: 'Current local account' } }, async (req, reply) => {
+    const actor = req.actor;
+    if (!actor?.userId || !actor.organizationId) return reply.code(401).send({ error: 'Unauthorized' });
+    const user = await store.findUserById(actor.userId);
+    const organizations = await store.listOrganizationsForUser(actor.userId);
+    const organization = organizations.find((item) => item.id === actor.organizationId);
+    const membership = await store.findMembership(actor.userId, actor.organizationId);
+    if (!user || !organization || !membership) return reply.code(401).send({ error: 'Unauthorized' });
+    return { user: publicUser(user), organization, membership, organizations };
+  });
+
+  app.post('/api/auth/logout', { schema: { tags: ['system'], summary: 'Logout local account' } }, async (req, reply) => {
+    const token = tokenFromRequest(req);
+    if (authMode() === 'local' && token) {
+      const session = await store.findSessionByTokenHash(hashToken(token));
+      if (session) await store.deleteSession(session.id);
+    }
+    clearSessionCookie(reply);
+    return reply.code(204).send();
+  });
+
+  app.post('/api/auth/password-reset/request', { schema: { tags: ['system'], summary: 'Request password reset' } }, async (req, reply) => {
+    const input = z.object({ email: z.string().email() }).parse(req.body);
+    const user = await store.findUserByEmail(input.email);
+    const body: { resetToken?: string } = {};
+    if (user) {
+      const resetToken = createResetToken();
+      await store.createPasswordResetToken({ userId: user.id, tokenHash: hashToken(resetToken), expiresAt: resetExpiresAt() });
+      if (process.env.NODE_ENV !== 'production' || process.env.TESTHUB_ALLOW_DISPLAY_RESET === 'true') body.resetToken = resetToken;
+    }
+    return reply.code(202).send(body);
+  });
+
+  app.post('/api/auth/password-reset/confirm', { schema: { tags: ['system'], summary: 'Confirm password reset' } }, async (req, reply) => {
+    const input = z.object({
+      resetToken: z.string().min(1),
+      password: passwordSchema,
+    }).parse(req.body);
+    const resetToken = await store.findPasswordResetByTokenHash(hashToken(input.resetToken));
+    if (!resetToken) return reply.code(400).send({ error: 'Token invalido ou expirado' });
+    const user = await store.updateUserPassword(resetToken.userId, await hashPassword(input.password));
+    if (!user) return reply.code(400).send({ error: 'Token invalido ou expirado' });
+    await store.markPasswordResetUsed(resetToken.id);
+    return reply.code(204).send();
+  });
 
   app.get('/api/audit', { schema: { tags: ['system'], summary: 'Audit log' } }, async (req) => {
     const query = z.object({
@@ -487,6 +606,48 @@ declare module 'fastify' {
   interface FastifyRequest {
     actor?: AuthActor;
   }
+}
+
+function isPublicRoute(url: string): boolean {
+  return url === '/'
+    || url.startsWith('/api/health')
+    || url.startsWith('/docs')
+    || url.startsWith('/openapi.json')
+    || url.startsWith('/api/system/security')
+    || url.startsWith('/api/auth/register')
+    || url.startsWith('/api/auth/login')
+    || url.startsWith('/api/auth/password-reset/request')
+    || url.startsWith('/api/auth/password-reset/confirm');
+}
+
+function tokenFromRequest(req: FastifyRequest): string | undefined {
+  const authorization = req.headers.authorization;
+  const bearer = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length).trim() : undefined;
+  return bearer || req.cookies?.[sessionCookieName];
+}
+
+function publicUser(user: User): Omit<User, 'passwordHash'> {
+  const { passwordHash: _passwordHash, ...safeUser } = user;
+  return safeUser;
+}
+
+function setSessionCookie(reply: FastifyReply, token: string, expiresAt: string): void {
+  reply.setCookie(sessionCookieName, token, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    expires: new Date(expiresAt),
+  });
+}
+
+function clearSessionCookie(reply: FastifyReply): void {
+  reply.clearCookie(sessionCookieName, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
 }
 
 function permissionFor(method: string, url: string): Permission | null {
