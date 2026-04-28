@@ -53,7 +53,7 @@ export default function RegisterPage() {
         <AuthField id="password" label="Senha">
           <Input id="password" type="password" autoComplete="new-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
         </AuthField>
-        {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
+        {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
         <Button type="submit" disabled={busy || !email || !name || !password || !organizationName}>{busy ? 'Criando...' : 'Criar conta'}</Button>
       </form>
     </AuthShell>
@@ -71,6 +71,6 @@ function AuthField({ id, label, children }: { id: string; label: string; childre
 
 function formatRegisterError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes('403')) return 'Cadastro publico desativado. Use usuario inicial/bootstrap ou habilite public signup.';
+  if (message.includes('Cadastro publico')) return 'Cadastro publico desativado. Use usuario inicial/bootstrap ou habilite public signup.';
   return message;
 }

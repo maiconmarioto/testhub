@@ -2,11 +2,16 @@ export const apiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localh
 
 const authPaths = ['/login', '/register', '/forgot-password', '/reset-password'];
 
-export async function api<T>(apiPath: string, options: RequestInit = {}): Promise<T> {
-  const headers = new Headers(options.headers);
+type ApiRequestInit = RequestInit & {
+  redirectOnUnauthorized?: boolean;
+};
+
+export async function api<T>(apiPath: string, options: ApiRequestInit = {}): Promise<T> {
+  const { redirectOnUnauthorized = true, ...fetchOptions } = options;
+  const headers = new Headers(fetchOptions.headers);
   const token = browserToken() ?? process.env.NEXT_PUBLIC_TESTHUB_TOKEN;
 
-  if (options.body && !headers.has('content-type')) {
+  if (fetchOptions.body && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
   }
   if (token && !headers.has('authorization')) {
@@ -14,16 +19,16 @@ export async function api<T>(apiPath: string, options: RequestInit = {}): Promis
   }
 
   const response = await fetch(`${apiBase}${apiPath}`, {
-    ...options,
+    ...fetchOptions,
     headers,
     credentials: 'include',
   });
 
-  if (response.status === 401 && shouldRedirectToLogin()) {
+  if (redirectOnUnauthorized && response.status === 401 && shouldRedirectToLogin()) {
     window.location.assign('/login');
   }
 
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) throw new Error(await readableError(response));
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
@@ -36,4 +41,40 @@ function browserToken(): string | undefined {
 function shouldRedirectToLogin(): boolean {
   if (typeof window === 'undefined') return false;
   return !authPaths.some((path) => window.location.pathname.startsWith(path));
+}
+
+async function readableError(response: Response): Promise<string> {
+  const text = await response.text();
+  if (!text) return `${response.status} ${response.statusText}`.trim();
+  try {
+    return messageFromJson(JSON.parse(text)) ?? text;
+  } catch {
+    return text;
+  }
+}
+
+function messageFromJson(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const body = value as { error?: unknown; message?: unknown; issues?: unknown };
+  const base = typeof body.error === 'string'
+    ? body.error
+    : typeof body.message === 'string'
+      ? body.message
+      : undefined;
+  const issues = Array.isArray(body.issues)
+    ? body.issues.map(issueMessage).filter(Boolean).slice(0, 3)
+    : [];
+
+  if (base && issues.length > 0) return `${base}: ${issues.join('; ')}`;
+  if (issues.length > 0) return issues.join('; ');
+  return base;
+}
+
+function issueMessage(issue: unknown): string {
+  if (!issue || typeof issue !== 'object') return '';
+  const item = issue as { path?: unknown; message?: unknown };
+  const message = typeof item.message === 'string' ? item.message : '';
+  const path = Array.isArray(item.path) ? item.path.join('.') : '';
+  if (path && message) return `${path}: ${message}`;
+  return message;
 }

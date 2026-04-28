@@ -43,7 +43,7 @@ export default function ForgotPasswordPage() {
           <Label htmlFor="email">Email</Label>
           <Input id="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
         </div>
-        {submitted ? <p className="rounded-md border border-[#d8d3c5] bg-white px-3 py-2 text-sm text-[#1f241f]">Se existir conta para este email, instrucoes foram enviadas.</p> : null}
+        {submitted ? <p aria-live="polite" className="rounded-md border border-[#d8d3c5] bg-white px-3 py-2 text-sm text-[#1f241f]">Se existir conta para este email, instrucoes foram enviadas.</p> : null}
         {resetToken ? (
           <div className="grid gap-2 rounded-md border border-[#d8d3c5] bg-white px-3 py-2 text-sm">
             <span className="font-mono break-all">{resetToken}</span>
@@ -52,7 +52,7 @@ export default function ForgotPasswordPage() {
             </Link>
           </div>
         ) : null}
-        {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
+        {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
         <Button type="submit" disabled={busy || !email}>{busy ? 'Enviando...' : 'Solicitar reset'}</Button>
       </form>
     </AuthShell>

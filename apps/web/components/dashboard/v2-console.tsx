@@ -29,7 +29,7 @@ type Suite = { id: string; projectId: string; name: string; type: 'api' | 'web';
 type AiConnection = { id: string; name: string; provider: 'openrouter' | 'openai' | 'anthropic'; apiKey?: string; model: string; baseUrl?: string; enabled: boolean };
 type SecurityStatus = {
   oidc: { configured: boolean; issuer: string | null };
-  auth: { apiTokenEnabled: boolean; rbacRole: string };
+  auth: { apiTokenEnabled: boolean; rbacRole: string; mode: 'off' | 'token' | 'oidc' | 'local' };
   secrets: { defaultKey: boolean; blockedInProduction: boolean };
   network: { allowedHosts: string[]; allowAllWhenEmpty: boolean };
   retention: { days: number };
@@ -150,7 +150,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     [projectRuns, suiteId, environmentId],
   );
   const selectedRun = scopedRuns.find((run) => run.id === selectedRunId) ?? scopedRuns[0];
-  const role = (me?.membership.role ?? security?.auth.rbacRole ?? 'viewer') as 'admin' | 'editor' | 'viewer';
+  const role = (me ? me.membership.role : security?.auth.mode && security.auth.mode !== 'local' ? security.auth.rbacRole : 'viewer') as 'admin' | 'editor' | 'viewer';
   const canWrite = role === 'admin' || role === 'editor';
   const canAdmin = role === 'admin';
   const stats = summarize(scopedRuns);
@@ -161,8 +161,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   async function refresh() {
     setError('');
     try {
-      const nextMe = await api<AuthMe>('/api/auth/me');
-      const [nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
+      const [nextMe, nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
+        api<AuthMe>('/api/auth/me', { redirectOnUnauthorized: false }).catch(() => null),
         api<Project[]>('/api/projects'),
         api<Environment[]>('/api/environments'),
         api<Suite[]>('/api/suites'),

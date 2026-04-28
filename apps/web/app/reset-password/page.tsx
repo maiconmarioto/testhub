@@ -32,7 +32,7 @@ function ResetPasswordForm() {
     try {
       await api('/api/auth/password-reset/confirm', {
         method: 'POST',
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ resetToken: token, password }),
       });
       router.replace('/login');
     } catch (nextError) {
@@ -53,7 +53,7 @@ function ResetPasswordForm() {
           <Label htmlFor="password">Nova senha</Label>
           <Input id="password" type="password" autoComplete="new-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
         </div>
-        {error ? <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
+        {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
         <Button type="submit" disabled={busy || !token || !password}>{busy ? 'Salvando...' : 'Salvar senha'}</Button>
       </form>
     </AuthShell>
