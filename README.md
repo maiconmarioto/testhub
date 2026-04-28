@@ -1,84 +1,220 @@
 # TestHub
 
-Runner + API + UI oficial para specs `frontend` e `api`.
+TestHub is a test orchestration platform for API and browser suites written in YAML. It provides a runner, REST API, worker queue, web console, artifact storage, reusable web flows, and an MCP server focused on agentic test creation and execution.
 
-## Estrutura
+The project is built as a TypeScript monorepo and can run locally with Node.js or as a Docker Compose stack backed by Postgres, Redis, and MinIO.
 
-- `apps/web`: UI oficial Next.js. `/v2`, `/projects`, `/suites`, `/settings`.
-- `apps/api`: Fastify REST, health/status, artifacts e Swagger/OpenAPI.
-- `apps/worker`: worker BullMQ, apenas executa runs.
-- `apps/cli`: CLI para validar, executar, servir API e limpeza.
-- `apps/mcp`: servidor MCP opcional.
-- `packages/runner`: execucao de specs API/web e reports.
-- `packages/spec`: parser, validacao e import OpenAPI.
-- `packages/db`: stores, Drizzle/Postgres, secrets e migrations.
-- `packages/shared`: tipos, jobs, filesystem e redaction.
-- `packages/ai`: prompts/adapters de AI opcionais.
-- `packages/artifacts`: upload/localizacao de artifacts.
+## What TestHub Provides
 
-## Setup
+- YAML-based API and Web test specs.
+- Browser execution with Playwright videos, traces, screenshots, console logs, and per-scenario evidence.
+- API execution with request/response artifacts, JSON schema assertions, and extracted variables.
+- Project, environment, suite, run, organization, user, and token management through the web app.
+- Organization-scoped Flow Library for reusable browser flows such as login/setup journeys.
+- MCP tools for AI agents to create projects, environments, flow library entries, suites, runs, and inspect evidence.
+- Optional AI assistance for explaining failures and suggesting test changes. AI does not decide pass/fail.
+
+## Repository Layout
+
+```text
+apps/
+  api       Fastify REST API, Swagger, artifacts, auth, RBAC
+  cli       Command-line runner and maintenance commands
+  mcp       MCP server for agentic test creation/execution
+  web       Next.js console
+  worker    BullMQ worker that executes queued runs
+
+packages/
+  ai         Optional AI adapters and prompts
+  artifacts Artifact upload/localization
+  db         Store, migrations, secrets, Postgres integration
+  runner     API/Web runner and report generation
+  shared     Shared types, jobs, filesystem helpers, redaction
+  spec       YAML parser, validation, OpenAPI import helpers
+```
+
+## Requirements
+
+- Node.js 22+
+- npm
+- Docker and Docker Compose for the full stack
+- Playwright Chromium for local browser runs
 
 ```bash
 npm install
-npm run build
-```
-
-Browsers Playwright, se necessario:
-
-```bash
 npx playwright install chromium
 ```
 
-## Validar spec
+## Quick Start
+
+Run the backend stack with Docker:
 
 ```bash
-npx tsx apps/cli/src/cli.ts validate examples/api-health.yaml
+cp .env.example .env
+docker compose up --build
 ```
 
-## Rodar API
+Run the web app locally:
 
 ```bash
-npx tsx apps/cli/src/cli.ts run examples/api-health.yaml --report-dir .testhub-runs
-npx tsx apps/cli/src/cli.ts run examples/api-chain.yaml --report-dir .testhub-runs --junit
+npm run web
 ```
 
-## Rodar Web
-
-```bash
-npx tsx apps/cli/src/cli.ts run examples/web-example.yaml --report-dir .testhub-runs
-```
-
-## Variaveis
-
-Specs podem usar `${VAR}`. Valores vêm do ambiente ou `--env-file`.
-
-```bash
-BASE_URL=https://crm-hml.local npx tsx apps/cli/src/cli.ts run tests/web/login.yaml
-```
-
-`.env` simples:
+Open:
 
 ```text
-BASE_URL=https://crm-hml.local
-CRM_USER=qa@example.com
-CRM_PASS=secret
+http://localhost:3333
 ```
+
+API health:
 
 ```bash
-npx tsx apps/cli/src/cli.ts run tests/web/login.yaml --env-file .env
+curl http://localhost:4321/api/health
 ```
 
-## Exit Codes
+Swagger/OpenAPI:
 
-- `0`: passou
-- `1`: teste falhou
-- `2`: spec invalida
-- `3`: erro infra/runner
-- `4`: variavel ausente
+```text
+http://localhost:4321/docs
+http://localhost:4321/openapi.json
+```
 
-## Recursos suportados
+## Development Commands
 
-Web:
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run web:build
+```
+
+Run individual services without Docker:
+
+```bash
+npm run server
+npm run worker
+npm run mcp
+```
+
+Run database migrations manually:
+
+```bash
+set -a; source .env; set +a
+DATABASE_URL="$TESTHUB_LOCAL_DATABASE_URL" npm run migrate
+```
+
+## Configuration
+
+Secrets belong in `.env`. Use `.env.example` as the template.
+
+Core variables:
+
+```text
+DATABASE_URL=postgres://testhub:replace-me@postgres:5432/testhub
+REDIS_URL=redis://redis:6379
+TESTHUB_SECRET_KEY=replace-with-random-32-byte-secret
+TESTHUB_AUTH_MODE=local
+TESTHUB_WEB_URL=http://localhost:3333
+TESTHUB_CORS_ORIGINS=http://localhost:3333,http://127.0.0.1:3333,http://host.docker.internal:3333
+NEXT_PUBLIC_TESTHUB_API_URL=http://localhost:4321
+```
+
+Artifact storage:
+
+```text
+S3_BUCKET=testhub
+S3_ENDPOINT=http://minio:9000
+S3_ACCESS_KEY_ID=testhub
+S3_SECRET_ACCESS_KEY=replace-me
+S3_FORCE_PATH_STYLE=true
+```
+
+Runtime controls:
+
+```text
+TESTHUB_RUN_TIMEOUT_MS=120000
+TESTHUB_WORKER_CONCURRENCY=2
+```
+
+## Authentication and Organizations
+
+Default web mode is local auth:
+
+```text
+TESTHUB_AUTH_MODE=local
+```
+
+The first registered user becomes admin and creates the initial organization. Projects, environments, suites, flows, runs, users, and tokens are scoped by organization.
+
+Supported auth modes:
+
+```text
+TESTHUB_AUTH_MODE=local|token|oidc|off
+```
+
+Local auth routes:
+
+```text
+/register
+/login
+/forgot-password
+/reset-password
+```
+
+Roles:
+
+- `admin`: full access, including settings, users, audit, and cleanup.
+- `editor`: projects, environments, suites, flows, runs, imports, and AI assistant.
+- `viewer`: read-only access.
+
+Personal access tokens for CLI/MCP are managed in the web console. Tokens can be scoped to one organization or all organizations the user can access.
+
+## Web Console
+
+Main routes:
+
+- `/v2` - run workspace, current suite/environment, evidence, recent runs.
+- `/projects` - projects and environments.
+- `/suites` - YAML suite editor with Monaco syntax highlighting and validation.
+- `/settings` - profile, organizations, users, tokens, Flow Library, security, AI, audit.
+- `/docs` - product documentation and examples.
+
+Evidence is grouped by run and by test scenario. Browser scenarios expose their own video, trace, screenshots, and console logs. Console logs open in-app instead of navigating away.
+
+## YAML Specs
+
+Specs use `version: 1` and `type: api` or `type: web`.
+
+### Web Example
+
+```yaml
+version: 1
+type: web
+name: login-smoke
+defaults:
+  timeoutMs: 30000
+  video: retain-on-failure
+  trace: retain-on-failure
+tests:
+  - name: user opens workspace
+    steps:
+      - goto: /login
+      - fill:
+          by: label
+          target: Email
+          value: ${USER_EMAIL}
+      - fill:
+          by: label
+          target: Senha
+          value: ${USER_PASSWORD}
+      - click:
+          by: role
+          role: button
+          name: Entrar
+      - expectText: TestHub v2
+```
+
+Supported web steps:
 
 - `goto`
 - `click`
@@ -95,18 +231,80 @@ Web:
 - `expectValue`
 - `expectCount`
 - `uploadFile`
+- `extract`
+- `use` with `with`
 
-Runs web gravam video Playwright por padrao. O artifact `.webm` aparece no report e no dashboard de runs.
+### Flow Library
 
-API:
+Flow Library entries are reusable browser flows stored at organization scope.
 
-- status, headers, body path, body contains
+Create a reusable login flow named `auth.login`:
+
+```yaml
+namespace: auth
+name: login
+params:
+  email: ${USER_EMAIL}
+  password: ${USER_PASSWORD}
+steps:
+  - goto: /login
+  - fill:
+      by: label
+      target: Email
+      value: ${email}
+  - fill:
+      by: label
+      target: Senha
+      value: ${password}
+  - click:
+      by: role
+      role: button
+      name: Entrar
+```
+
+Use it from a suite:
+
+```yaml
+version: 1
+type: web
+name: workspace-navigation
+tests:
+  - name: user opens docs
+    steps:
+      - use: auth.login
+      - goto: /docs
+      - expectText: Documentacao TestHub
+```
+
+Local `flows:` in the suite remain supported. Local flow names take precedence over library flows when the exact reference matches.
+
+### API Example
+
+```yaml
+version: 1
+type: api
+name: health
+tests:
+  - name: status 200
+    request:
+      method: GET
+      path: /health
+    expect:
+      status: 200
+```
+
+API assertions include:
+
+- status
+- headers
+- body path
+- body contains
 - `bodyPathExists`
 - `bodyPathMatches`
 - `jsonSchema`
-- `extract` para encadear requests
+- `extract` for chaining requests
 
-Comum:
+Common suite features:
 
 - `skip`
 - `only`
@@ -114,227 +312,69 @@ Comum:
 - `retries`
 - `beforeEach`
 - `afterEach`
+- `defaults.timeoutMs`
 - `--tag`
 - `--junit`
 
-## API
+## CLI
+
+Validate a spec:
 
 ```bash
-npm run build
-node dist/apps/cli/src/cli.js server --port 4321
+npx tsx apps/cli/src/cli.ts validate examples/api-health.yaml
 ```
 
-Abrir:
-
-```text
-http://localhost:4321
-http://localhost:4321/docs
-http://localhost:4321/openapi.json
-```
-
-## UI oficial
-
-Frontend real em `apps/web`.
+Run an API spec:
 
 ```bash
-npm run web
+npx tsx apps/cli/src/cli.ts run examples/api-health.yaml \
+  --report-dir .testhub-runs \
+  --junit
 ```
 
-Abrir:
-
-```text
-http://localhost:3333
-```
-
-Rotas principais:
-
-- `/v2`: overview/run workspace. Query params compartilhaveis: `project`, `environment`, `suite`, `run`.
-- `/projects`: criar/editar projetos e ambientes. Retention por projeto fica aqui.
-- `/suites`: criar/editar suites YAML, Monaco editor, validação inline e import OpenAPI.
-- `/settings`: AI connections, segurança, audit e cleanup.
-
-Wizard:
-
-- Botao `Wizard` no topo da home.
-- Cria projeto, ambiente e primeira suite em passos.
-- Modal nao fecha com `Esc` nem clique fora; fecha apenas em `Fechar`/`X`.
-
-Build:
+Run a web spec:
 
 ```bash
-npm run web:build
+npx tsx apps/cli/src/cli.ts run examples/web-example.yaml \
+  --report-dir .testhub-runs
 ```
 
-## Postgres/Redis/MinIO
-
-Rodar stack completa:
+Use environment variables:
 
 ```bash
-cp .env.example .env
-# edite os secrets em .env antes de subir ambiente compartilhado/producao
-docker compose up --build
+npx tsx apps/cli/src/cli.ts run tests/web/login.yaml --env-file .env
 ```
 
-Migrar DB manualmente:
+Exit codes:
 
-```bash
-set -a; source .env; set +a
-DATABASE_URL="$TESTHUB_LOCAL_DATABASE_URL" npm run migrate
-```
-
-Variaveis principais:
-
-```text
-DATABASE_URL=<postgres-url>
-REDIS_URL=<redis-url>
-TESTHUB_SECRET_KEY=<random-secret>
-S3_BUCKET=<bucket>
-S3_ENDPOINT=<s3-endpoint>
-S3_ACCESS_KEY_ID=<access-key>
-S3_SECRET_ACCESS_KEY=<secret-key>
-S3_FORCE_PATH_STYLE=true|false
-```
-
-Secrets ficam no `.env` local, que nao deve ser commitado. Use `.env.example` como template.
-
-API basica:
-
-```bash
-curl http://localhost:4321/api/health
-```
-
-Auth local:
-
-- Modo web padrao: auth local (`TESTHUB_AUTH_MODE=local`).
-- Primeiro usuario criado vira admin, cria a organizacao/time inicial e conclui setup.
-- Rotas web: `/register`, `/login`, `/forgot-password`, `/reset-password`.
-- Reset de senha sem email configurado retorna o codigo apenas fora de producao ou com `TESTHUB_ALLOW_DISPLAY_RESET=true`.
-- `off` serve apenas para demos locais. Nao use em producao.
-
-Modos e variaveis:
-
-```text
-TESTHUB_AUTH_MODE=local|token|oidc|off
-TESTHUB_TOKEN=<shared-api-token>
-TESTHUB_PAT=<personal-access-token>
-TESTHUB_ORGANIZATION_ID=<organization-id>
-TESTHUB_ALLOW_DISPLAY_RESET=true
-TESTHUB_ROLE=admin|editor|viewer
-AUTH_OIDC_ISSUER=https://issuer.example.com
-AUTH_OIDC_CLIENT_ID=testhub
-TESTHUB_ADMIN_GROUPS=platform-admins
-TESTHUB_EDITOR_GROUPS=qa,developers
-TESTHUB_VIEWER_GROUPS=readers
-```
-
-CLI/MCP:
-
-- Em auth local, gere tokens pessoais em `/settings` -> `Seguranca` -> `Tokens CLI/MCP`.
-- MCP/CLI aceitam `TESTHUB_PAT=<th_pat_...>` como bearer. Para token com multiplas organizacoes, use `TESTHUB_ORGANIZATION_ID=<organization-id>` para escolher a org ativa.
-- Token de sessao ainda funciona para dev via `TESTHUB_SESSION_TOKEN=<token>`, mas PAT e o caminho recomendado para MCP.
-- Em modo token, exporte `TESTHUB_AUTH_MODE=token` e `TESTHUB_TOKEN=<shared-api-token>`; use `authorization: Bearer <shared-api-token>`.
-
-Permissões:
-
-- `admin`: tudo, incluindo settings, audit e cleanup.
-- `editor`: projetos/ambientes/suites/runs/import/AI assistant.
-- `viewer`: leitura.
-
-Na UI, tokens pessoais ficam mascarados, mas podem ser copiados novamente enquanto ativos.
-
-Operacoes uteis:
-
-```bash
-curl -X POST http://localhost:4321/api/runs/<run-id>/cancel
-curl -X POST http://localhost:4321/api/cleanup -H 'content-type: application/json' -d '{"days":30}'
-curl http://localhost:4321/api/audit?limit=100
-curl http://localhost:4321/api/audit/export
-```
-
-Delete de entidades e cleanup usam soft delete/archive. Por padrao artifacts sao preservados. Projeto pode habilitar `cleanupArtifacts` para remover artifacts locais no cleanup.
-
-Timeout e concorrencia:
-
-```text
-TESTHUB_RUN_TIMEOUT_MS=120000
-TESTHUB_WORKER_CONCURRENCY=2
-```
-
-Import OpenAPI simples:
-
-```bash
-curl -X POST http://localhost:4321/api/import/openapi \\
-  -H 'content-type: application/json' \\
-  -d '{"projectId":"...","name":"catalog-api","spec":{"openapi":"3.0.0","paths":{"/health":{"get":{"responses":{"200":{"description":"ok"}}}}}}}'
-```
-
-Import OpenAPI avancado:
-
-```bash
-curl -X POST http://localhost:4321/api/import/openapi \\
-  -H 'content-type: application/json' \\
-  -d '{
-    "projectId":"...",
-    "name":"catalog-api",
-    "baseUrl":"https://api.local",
-    "authTemplate":"bearer",
-    "headers":{"x-tenant":"demo"},
-    "tags":["catalog"],
-    "selectedOperations":["GET /health","createUser"],
-    "includeBodyExamples":true,
-    "spec":{"openapi":"3.0.0","paths":{}}
-  }'
-```
-
-CLI cleanup:
-
-```bash
-npx tsx apps/cli/src/cli.ts cleanup --days 30
-```
-
-## AI Connections
-
-AI e opcional. Sem connection, runner/API/UI seguem funcionando. AI nunca decide pass/fail. Patch sugerido só é aplicado quando usuario marca aprovação humana na tela de suites.
-
-Providers suportados no adapter:
-
-- `openrouter`
-- `openai`
-- `anthropic`
-
-Criar connection:
-
-```bash
-curl -X POST http://localhost:4321/api/ai/connections \\
-  -H 'content-type: application/json' \\
-  -d '{
-    "name": "OpenRouter",
-    "provider": "openrouter",
-    "apiKey": "sk-...",
-    "model": "openai/gpt-4o-mini",
-    "enabled": true
-  }'
-```
-
-Explicar falha:
-
-```bash
-curl -X POST http://localhost:4321/api/ai/explain-failure \\
-  -H 'content-type: application/json' \\
-  -d '{"context":{"error":"Status esperado 200, recebido 500"}}'
-```
+- `0`: passed
+- `1`: test failed
+- `2`: invalid spec
+- `3`: infrastructure/runner error
+- `4`: missing variable
 
 ## MCP
 
-Rodar MCP:
+The MCP server is intended for agents that create and run tests through YAML. It does not manage users, personal tokens, OpenAPI imports, cleanup, or AI connections. Those operations stay in the web application/API.
+
+Run MCP:
 
 ```bash
-TESTHUB_URL=http://localhost:4321 TESTHUB_PAT=th_pat_xxx npx testhub-mcp
+TESTHUB_URL=http://localhost:4321 \
+TESTHUB_PAT=th_pat_xxx \
+npx testhub-mcp
 ```
 
-Tools:
+If the token has access to multiple organizations:
+
+```bash
+TESTHUB_ORGANIZATION_ID=<organization-id>
+```
+
+Available tools:
 
 - `testhub_help`
+- `testhub_get_spec_examples`
 - `testhub_get_test_context`
 - `testhub_list_projects`
 - `testhub_get_project`
@@ -345,9 +385,9 @@ Tools:
 - `testhub_list_envs`
 - `testhub_create_environment`
 - `testhub_create_env`
+- `testhub_get_environment`
 - `testhub_update_environment`
 - `testhub_archive_environment`
-- `testhub_get_environment`
 - `list_environments`
 - `create_environment`
 - `get_environment`
@@ -356,7 +396,11 @@ Tools:
 - `testhub_create_suite`
 - `testhub_update_suite`
 - `testhub_validate_spec`
-- `testhub_import_openapi`
+- `testhub_list_flows`
+- `testhub_get_flow`
+- `testhub_create_flow`
+- `testhub_update_flow`
+- `testhub_archive_flow`
 - `testhub_list_runs`
 - `testhub_run_suite`
 - `testhub_get_run_status`
@@ -364,39 +408,102 @@ Tools:
 - `testhub_get_run_report`
 - `testhub_get_artifacts`
 - `testhub_cancel_run`
-- `testhub_list_ai_connections`
-- `testhub_upsert_ai_connection`
-- `testhub_explain_failure`
-- `testhub_cleanup`
 
-Resources:
+Resource:
 
-- `testhub://guide` - guia operacional para agentes entenderem o fluxo correto antes de alterar/rodar testes.
+- `testhub://guide`
 
-Prompts:
+Prompt:
 
-- `testhub_operator` - instrucoes para agentes trabalharem com TestHub sem adivinhar estado, com fluxo project -> environment -> suite -> run -> report -> artifacts.
+- `testhub_operator`
 
-## Docker e apps locais
+Recommended agent flow:
 
-Quando TestHub roda em container, `localhost` aponta para o proprio container do runner, nao para sua maquina host. Para testar uma aplicacao local que esta rodando fora do container, configure o environment com `host.docker.internal`.
+1. Read `testhub_help`.
+2. List projects and choose/create a project.
+3. List/create environments.
+4. List existing Flow Library entries before writing browser specs.
+5. Validate YAML before saving suites.
+6. Run the suite.
+7. Inspect status, report, and artifacts.
 
-Exemplos:
+## REST API
 
-```text
-Web local no host: http://host.docker.internal:3000
-API local no host: http://host.docker.internal:4000
+Run the API:
+
+```bash
+npm run build
+node dist/apps/cli/src/cli.js server --port 4321
 ```
 
-Se TestHub e a aplicacao alvo rodam no mesmo `docker-compose`, prefira o nome do servico na rede Docker:
+Selected endpoints:
 
 ```text
-http://api:4000
-http://web:3000
+GET    /api/health
+GET    /api/projects
+POST   /api/projects
+GET    /api/environments?projectId=...
+POST   /api/environments
+GET    /api/suites?projectId=...
+POST   /api/suites
+POST   /api/spec/validate
+GET    /api/flows
+POST   /api/flows
+POST   /api/runs
+GET    /api/runs/:id
+GET    /api/runs/:id/report
+POST   /api/runs/:id/cancel
+GET    /artifacts?path=...
 ```
 
-Regra pratica:
+## Docker Networking
 
-- TestHub fora do Docker -> use `http://localhost:<porta>`.
-- TestHub dentro do Docker e app no host -> use `http://host.docker.internal:<porta>`.
-- TestHub dentro do Docker e app em outro container da mesma rede -> use `http://<service-name>:<porta>`.
+When the worker runs inside Docker, `localhost` points to the worker container, not the host machine.
+
+Use:
+
+```text
+TestHub outside Docker -> http://localhost:<port>
+TestHub in Docker, target app on host -> http://host.docker.internal:<port>
+TestHub in Docker, target app in same Compose network -> http://<service-name>:<port>
+```
+
+Example environment for a locally running web app:
+
+```text
+http://host.docker.internal:3000
+```
+
+## AI Assistance
+
+AI is optional. Without configured AI connections, the runner, API, UI, CLI, and MCP continue to work.
+
+Supported providers in the adapter:
+
+- `openrouter`
+- `openai`
+- `anthropic`
+
+AI can explain failures and suggest changes. Applying a suggested patch requires explicit human approval in the suite editor.
+
+## Data Retention and Cleanup
+
+Deletes are soft deletes/archive operations for visible entities. Cleanup can remove old runs based on retention settings. Artifact removal is opt-in per project through `cleanupArtifacts`.
+
+CLI cleanup:
+
+```bash
+npx tsx apps/cli/src/cli.ts cleanup --days 30
+```
+
+API cleanup:
+
+```bash
+curl -X POST http://localhost:4321/api/cleanup \
+  -H 'content-type: application/json' \
+  -d '{"projectId":"...","days":30}'
+```
+
+## License
+
+No license has been published yet.
