@@ -327,20 +327,18 @@ export function createApp() {
       temporaryPassword: passwordSchema.optional(),
     }).parse(req.body);
     const organizationId = requireOrganization(req.actor);
-    let user = await store.findUserByEmail(input.email);
+    const existingUser = await store.findUserByEmail(input.email);
+    if (existingUser) return reply.code(409).send({ error: 'Usuario ja existe; troca de organizacao ainda nao suportada' });
     let generatedTemporaryPassword: string | undefined;
-    if (!user) {
-      const temporaryPassword = input.temporaryPassword ?? createResetToken();
-      passwordSchema.parse(temporaryPassword);
-      if (!input.temporaryPassword) generatedTemporaryPassword = temporaryPassword;
-      user = await store.createUser({
-        email: input.email,
-        name: input.name,
-        passwordHash: await hashPassword(temporaryPassword),
-      });
-    }
-    const existingMembership = await store.findMembership(user.id, organizationId);
-    const membership = existingMembership ?? await store.createMembership({
+    const temporaryPassword = input.temporaryPassword ?? createResetToken();
+    passwordSchema.parse(temporaryPassword);
+    if (!input.temporaryPassword) generatedTemporaryPassword = temporaryPassword;
+    const user = await store.createUser({
+      email: input.email,
+      name: input.name,
+      passwordHash: await hashPassword(temporaryPassword),
+    });
+    const membership = await store.createMembership({
       userId: user.id,
       organizationId,
       role: input.role as MembershipRole,

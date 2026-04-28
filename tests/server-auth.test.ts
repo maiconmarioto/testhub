@@ -214,6 +214,36 @@ describe('server local auth', () => {
       membership: { organizationId: admin.organization.id, role: 'editor' },
     });
     expect((login.json() as { user: { passwordHash?: string } }).user.passwordHash).toBeUndefined();
+
+    const duplicateMember = await app.inject({
+      method: 'POST',
+      url: '/api/organizations/current/members',
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: {
+        email: 'EDITOR@example.com',
+        role: 'admin',
+        temporaryPassword: 'different-password',
+      },
+    });
+    expect(duplicateMember.statusCode).toBe(409);
+    expect(duplicateMember.json()).toEqual({ error: 'Usuario ja existe; troca de organizacao ainda nao suportada' });
+
+    const originalPasswordLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'editor@example.com', password: 'temporary-password' },
+    });
+    expect(originalPasswordLogin.statusCode).toBe(200);
+    expect(originalPasswordLogin.json()).toMatchObject({
+      membership: { organizationId: admin.organization.id, role: 'editor' },
+    });
+
+    const changedPasswordLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'editor@example.com', password: 'different-password' },
+    });
+    expect(changedPasswordLogin.statusCode).toBe(401);
   });
 
   it('forbids a viewer from creating organization members', async () => {
