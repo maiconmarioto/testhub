@@ -463,7 +463,7 @@ git commit -m "feat: add postgres auth schema"
 - Create: `packages/db/src/auth.ts`
 - Create/modify: `tests/auth-store.test.ts`
 
-- [ ] **Step 1: Write failing helper tests**
+- [x] **Step 1: Write failing helper tests**
 
 Append to `tests/auth-store.test.ts`:
 
@@ -486,7 +486,7 @@ describe('auth helpers', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -496,7 +496,7 @@ npm test -- tests/auth-store.test.ts
 
 Expected: FAIL with `Cannot find module '../packages/db/src/auth.js'`.
 
-- [ ] **Step 3: Create auth helper module**
+- [x] **Step 3: Create auth helper module**
 
 Create `packages/db/src/auth.ts`:
 
@@ -542,7 +542,7 @@ export function resetExpiresAt(now = new Date()): string {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -552,7 +552,7 @@ npm test -- tests/auth-store.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/db/src/auth.ts tests/auth-store.test.ts
