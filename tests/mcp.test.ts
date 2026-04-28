@@ -61,6 +61,11 @@ describe('mcp server', () => {
         'testhub_archive_environment',
         'testhub_get_environment',
         'testhub_validate_spec',
+        'testhub_get_spec_examples',
+        'testhub_list_flows',
+        'testhub_create_flow',
+        'testhub_update_flow',
+        'testhub_archive_flow',
         'list_environments',
         'create_environment',
         'get_environment',
@@ -120,6 +125,43 @@ describe('mcp server', () => {
         ].join('\n'),
       });
       expect(validation).toMatchObject({ valid: true, type: 'api', tests: 1 });
+
+      const createdFlow = await callToolJson<{ id: string; namespace: string; name: string }>(client, 'testhub_create_flow', {
+        namespace: 'auth',
+        name: 'login',
+        description: 'Login MCP',
+        params: { email: '${USER_EMAIL}', password: '${USER_PASSWORD}' },
+        steps: [
+          { goto: '/login' },
+          { fill: { by: 'label', target: 'Email', value: '${email}' } },
+        ],
+      });
+      expect(createdFlow).toMatchObject({ namespace: 'auth', name: 'login' });
+
+      const listedFlows = await callToolJson<Array<{ id: string; namespace: string }>>(client, 'testhub_list_flows', { namespace: 'auth' });
+      expect(listedFlows.map((flow) => flow.id)).toContain(createdFlow.id);
+
+      const flowSpecValidation = await callToolJson<{ valid: true; type: string; tests: number }>(client, 'testhub_validate_spec', {
+        specContent: [
+          'version: 1',
+          'type: web',
+          'name: web-library',
+          'tests:',
+          '  - name: login',
+          '    steps:',
+          '      - use: auth.login',
+          '      - expectText: Dashboard',
+          '',
+        ].join('\n'),
+      });
+      expect(flowSpecValidation).toMatchObject({ valid: true, type: 'web', tests: 1 });
+
+      const examples = await callToolJson<{ examples: { 'web-flow': string } }>(client, 'testhub_get_spec_examples', { example: 'web-flow' });
+      expect(examples.examples['web-flow']).toContain('flows:');
+      expect(examples.examples['web-flow']).toContain('extract:');
+
+      const libraryExample = await callToolJson<{ examples: { 'web-library-flow': string } }>(client, 'testhub_get_spec_examples', { example: 'web-library-flow' });
+      expect(libraryExample.examples['web-library-flow']).toContain('use: auth.login');
 
       const run = await callToolJson<{ environmentId: string }>(client, 'testhub_run_suite', {
         projectId: project.project.id,

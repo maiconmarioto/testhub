@@ -1,13 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, expect, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import type { Artifact, SelectorInput, StepResult, TestResult, WebSpec, WebStep } from '../../shared/src/types.js';
+import type { Artifact, SelectorInput, StepResult, TestResult, WebFlow, WebSpec, WebStep } from '../../shared/src/types.js';
 import { ensureDir, sanitizeFilename } from '../../shared/src/fs-utils.js';
+import { resolveVariablesWithContext } from '../../spec/src/spec.js';
+
+type RuntimeContext = Record<string, string | number | boolean | undefined>;
 
 export async function runWebSpec(
   spec: WebSpec,
   runDir: string,
-  options: { headed?: boolean } = {},
+  options: { headed?: boolean; externalFlows?: Record<string, WebFlow> } = {},
 ): Promise<TestResult[]> {
   const results: TestResult[] = [];
   let browser: Browser | undefined;
@@ -31,63 +34,89 @@ export async function runWebSpec(
       try {
         const retries = test.retries ?? spec.defaults?.retries ?? 0;
         await runWithRetries(retries, async () => {
-        const videoMode = spec.defaults?.video ?? 'on';
-        context = await browser!.newContext({
-          recordVideo: shouldRecord(videoMode) ? { dir: testDir } : undefined,
-        });
-        context.setDefaultTimeout(test.timeoutMs ?? spec.defaults?.timeoutMs ?? 10_000);
-        page = await context.newPage();
-        page.on('console', (message) => {
-          consoleLogs.push(`[${message.type()}] ${message.text()}`);
-        });
+          status = 'passed';
+          errorMessage = undefined;
+          failedStepIndex = undefined;
+          steps.length = 0;
+          const videoMode = spec.defaults?.video ?? 'on';
+          context = await browser!.newContext({
+            recordVideo: shouldRecord(videoMode) ? { dir: testDir } : undefined,
+          });
+          context.setDefaultTimeout(test.timeoutMs ?? spec.defaults?.timeoutMs ?? 10_000);
+          page = await context.newPage();
+          page.on('console', (message) => {
+            consoleLogs.push(`[${message.type()}] ${message.text()}`);
+          });
 
-        if (shouldRecord(spec.defaults?.trace ?? 'retain-on-failure')) {
-          await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-        }
-
-        const allSteps = [...(spec.beforeEach ?? []), ...test.steps, ...(spec.afterEach ?? [])];
-        for (let index = 0; index < allSteps.length; index++) {
-          const step = allSteps[index];
-          const stepStarted = Date.now();
-          try {
-            await runWebStep(page, spec.baseUrl, step);
-            steps.push({
-              index,
-              name: describeStep(step),
-              status: 'passed',
-              durationMs: Date.now() - stepStarted,
-            });
-          } catch (error) {
-            status = 'failed';
-            failedStepIndex = index;
-            errorMessage = error instanceof Error ? error.message : String(error);
-            const stepArtifacts: Artifact[] = [];
-            if (spec.defaults?.screenshotOnFailure !== false) {
-              const screenshotPath = path.join(testDir, `step-${index + 1}-failure.png`);
-              await page.screenshot({ path: screenshotPath, fullPage: true });
-              const artifact = { type: 'screenshot' as const, path: screenshotPath, label: 'Failure screenshot' };
-              stepArtifacts.push(artifact);
-              artifacts.push(artifact);
-            }
-            steps.push({
-              index,
-              name: describeStep(step),
-              status: 'failed',
-              durationMs: Date.now() - stepStarted,
-              error: errorMessage,
-              artifacts: stepArtifacts,
-            });
-            break;
+          if (shouldRecord(spec.defaults?.trace ?? 'retain-on-failure')) {
+            await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
           }
-        }
-        if (failedStepIndex !== undefined && errorMessage) {
-          throw new Error(errorMessage ?? 'Web test failed');
-        }
-        if (status === 'passed' && spec.defaults?.screenshotOnSuccess) {
-          const screenshotPath = path.join(testDir, 'success.png');
-          await page.screenshot({ path: screenshotPath, fullPage: true });
-          artifacts.push({ type: 'screenshot', path: screenshotPath, label: 'Success screenshot' });
-        }
+
+          const runtime: RuntimeContext = { ...(spec.variables ?? {}) };
+          let stepIndex = 0;
+          const executeSteps = async (inputSteps: WebStep[], prefix?: string, frame: RuntimeContext = runtime, depth = 0): Promise<void> => {
+            if (depth > 20) throw new Error('Profundidade maxima de flows excedida');
+            for (const rawStep of inputSteps) {
+              if (failedStepIndex !== undefined) return;
+              const step = resolveVariablesWithContext(rawStep, frame);
+              if ('use' in step) {
+                const flow = spec.flows?.[step.use] ?? options.externalFlows?.[step.use];
+                if (!flow) throw new Error(`Flow nao encontrado: ${step.use}`);
+                const flowFrame: RuntimeContext = {
+                  ...runtime,
+                  ...resolveVariablesWithContext(flow.params ?? {}, frame),
+                  ...resolveVariablesWithContext(step.with ?? {}, frame),
+                };
+                await executeSteps(flow.steps, prefix ? `${prefix} / ${step.use}` : step.use, flowFrame, depth + 1);
+                continue;
+              }
+              const currentIndex = stepIndex++;
+              const stepStarted = Date.now();
+              try {
+                const output = await runWebStep(page!, spec.baseUrl, step);
+                if (output?.extract) {
+                  runtime[output.extract.name] = output.extract.value;
+                  frame[output.extract.name] = output.extract.value;
+                }
+                steps.push({
+                  index: currentIndex,
+                  name: describeStep(step, prefix),
+                  status: 'passed',
+                  durationMs: Date.now() - stepStarted,
+                });
+              } catch (error) {
+                status = 'failed';
+                failedStepIndex = currentIndex;
+                errorMessage = error instanceof Error ? error.message : String(error);
+                const stepArtifacts: Artifact[] = [];
+                if (spec.defaults?.screenshotOnFailure !== false) {
+                  const screenshotPath = path.join(testDir, `step-${currentIndex + 1}-failure.png`);
+                  await page!.screenshot({ path: screenshotPath, fullPage: true });
+                  const artifact = { type: 'screenshot' as const, path: screenshotPath, label: 'Failure screenshot' };
+                  stepArtifacts.push(artifact);
+                  artifacts.push(artifact);
+                }
+                steps.push({
+                  index: currentIndex,
+                  name: describeStep(step, prefix),
+                  status: 'failed',
+                  durationMs: Date.now() - stepStarted,
+                  error: errorMessage,
+                  artifacts: stepArtifacts,
+                });
+                break;
+              }
+          }
+        };
+        await executeSteps([...(spec.beforeEach ?? []), ...test.steps, ...(spec.afterEach ?? [])]);
+          if (failedStepIndex !== undefined && errorMessage) {
+            throw new Error(errorMessage ?? 'Web test failed');
+          }
+          if (status === 'passed' && spec.defaults?.screenshotOnSuccess) {
+            const screenshotPath = path.join(testDir, 'success.png');
+            await page!.screenshot({ path: screenshotPath, fullPage: true });
+            artifacts.push({ type: 'screenshot', path: screenshotPath, label: 'Success screenshot' });
+          }
         });
       } catch (error) {
         if (failedStepIndex === undefined) {
@@ -141,7 +170,7 @@ export async function runWebSpec(
   return results;
 }
 
-async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep): Promise<void> {
+async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep): Promise<{ extract?: { name: string; value: string } } | void> {
   if ('goto' in step) {
     if (!baseUrl && !/^https?:\/\//i.test(step.goto)) {
       throw new Error('baseUrl ausente. Use baseUrl no spec ou --base-url.');
@@ -223,6 +252,11 @@ async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep
   if ('uploadFile' in step) {
     if (!step.uploadFile.path) throw new Error('uploadFile.path ausente');
     await locator(page, step.uploadFile).setInputFiles(step.uploadFile.path);
+    return;
+  }
+  if ('extract' in step) {
+    const value = await extractValue(page, step.extract);
+    return { extract: { name: step.extract.as, value } };
   }
 }
 
@@ -254,9 +288,23 @@ function locator(page: Page, input: SelectorInput): Locator {
   throw new Error('selector requer selector, text ou by');
 }
 
-function describeStep(step: WebStep): string {
+async function extractValue(page: Page, input: Extract<WebStep, { extract: unknown }>['extract']): Promise<string> {
+  if (input.property === 'url') return page.url();
+  if (!input.from) throw new Error(`extract.${input.property} requer from`);
+  const target = locator(page, input.from);
+  if (input.property === 'text') return (await target.textContent()) ?? '';
+  if (input.property === 'value') return await target.inputValue();
+  if (input.property === 'attribute') {
+    if (!input.attribute) throw new Error('extract.attribute requer attribute');
+    return (await target.getAttribute(input.attribute)) ?? '';
+  }
+  return '';
+}
+
+function describeStep(step: WebStep, prefix?: string): string {
   const [key, value] = Object.entries(step)[0] ?? ['step', ''];
-  return `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`;
+  const label = `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`;
+  return prefix ? `${prefix} / ${label}` : label;
 }
 
 function shouldRecord(value: WebSpec['defaults'] extends infer D ? D extends { video?: infer V } ? V : never : never): boolean {

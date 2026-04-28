@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { BookOpen, Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Database, FileCode2, FolderKanban, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
+import { BookOpen, Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Database, FileCode2, FolderKanban, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
 import YAML from 'yaml';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -60,6 +60,19 @@ type PersonalAccessToken = {
   updatedAt: string;
   lastUsedAt?: string;
 };
+type FlowLibraryItem = {
+  id: string;
+  organizationId: string;
+  namespace: string;
+  name: string;
+  description?: string;
+  params?: Record<string, string | number | boolean>;
+  steps: unknown[];
+  status: 'active' | 'inactive';
+  createdAt: string;
+  updatedAt: string;
+};
+type FlowDraft = { id: string; namespace: string; name: string; description: string; params: string; steps: string };
 type AuditEntry = { id: string; action: string; actor: string; status: 'ok' | 'blocked' | 'error'; target?: string; createdAt: string; detail?: Record<string, unknown> };
 type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
 type Run = {
@@ -110,6 +123,28 @@ const controlClass = 'h-10 border-[#d7d2c4] bg-white text-[#1f241f] shadow-none 
 const darkSelectClass = `min-w-52 ${controlClass}`;
 const roles: Role[] = ['admin', 'editor', 'viewer'];
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+const defaultFlowDraft: FlowDraft = {
+  id: '',
+  namespace: 'auth',
+  name: 'login',
+  description: 'Login padrao reutilizavel',
+  params: 'email: ${USER_EMAIL}\npassword: ${USER_PASSWORD}',
+  steps: [
+    '- goto: /login',
+    '- fill:',
+    '    by: label',
+    '    target: Email',
+    '    value: ${email}',
+    '- fill:',
+    '    by: label',
+    '    target: Senha',
+    '    value: ${password}',
+    '- click:',
+    '    by: role',
+    '    role: button',
+    '    name: Entrar',
+  ].join('\n'),
+};
 const defaultSpec = `version: 1
 type: api
 name: health
@@ -133,6 +168,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [managedUsers, setManagedUsers] = useState<UserManagementItem[]>([]);
   const [personalTokens, setPersonalTokens] = useState<PersonalAccessToken[]>([]);
+  const [flowLibrary, setFlowLibrary] = useState<FlowLibraryItem[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [projectId, setProjectId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
@@ -155,6 +191,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [orgDraft, setOrgDraft] = useState({ name: '' });
   const [membershipEdit, setMembershipEdit] = useState<MembershipEdit>({});
   const [tokenDraft, setTokenDraft] = useState({ name: 'mcp-local', scope: 'all' as 'all' | 'selected', organizationIds: [] as string[] });
+  const [flowDraft, setFlowDraft] = useState<FlowDraft>(defaultFlowDraft);
   const [aiOutput, setAiOutput] = useState('');
   const [cleanupDays, setCleanupDays] = useState('30');
   const [cleanupResult, setCleanupResult] = useState('');
@@ -197,10 +234,11 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   async function refresh() {
     setError('');
     try {
-      const [nextMe, nextMembers, nextTokens, nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
+      const [nextMe, nextMembers, nextTokens, nextFlows, nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
         api<AuthMe>('/api/auth/me', { redirectOnUnauthorized: false }).catch(() => null),
         api<OrganizationMember[]>('/api/organizations/current/members', { redirectOnUnauthorized: false }).catch(() => []),
         api<PersonalAccessToken[]>('/api/users/me/tokens', { redirectOnUnauthorized: false }).catch(() => []),
+        api<FlowLibraryItem[]>('/api/flows', { redirectOnUnauthorized: false }).catch(() => []),
         api<Project[]>('/api/projects'),
         api<Environment[]>('/api/environments'),
         api<Suite[]>('/api/suites'),
@@ -212,6 +250,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       setMe(nextMe);
       setMembers(nextMembers);
       setPersonalTokens(nextTokens);
+      setFlowLibrary(nextFlows);
       setProjects(nextProjects);
       setEnvs(nextEnvs);
       setSuites(nextSuites);
@@ -648,6 +687,48 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     }, 'Token revogado.');
   }
 
+  function editFlow(flow: FlowLibraryItem) {
+    setFlowDraft({
+      id: flow.id,
+      namespace: flow.namespace,
+      name: flow.name,
+      description: flow.description ?? '',
+      params: flow.params ? YAML.stringify(flow.params).trim() : '',
+      steps: YAML.stringify(flow.steps).trim(),
+    });
+  }
+
+  async function saveFlow() {
+    const namespace = flowDraft.namespace.trim();
+    const name = flowDraft.name.trim();
+    if (!namespace || !name) return;
+    await mutate(async () => {
+      const params = flowDraft.params.trim() ? YAML.parse(flowDraft.params) : undefined;
+      const steps = YAML.parse(flowDraft.steps);
+      if (!Array.isArray(steps)) throw new Error('Steps deve ser uma lista YAML.');
+      const payload = {
+        namespace,
+        name,
+        description: flowDraft.description.trim() || undefined,
+        params,
+        steps,
+      };
+      await api(flowDraft.id ? `/api/flows/${flowDraft.id}` : '/api/flows', {
+        method: flowDraft.id ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      setFlowDraft(defaultFlowDraft);
+    }, flowDraft.id ? 'Flow atualizado.' : 'Flow criado.');
+  }
+
+  async function archiveFlow(flowId: string) {
+    await mutate(async () => {
+      await api(`/api/flows/${flowId}`, { method: 'DELETE' });
+      setFlowLibrary((current) => current.filter((flow) => flow.id !== flowId));
+      setFlowDraft((current) => current.id === flowId ? defaultFlowDraft : current);
+    }, 'Flow arquivado.');
+  }
+
   async function explainFailure(run?: Run) {
     await runAi('explain-failure', run, 'Analise IA gerada.');
   }
@@ -899,6 +980,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 membershipEdit={membershipEdit}
                 personalTokens={personalTokens}
                 tokenDraft={tokenDraft}
+                flowLibrary={flowLibrary}
+                flowDraft={flowDraft}
                 aiConnections={aiConnections}
                 aiDraft={aiDraft}
                 security={security}
@@ -920,6 +1003,11 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 onTokenDraftChange={setTokenDraft}
                 onCreatePersonalToken={createPersonalToken}
                 onRevokePersonalToken={revokePersonalToken}
+                onFlowDraftChange={setFlowDraft}
+                onNewFlow={() => setFlowDraft(defaultFlowDraft)}
+                onEditFlow={editFlow}
+                onSaveFlow={saveFlow}
+                onArchiveFlow={archiveFlow}
                 onAiDraftChange={setAiDraft}
                 onEditAiConnection={editAiConnection}
                 onSaveAiConnection={saveAiConnection}
@@ -1376,6 +1464,8 @@ function SettingsWorkspace(props: {
   membershipEdit: MembershipEdit;
   personalTokens: PersonalAccessToken[];
   tokenDraft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] };
+  flowLibrary: FlowLibraryItem[];
+  flowDraft: FlowDraft;
   aiConnections: AiConnection[];
   aiDraft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean };
   security: SecurityStatus | null;
@@ -1397,6 +1487,11 @@ function SettingsWorkspace(props: {
   onTokenDraftChange: (draft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] }) => void;
   onCreatePersonalToken: () => void;
   onRevokePersonalToken: (tokenId: string) => void;
+  onFlowDraftChange: (draft: FlowDraft) => void;
+  onNewFlow: () => void;
+  onEditFlow: (flow: FlowLibraryItem) => void;
+  onSaveFlow: () => void;
+  onArchiveFlow: (flowId: string) => void;
   onAiDraftChange: (draft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean }) => void;
   onEditAiConnection: (connection: AiConnection) => void;
   onSaveAiConnection: () => void;
@@ -1405,10 +1500,11 @@ function SettingsWorkspace(props: {
 }) {
   return (
     <Tabs defaultValue="profile" className="grid gap-4">
-      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
         <TabsTrigger value="profile">Perfil</TabsTrigger>
         <TabsTrigger value="organizations">Organizacoes</TabsTrigger>
         <TabsTrigger value="users">Usuarios</TabsTrigger>
+        <TabsTrigger value="flows">Flows</TabsTrigger>
         <TabsTrigger value="security">Seguranca</TabsTrigger>
         <TabsTrigger value="ai">AI</TabsTrigger>
         <TabsTrigger value="audit">Audit</TabsTrigger>
@@ -1561,6 +1657,60 @@ function SettingsWorkspace(props: {
               </CardContent>
             </Card>
           ) : null}
+        </div>
+      </TabsContent>
+
+      <TabsContent value="flows" className="m-0">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_460px]">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Flow Library</CardTitle>
+              <CardDescription>Flows web reutilizaveis da organizacao atual.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-2">
+              {props.flowLibrary.map((flow) => (
+                <div key={flow.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{flow.namespace}.{flow.name}</p>
+                      <p className="truncate text-xs text-[#66705f]">{flow.description || `${flow.steps.length} steps`}</p>
+                    </div>
+                    <Badge variant="success">ativo</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => props.onEditFlow(flow)}>Editar</Button>
+                    <Button variant="outline" size="sm" onClick={() => navigator.clipboard?.writeText(`use: ${flow.namespace}.${flow.name}`)}>
+                      <Copy data-icon="inline-start" />Copiar use
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => props.onArchiveFlow(flow.id)} disabled={props.busy || !props.canWrite}>
+                      <Trash2 data-icon="inline-start" />Arquivar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {props.flowLibrary.length === 0 ? <DarkEmpty text="Nenhum flow cadastrado." /> : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>{props.flowDraft.id ? 'Editar flow' : 'Novo flow'}</CardTitle>
+              <CardDescription>{props.flowDraft.namespace && props.flowDraft.name ? `Referencia: use: ${props.flowDraft.namespace}.${props.flowDraft.name}` : 'Namespace + nome viram a referencia YAML.'}</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Namespace"><Input value={props.flowDraft.namespace} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, namespace: event.target.value })} placeholder="auth" /></Field>
+                <Field label="Nome"><Input value={props.flowDraft.name} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, name: event.target.value })} placeholder="login" /></Field>
+              </div>
+              <Field label="Descricao"><Input value={props.flowDraft.description} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, description: event.target.value })} placeholder="Opcional" /></Field>
+              <Field label="Params YAML"><Textarea className="min-h-24 font-mono text-xs" value={props.flowDraft.params} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, params: event.target.value })} /></Field>
+              <Field label="Steps YAML"><Textarea className="min-h-72 font-mono text-xs" value={props.flowDraft.steps} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, steps: event.target.value })} /></Field>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={props.onSaveFlow} disabled={props.busy || !props.canWrite || !props.flowDraft.namespace.trim() || !props.flowDraft.name.trim() || !props.flowDraft.steps.trim()}>Salvar flow</Button>
+                <Button variant="outline" onClick={props.onNewFlow}>Novo</Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </TabsContent>
 
@@ -1747,12 +1897,457 @@ function PersonalTokenControl(props: {
 }
 
 function DocumentationWorkspace() {
+  const docs = useMemo(() => ([
+    {
+      id: 'quickstart',
+      group: 'Comece',
+      title: 'Quickstart',
+      description: 'Do zero ate a primeira run com evidence.',
+      tags: ['projeto', 'ambiente', 'suite', 'run'],
+      content: (
+        <div className="grid gap-5">
+          <DocHero title="Documentacao TestHub" description="Guia operacional para criar, reutilizar, executar e depurar testes API e Web com organizacoes, ambientes, Flow Library, MCP e IA." />
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <DocStep title="1. Projeto" text="Crie o workspace do produto ou squad." />
+            <DocStep title="2. Ambiente" text="Cadastre baseUrl e variaveis seguras." />
+            <DocStep title="3. Suite" text="Escreva YAML API ou Web e valide." />
+            <DocStep title="4. Run" text="Execute, revise timeline, artifacts e report." />
+          </div>
+          <DocPanel title="Primeira suite API">
+            <CodeBlock code={`version: 1
+type: api
+name: api-smoke
+tests:
+  - name: health
+    request:
+      method: GET
+      path: /health
+    expect:
+      status: 200`} />
+          </DocPanel>
+        </div>
+      ),
+    },
+    {
+      id: 'concepts',
+      group: 'Fundamentos',
+      title: 'Modelo mental',
+      description: 'Como as pecas se conectam.',
+      tags: ['organizacao', 'rbac', 'evidence', 'retention'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Hierarquia">
+            <div className="grid gap-3 md:grid-cols-2">
+              <InfoLine label="Organizacao" value="Escopo de usuarios, projetos, flows, AI e audit." />
+              <InfoLine label="Projeto" value="Agrupa ambientes, suites e runs." />
+              <InfoLine label="Ambiente" value="baseUrl + variables/secrets para execucao." />
+              <InfoLine label="Suite" value="YAML versionado via UI ou MCP." />
+              <InfoLine label="Run" value="Execucao com status, timeline e artifacts." />
+              <InfoLine label="Flow Library" value="Flows web compartilhados pela organizacao." />
+            </div>
+          </DocPanel>
+          <DocPanel title="Permissoes">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p><strong>admin</strong>: gerencia usuarios, organizacoes, tokens, AI, flows e recursos.</p>
+              <p><strong>editor</strong>: cria/edita projetos, ambientes, suites, flows e runs.</p>
+              <p><strong>viewer</strong>: consulta recursos e evidence.</p>
+            </div>
+          </DocPanel>
+        </div>
+      ),
+    },
+    {
+      id: 'web',
+      group: 'YAML',
+      title: 'Web suites',
+      description: 'Sintaxe web baseada em Playwright.',
+      tags: ['goto', 'click', 'fill', 'expect', 'extract'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Steps web suportados">
+            <CodeBlock code={`steps:
+  - goto: /login
+  - fill:
+      by: label
+      target: Email
+      value: qa@example.com
+  - click:
+      by: role
+      role: button
+      name: Entrar
+  - expectVisible:
+      by: role
+      role: heading
+      name: Dashboard
+  - expectText: Dashboard
+  - expectUrlContains: /dashboard
+  - expectAttribute:
+      by: testId
+      target: submit
+      attribute: disabled
+      value: "true"
+  - expectValue:
+      by: label
+      target: Email
+      value: qa@example.com
+  - expectCount:
+      selector: .todo-item
+      count: 3
+  - uploadFile:
+      selector: input[type="file"]
+      path: ./fixtures/avatar.png`} />
+          </DocPanel>
+          <DocPanel title="Seletores recomendados">
+            <CodeBlock code={`# Preferidos: estaveis e acessiveis
+by: role
+by: label
+by: testId
+by: placeholder
+by: text
+
+# CSS direto: use quando nao houver alternativa melhor
+selector: '[data-testid="save"]'`} />
+          </DocPanel>
+        </div>
+      ),
+    },
+    {
+      id: 'api',
+      group: 'YAML',
+      title: 'API suites',
+      description: 'Requests HTTP, asserts e extracao.',
+      tags: ['request', 'expect', 'extract', 'schema'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Request, expect e extract">
+            <CodeBlock code={`tests:
+  - name: login extrai token
+    request:
+      method: POST
+      path: /login
+      body:
+        email: qa@example.com
+        password: \${USER_PASSWORD}
+    expect:
+      status: 200
+      maxMs: 1500
+      bodyPathExists:
+        - token
+      bodyPathMatches:
+        token: "^ey"
+    extract:
+      AUTH_TOKEN: body.token
+
+  - name: usa token
+    request:
+      method: GET
+      path: /me
+      headers:
+        Authorization: Bearer \${AUTH_TOKEN}
+    expect:
+      status: 200`} />
+          </DocPanel>
+          <DocPanel title="JSON Schema">
+            <CodeBlock code={`expect:
+  status: 201
+  jsonSchema:
+    type: object
+    required: [id, email]
+    properties:
+      id:
+        type: string
+      email:
+        type: string`} />
+          </DocPanel>
+        </div>
+      ),
+    },
+    {
+      id: 'flows',
+      group: 'Reuso',
+      title: 'Flow Library',
+      description: 'Flows web compartilhados por organizacao.',
+      tags: ['flows', 'use', 'with', 'auth.login'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Criar flow compartilhado">
+            <CodeBlock code={`# Settings / Flows
+namespace: auth
+name: login
+params:
+  email: \${USER_EMAIL}
+  password: \${USER_PASSWORD}
+steps:
+  - goto: /login
+  - fill:
+      by: label
+      target: Email
+      value: \${email}
+  - fill:
+      by: label
+      target: Senha
+      value: \${password}
+  - click:
+      by: role
+      role: button
+      name: Entrar`} />
+          </DocPanel>
+          <DocPanel title="Usar em varias suites">
+            <CodeBlock code={`version: 1
+type: web
+name: checkout
+tests:
+  - name: checkout autenticado
+    steps:
+      - use: auth.login
+        with:
+          email: qa@example.com
+      - goto: /checkout
+      - expectText: Finalizar compra`} />
+          </DocPanel>
+          <DocCallout title="Precedencia" text="Flows locais em `flows:` continuam funcionando e vencem a biblioteca quando o nome exato for igual. Referencias com namespace, como `auth.login`, buscam a Flow Library." />
+        </div>
+      ),
+    },
+    {
+      id: 'extract',
+      group: 'Reuso',
+      title: 'Extract web',
+      description: 'Capture dados dinamicos da tela.',
+      tags: ['ORDER_ID', 'attribute', 'url'],
+      content: (
+        <DocPanel title="Capturas disponiveis">
+          <CodeBlock code={`steps:
+  - extract:
+      as: ORDER_ID
+      from:
+        by: testId
+        target: order-id
+      property: text
+  - extract:
+      as: EMAIL
+      from:
+        by: label
+        target: Email
+      property: value
+  - extract:
+      as: DETAIL_URL
+      from:
+        by: testId
+        target: order-link
+      property: attribute
+      attribute: href
+  - extract:
+      as: CURRENT_URL
+      property: url
+  - goto: \${DETAIL_URL}
+  - expectText: \${ORDER_ID}`} />
+        </DocPanel>
+      ),
+    },
+    {
+      id: 'envs',
+      group: 'Operacao',
+      title: 'Ambientes e secrets',
+      description: 'Como passar configuracao sem vazar segredo.',
+      tags: ['baseUrl', 'variables', 'secrets'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Variaveis de ambiente">
+            <CodeBlock code={`# Ambiente
+USER_EMAIL=qa@example.com
+USER_PASSWORD=secret
+API_TOKEN=secret
+
+# YAML
+headers:
+  Authorization: Bearer \${API_TOKEN}`} />
+          </DocPanel>
+          <DocCallout title="Regra" text="Secrets ficam no ambiente. YAML deve usar placeholders. Reports passam por redaction antes de IA e UI." />
+        </div>
+      ),
+    },
+    {
+      id: 'runs',
+      group: 'Operacao',
+      title: 'Runs e evidence',
+      description: 'Status, timeline e artifacts.',
+      tags: ['report', 'video', 'trace', 'screenshot'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Estados">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p><strong>queued/running</strong>: aguardando ou executando.</p>
+              <p><strong>passed/failed</strong>: teste terminou com asserts ok ou falhando.</p>
+              <p><strong>error</strong>: erro de spec, ambiente, infraestrutura ou runtime.</p>
+              <p><strong>canceled/deleted</strong>: cancelada ou arquivada por cleanup.</p>
+            </div>
+          </DocPanel>
+          <DocPanel title="Checklist de debug">
+            <CodeBlock code={`1. Abra Evidence
+2. Veja erro principal e timeline
+3. API: request/response/payload
+4. Web: screenshot/video/trace
+5. Confirme baseUrl e variables do ambiente
+6. Ajuste suite, flow ou ambiente
+7. Rode novamente`} />
+          </DocPanel>
+        </div>
+      ),
+    },
+    {
+      id: 'mcp-ai',
+      group: 'Automacao',
+      title: 'MCP e IA',
+      description: 'Operar TestHub por agentes e explicar falhas.',
+      tags: ['MCP', 'PAT', 'AI', 'agent'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Configurar MCP em agente">
+            <CodeBlock code={`{
+  "mcpServers": {
+    "testhub": {
+      "command": "npx",
+      "args": ["testhub-mcp"],
+      "env": {
+        "TESTHUB_URL": "http://localhost:4321",
+        "TESTHUB_PAT": "th_pat_xxx",
+        "TESTHUB_ORGANIZATION_ID": "<org-id-opcional>"
+      }
+    }
+  }
+}`} />
+          </DocPanel>
+          <DocPanel title="Fluxo MCP recomendado">
+            <CodeBlock code={`1. testhub_help()
+2. testhub_list_projects()
+3. testhub_list_flows({ "namespace": "auth" })
+4. testhub_get_spec_examples({ "example": "web-library-flow" })
+5. testhub_validate_spec({ "specContent": "..." })
+6. testhub_create_suite ou testhub_update_suite
+7. testhub_run_suite
+8. testhub_wait_run
+9. testhub_get_run_report`} />
+          </DocPanel>
+          <DocCallout title="IA" text="A IA nao executa testes. Ela usa report, timeline, artifacts e redaction para explicar falhas ou sugerir ajustes." />
+        </div>
+      ),
+    },
+    {
+      id: 'reference',
+      group: 'Referencia',
+      title: 'Referencia rapida',
+      description: 'Campos YAML e erros comuns.',
+      tags: ['defaults', 'hooks', 'errors'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Campos principais">
+            <CodeBlock code={`version: 1
+type: api | web
+name: minha-suite
+description: opcional
+baseUrl: https://app.example.com
+variables: {}
+defaults:
+  timeoutMs: 10000
+  retries: 1
+  screenshotOnFailure: true
+  video: retain-on-failure
+  trace: retain-on-failure
+beforeEach: []
+afterEach: []
+flows: {}
+tests: []`} />
+          </DocPanel>
+          <DocPanel title="Erros comuns">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p><strong>flow nao encontrado</strong>: `use` nao existe localmente nem na Flow Library.</p>
+              <p><strong>ciclo em flows</strong>: um flow chama outro que volta para ele.</p>
+              <p><strong>Variavel obrigatoria ausente</strong>: placeholder sem valor em ambiente, params, variables ou extract.</p>
+              <p><strong>extract attribute requer attribute</strong>: informe o nome do atributo.</p>
+            </div>
+          </DocPanel>
+        </div>
+      ),
+    },
+  ]), []);
+
+  const [activeId, setActiveId] = useState(docs[0].id);
+  const [query, setQuery] = useState('');
+  const filteredDocs = docs.filter((doc) => {
+    const haystack = `${doc.group} ${doc.title} ${doc.description} ${doc.tags.join(' ')}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
+  const activeDoc = docs.find((doc) => doc.id === activeId) ?? docs[0];
+  const groupedDocs = filteredDocs.reduce<Record<string, typeof docs>>((groups, doc) => {
+    groups[doc.group] = [...(groups[doc.group] ?? []), doc];
+    return groups;
+  }, {});
+
+  return (
+    <div className="grid min-h-[calc(100vh-160px)] gap-4 lg:grid-cols-[300px_minmax(0,1fr)_220px]">
+      <aside className="grid h-fit gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3 lg:sticky lg:top-4">
+        <Field label="Buscar docs">
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="flow, api, mcp..." />
+        </Field>
+        <ScrollArea className="max-h-[calc(100vh-280px)] pr-2">
+          <div className="grid gap-4">
+            {Object.entries(groupedDocs).map(([group, items]) => (
+              <div key={group} className="grid gap-1">
+                <p className="px-2 text-xs font-bold uppercase tracking-wide text-[#66705f]">{group}</p>
+                {items.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => setActiveId(doc.id)}
+                    className={cn('grid gap-1 rounded-md px-2 py-2 text-left text-sm hover:bg-[#f4f1e8]', activeDoc.id === doc.id ? 'bg-[#edf3cf] text-[#1f241f]' : 'text-[#4b5348]')}
+                  >
+                    <span className="font-semibold">{doc.title}</span>
+                    <span className="line-clamp-2 text-xs text-[#66705f]">{doc.description}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </aside>
+
+      <main className="min-w-0">
+        <div className="grid gap-4">
+          <div className="rounded-lg border border-[#e1ddd1] bg-white p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#66705f]">{activeDoc.group}</p>
+                <h1 className="mt-1 text-2xl font-semibold text-[#1f241f]">{activeDoc.title}</h1>
+                <p className="mt-2 max-w-3xl text-sm text-[#4b5348]">{activeDoc.description}</p>
+              </div>
+              <Badge variant="outline">{activeDoc.tags.length} topicos</Badge>
+            </div>
+          </div>
+          {activeDoc.content}
+        </div>
+      </main>
+
+      <aside className="hidden h-fit rounded-lg border border-[#e1ddd1] bg-white p-3 lg:sticky lg:top-4 lg:grid lg:gap-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-[#66705f]">Nesta pagina</p>
+        {activeDoc.tags.map((tag) => (
+          <Badge key={tag} variant="outline" className="w-fit">{tag}</Badge>
+        ))}
+        <Separator className="my-2" />
+        <p className="text-xs text-[#66705f]">Use busca para achar sintaxe, exemplos e operacao sem trocar contexto.</p>
+      </aside>
+    </div>
+  );
+}
+
+function LegacyDocumentationWorkspace() {
   return (
     <Tabs defaultValue="start" className="grid gap-4">
-      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
+      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-3 xl:grid-cols-9">
         <TabsTrigger value="start">Inicio</TabsTrigger>
         <TabsTrigger value="yaml">YAML</TabsTrigger>
         <TabsTrigger value="syntax">Sintaxes</TabsTrigger>
+        <TabsTrigger value="flows">Fluxos</TabsTrigger>
         <TabsTrigger value="api">API suites</TabsTrigger>
         <TabsTrigger value="web">Web suites</TabsTrigger>
         <TabsTrigger value="ai">IA</TabsTrigger>
@@ -1873,6 +2468,37 @@ request:
   - uploadFile:
       selector: input[type="file"]
       path: ./fixtures/avatar.png`} />
+            </DocAccordion>
+
+            <DocAccordion title="Flows reutilizaveis">
+              <CodeBlock code={`flows:
+  login:
+    params:
+      email: \${USER_EMAIL}
+      password: \${USER_PASSWORD}
+    steps:
+      - goto: /login
+      - fill:
+          by: label
+          target: Email
+          value: \${email}
+      - fill:
+          by: label
+          target: Senha
+          value: \${password}
+      - click:
+          by: role
+          role: button
+          name: Entrar
+
+tests:
+  - name: checkout completo
+    steps:
+      - use: login
+        with:
+          email: qa@example.com
+      - goto: /checkout
+      - expectText: Finalizar compra`} />
             </DocAccordion>
 
             <DocAccordion title="Seletores estilo Playwright">
@@ -2026,6 +2652,237 @@ tests:
       path: /orders/\${ORDER_ID}
     expect:
       status: 200`} />
+              </div>
+            </DocAccordion>
+            <DocAccordion title="Extract em testes web">
+              <CodeBlock code={`tests:
+  - name: pedido criado
+    steps:
+      - goto: /orders/new
+      - click:
+          by: role
+          role: button
+          name: Criar pedido
+      - extract:
+          as: ORDER_ID
+          from:
+            by: testId
+            target: order-id
+          property: text
+      - goto: /orders/\${ORDER_ID}
+      - expectText: \${ORDER_ID}
+      - extract:
+          as: ORDER_LINK
+          from:
+            by: testId
+            target: order-link
+          property: attribute
+          attribute: href
+      - extract:
+          as: CURRENT_URL
+          property: url`} />
+            </DocAccordion>
+          </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="flows" className="m-0">
+        <div className="grid gap-4">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Fluxos extensos</CardTitle><CardDescription>Use flows para reaproveitar jornadas longas sem duplicar login, setup, busca ou checkout.</CardDescription></CardHeader>
+            <CardContent className="grid gap-3 text-sm text-[#4b5348]">
+              <p>Um `flow` e uma lista nomeada de steps web. Chame com `use`. Passe dados com `with`. Capture dados da tela com `extract` e reutilize com `${'{VARIAVEL}'}`.</p>
+              <p>No report, os steps aparecem expandidos com prefixo do flow, por exemplo `login / fill: Email`.</p>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <DocAccordion title="Exemplo completo">
+              <CodeBlock code={`version: 1
+type: web
+name: checkout-completo
+defaults:
+  timeoutMs: 15000
+  retries: 1
+  video: retain-on-failure
+  trace: retain-on-failure
+
+flows:
+  login:
+    params:
+      email: \${USER_EMAIL}
+      password: \${USER_PASSWORD}
+    steps:
+      - goto: /login
+      - fill:
+          by: label
+          target: Email
+          value: \${email}
+      - fill:
+          by: label
+          target: Senha
+          value: \${password}
+      - click:
+          by: role
+          role: button
+          name: Entrar
+
+tests:
+  - name: compra produto com cartao
+    tags: [checkout, smoke]
+    steps:
+      - use: login
+      - goto: /produtos
+      - click:
+          by: text
+          target: Produto A
+      - click:
+          by: role
+          role: button
+          name: Adicionar ao carrinho
+      - goto: /checkout
+      - click:
+          by: role
+          role: button
+          name: Finalizar compra
+      - extract:
+          as: ORDER_ID
+          from:
+            by: testId
+            target: order-id
+          property: text
+      - expectText: \${ORDER_ID}`} />
+            </DocAccordion>
+
+            <DocAccordion title="Params e with">
+              <CodeBlock code={`flows:
+  login:
+    params:
+      email: \${USER_EMAIL}
+      password: \${USER_PASSWORD}
+    steps:
+      - fill:
+          by: label
+          target: Email
+          value: \${email}
+      - fill:
+          by: label
+          target: Senha
+          value: \${password}
+
+tests:
+  - name: login usuario padrao
+    steps:
+      - use: login
+
+  - name: login usuario alternativo
+    steps:
+      - use: login
+        with:
+          email: editor@example.com
+          password: editor-secret`} />
+            </DocAccordion>
+
+            <DocAccordion title="Flow Library da organizacao">
+              <div className="grid gap-3">
+                <p className="text-sm text-[#4b5348]">Flows cadastrados em Settings / Flows ficam disponiveis para todas as suites da organizacao. A referencia usa `namespace.nome`, como `auth.login`.</p>
+                <CodeBlock code={`# Flow salvo na biblioteca
+namespace: auth
+name: login
+params:
+  email: \${USER_EMAIL}
+  password: \${USER_PASSWORD}
+steps:
+  - goto: /login
+  - fill:
+      by: label
+      target: Email
+      value: \${email}
+  - fill:
+      by: label
+      target: Senha
+      value: \${password}
+  - click:
+      by: role
+      role: button
+      name: Entrar
+
+# Suite usando o flow compartilhado
+version: 1
+type: web
+name: checkout-com-flow
+tests:
+  - name: compra autenticada
+    steps:
+      - use: auth.login
+        with:
+          email: qa@example.com
+      - goto: /checkout
+      - expectText: Finalizar compra`} />
+              </div>
+            </DocAccordion>
+
+            <DocAccordion title="Extract web">
+              <CodeBlock code={`# text: captura texto visivel
+- extract:
+    as: ORDER_ID
+    from:
+      by: testId
+      target: order-id
+    property: text
+
+# value: captura valor de input
+- extract:
+    as: EMAIL
+    from:
+      by: label
+      target: Email
+    property: value
+
+# attribute: captura atributo
+- extract:
+    as: DETAIL_URL
+    from:
+      by: testId
+      target: order-link
+    property: attribute
+    attribute: href
+
+# url: captura URL atual, sem selector
+- extract:
+    as: CURRENT_URL
+    property: url`} />
+            </DocAccordion>
+
+            <DocAccordion title="Boas praticas para fluxos longos">
+              <div className="grid gap-2 text-sm text-[#4b5348]">
+                <p>Prefira flows pequenos e semânticos: `login`, `criarPedido`, `abrirCheckout`, `finalizarCompra`.</p>
+                <p>Use `data-testid`, `role` e `label`; evite CSS frágil em jornadas críticas.</p>
+                <p>Mantenha secrets em ambientes. Passe só overrides pontuais com `with`.</p>
+                <p>Use `extract` para IDs gerados pela aplicação, URLs dinâmicas e valores necessários em steps seguintes.</p>
+              </div>
+            </DocAccordion>
+
+            <DocAccordion title="Erros comuns">
+              <div className="grid gap-2 text-sm text-[#4b5348]">
+                <p><strong>flow nao encontrado</strong>: o nome em `use` nao existe em `flows`.</p>
+                <p><strong>flow externo nao encontrado</strong>: `use: auth.login` nao existe na Flow Library da organizacao atual ou foi arquivado.</p>
+                <p><strong>ciclo em flows</strong>: um flow chama outro que chama o primeiro.</p>
+                <p><strong>Variavel obrigatoria ausente</strong>: `${'{VARIAVEL}'}` nao veio do ambiente, `variables`, params ou `extract`.</p>
+                <p><strong>extract attribute requer attribute</strong>: `property: attribute` precisa informar o nome do atributo.</p>
+              </div>
+            </DocAccordion>
+
+            <DocAccordion title="Usando pelo MCP">
+              <div className="grid gap-3">
+                <p className="text-sm text-[#4b5348]">Agentes MCP devem consultar a biblioteca antes de escrever suites web. Se o flow existir, use `use: namespace.nome`; se nao existir, crie com `testhub_create_flow`.</p>
+                <CodeBlock code={`1. testhub_list_flows({ "namespace": "auth" })
+2. testhub_get_spec_examples({ "example": "web-library-flow" })
+3. testhub_validate_spec({ "specContent": "..." })
+4. testhub_create_suite ou testhub_update_suite
+5. testhub_run_suite
+6. testhub_wait_run
+7. testhub_get_run_report`} />
               </div>
             </DocAccordion>
           </div>
@@ -2192,6 +3049,15 @@ npm run mcp`} />
   }
 }`} />
               <p className="text-sm text-[#4b5348]">Depois de conectar, chame `testhub_help` no agente para ver tools, fluxo recomendado e exemplos operacionais.</p>
+              <p className="text-sm text-[#4b5348]">Para criar suites web, chame `testhub_list_flows` primeiro. Reuse Flow Library com `use: auth.login` quando possivel; depois chame `testhub_get_spec_examples` e valide o YAML.</p>
+              <CodeBlock code={`testhub_list_flows({ "namespace": "auth" })
+testhub_create_flow({
+  "namespace": "auth",
+  "name": "login",
+  "params": { "email": "\${USER_EMAIL}", "password": "\${USER_PASSWORD}" },
+  "steps": [{ "goto": "/login" }]
+})
+testhub_get_spec_examples({ "example": "web-library-flow" })`} />
             </div>
           </DocAccordion>
           <DocAccordion title="Organizacoes e RBAC">
@@ -2228,6 +3094,36 @@ npm run mcp`} />
         </div>
       </TabsContent>
     </Tabs>
+  );
+}
+
+function DocHero({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-lg border border-[#d7d2c4] bg-[#fbfaf6] p-5">
+      <p className="text-xs font-bold uppercase tracking-wide text-[#66705f]">Wiki operacional</p>
+      <h2 className="mt-2 text-2xl font-semibold text-[#1f241f]">{title}</h2>
+      <p className="mt-2 max-w-3xl text-sm text-[#4b5348]">{description}</p>
+    </div>
+  );
+}
+
+function DocPanel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+function DocCallout({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-lg border border-[#c9d78c] bg-[#f2f6d8] p-4">
+      <p className="font-semibold text-[#1f241f]">{title}</p>
+      <p className="mt-1 text-sm text-[#4b5348]">{text}</p>
+    </div>
   );
 }
 
@@ -2675,6 +3571,8 @@ function YamlEditor({ value, onChange }: { value: string; onChange: (value: stri
                 { label: 'type frontend', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'type: web', range: undefined as never },
                 { label: 'api test', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'tests:\\n  - name: ${1:health}\\n    request:\\n      method: GET\\n      path: /health\\n    expect:\\n      status: 200', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
                 { label: 'frontend test', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'tests:\\n  - name: ${1:login}\\n    steps:\\n      - goto: /\\n      - expectVisible: ${2:text}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
+                { label: 'web flow', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'flows:\\n  ${1:login}:\\n    params:\\n      ${2:email}: ${3:\\${USER_EMAIL}}\\n    steps:\\n      - goto: ${4:/login}\\n      - fill:\\n          by: label\\n          target: ${5:Email}\\n          value: \\${${2:email}}\\n\\ntests:\\n  - name: ${6:fluxo}\\n    steps:\\n      - use: ${1:login}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
+                { label: 'web extract', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '- extract:\\n    as: ${1:ORDER_ID}\\n    from:\\n      by: testId\\n      target: ${2:order-id}\\n    property: ${3:text}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
               ],
             }),
           });

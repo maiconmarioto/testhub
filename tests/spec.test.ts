@@ -46,6 +46,129 @@ tests:
     expect(spec.type).toBe('web');
     expect(spec.tests[0]?.steps).toHaveLength(4);
   });
+
+  it('parses web flows and extract steps', () => {
+    const file = tempFile(`
+version: 1
+type: web
+name: web
+flows:
+  login:
+    params:
+      email: qa@example.com
+    steps:
+      - fill:
+          by: label
+          target: Email
+          value: \${email}
+      - extract:
+          as: USER_NAME
+          from:
+            by: testId
+            target: user-name
+          property: text
+tests:
+  - name: form
+    steps:
+      - use: login
+        with:
+          email: other@example.com
+      - expectText: Dashboard
+`);
+    const spec = parseSpecFile(file);
+    expect(spec.type).toBe('web');
+    expect(spec.flows?.login?.steps).toHaveLength(2);
+  });
+
+  it('resolves organization flow library refs passed by caller', () => {
+    const file = tempFile(`
+version: 1
+type: web
+name: web
+tests:
+  - name: form
+    steps:
+      - use: auth.login
+      - expectText: Dashboard
+`);
+    const spec = parseSpecFile(file, {
+      externalFlows: {
+        'auth.login': {
+          params: { email: 'qa@example.com' },
+          steps: [{ goto: '/login' }],
+        },
+      },
+    });
+    expect(spec.type).toBe('web');
+    expect(spec.tests[0]?.steps[0]).toEqual({ use: 'auth.login' });
+  });
+
+  it('detects cycles across local and external flows', () => {
+    expect(() => parseSpecFile(tempFile(`
+version: 1
+type: web
+name: web
+flows:
+  setup:
+    steps:
+      - use: auth.login
+tests:
+  - name: form
+    steps:
+      - use: setup
+`), {
+      externalFlows: {
+        'auth.login': {
+          steps: [{ use: 'setup' }],
+        },
+      },
+    })).toThrow(/ciclo em flows/);
+  });
+
+  it('rejects missing and cyclic web flows', () => {
+    expect(() => parseSpecFile(tempFile(`
+version: 1
+type: web
+name: web
+tests:
+  - name: form
+    steps:
+      - use: login
+`))).toThrow(/flow "login" nao encontrado/);
+
+    expect(() => parseSpecFile(tempFile(`
+version: 1
+type: web
+name: web
+flows:
+  a:
+    steps:
+      - use: b
+  b:
+    steps:
+      - use: a
+tests:
+  - name: form
+    steps:
+      - use: a
+`))).toThrow(/ciclo em flows/);
+  });
+
+  it('requires attribute name for attribute extract', () => {
+    expect(() => parseSpecFile(tempFile(`
+version: 1
+type: web
+name: web
+tests:
+  - name: form
+    steps:
+      - extract:
+          as: LINK
+          from:
+            selector: a
+          property: attribute
+`))).toThrow(/property attribute requer attribute/);
+  });
 });
 
 function tempFile(content: string): string {

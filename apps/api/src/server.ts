@@ -15,6 +15,7 @@ import { createRunQueue } from '../../../packages/shared/src/jobs.js';
 import { openApiToSuite } from '../../../packages/spec/src/openapi-import.js';
 import { parseSpecContent, SpecValidationError } from '../../../packages/spec/src/spec.js';
 import { redactDeep } from '../../../packages/shared/src/redact.js';
+import type { WebFlow } from '../../../packages/shared/src/types.js';
 import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
 import { actorFromAuthorization, actorLabel, authMode, hasPermission, isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus, type AuthActor, type Permission } from '../../../packages/db/src/security.js';
@@ -71,6 +72,15 @@ const openApiDocument = {
     },
     '/api/import/openapi': { post: { tags: ['suites'], summary: 'Import OpenAPI as API suite', responses: { '201': { description: 'Created' } } } },
     '/api/spec/validate': { post: { tags: ['suites'], summary: 'Validate TestHub YAML spec', responses: { '200': { description: 'Valid' }, '400': { description: 'Invalid' } } } },
+    '/api/flows': {
+      get: { tags: ['suites'], summary: 'List reusable web flows', responses: { '200': { description: 'OK' } } },
+      post: { tags: ['suites'], summary: 'Create reusable web flow', responses: { '201': { description: 'Created' } } },
+    },
+    '/api/flows/{id}': {
+      get: { tags: ['suites'], summary: 'Get reusable web flow', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      put: { tags: ['suites'], summary: 'Update reusable web flow', responses: { '200': { description: 'OK' }, '404': { description: 'Not found' } } },
+      delete: { tags: ['suites'], summary: 'Archive reusable web flow', responses: { '204': { description: 'Archived' }, '404': { description: 'Not found' } } },
+    },
     '/api/runs': {
       get: { tags: ['runs'], summary: 'List runs', responses: { '200': { description: 'OK' } } },
       post: { tags: ['runs'], summary: 'Create run', responses: { '202': { description: 'Queued' } } },
@@ -217,6 +227,26 @@ export function createApp() {
     if (!suite) return undefined;
     const project = db.projects.find((item) => item.id === suite.projectId && item.status !== 'inactive');
     return project?.organizationId === organizationId ? suite : undefined;
+  }
+
+  async function flowMapForActor(actor?: AuthActor): Promise<Record<string, WebFlow>> {
+    const organizationId = requireOrganization(actor);
+    const flows = await store.listFlowsForOrganization(organizationId);
+    return Object.fromEntries(flows.map((flow) => [`${flow.namespace}.${flow.name}`, { params: flow.params, steps: flow.steps }]));
+  }
+
+  async function validateSpecForActor(specContent: string, actor?: AuthActor): Promise<void> {
+    parseSpecContent(specContent, { externalFlows: await flowMapForActor(actor) });
+  }
+
+  async function validateFlowForActor(input: { namespace: string; name: string; params?: WebFlow['params']; steps: WebFlow['steps'] }, actor?: AuthActor): Promise<void> {
+    const key = `${input.namespace}.${input.name}`;
+    parseSpecContent(flowValidationSpec(input.steps), {
+      externalFlows: {
+        ...(await flowMapForActor(actor)),
+        [key]: { params: input.params, steps: input.steps },
+      },
+    });
   }
 
   async function getRunInActorOrg(runId: string, actor?: AuthActor): Promise<RunRecord | undefined> {
@@ -747,6 +777,12 @@ export function createApp() {
     }).parse(req.body);
     const project = await getProjectInActorOrg(input.projectId, req.actor);
     if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    try {
+      await validateSpecForActor(input.specContent, req.actor);
+    } catch (error) {
+      if (error instanceof SpecValidationError) return reply.code(400).send({ error: error.message });
+      throw error;
+    }
     return reply.code(201).send(await store.createSuite(input));
   });
   app.put('/api/suites/:id', { schema: { tags: ['suites'], summary: 'Update suite spec content' } }, async (req, reply) => {
@@ -758,6 +794,12 @@ export function createApp() {
     }).parse(req.body);
     const existing = await getSuiteInActorOrg(params.id, req.actor);
     if (!existing) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    try {
+      await validateSpecForActor(input.specContent, req.actor);
+    } catch (error) {
+      if (error instanceof SpecValidationError) return reply.code(400).send({ error: error.message });
+      throw error;
+    }
     const suite = await store.updateSuite(params.id, input);
     if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
     return suite;
@@ -766,7 +808,7 @@ export function createApp() {
   app.post('/api/spec/validate', { schema: { tags: ['suites'], summary: 'Validate TestHub YAML spec' } }, async (req, reply) => {
     const input = z.object({ specContent: z.string().min(1) }).parse(req.body);
     try {
-      const spec = parseSpecContent(input.specContent);
+      const spec = parseSpecContent(input.specContent, { externalFlows: await flowMapForActor(req.actor) });
       return {
         valid: true,
         type: spec.type,
@@ -779,6 +821,59 @@ export function createApp() {
       }
       throw error;
     }
+  });
+
+  const flowInputSchema = z.object({
+    namespace: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/),
+    name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/),
+    description: z.string().optional(),
+    params: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    steps: z.array(z.unknown()).min(1),
+  });
+
+  app.get('/api/flows', { schema: { tags: ['suites'], summary: 'List reusable web flows' } }, async (req) => {
+    const query = z.object({ namespace: z.string().optional() }).parse(req.query);
+    return store.listFlowsForOrganization(requireOrganization(req.actor), query.namespace);
+  });
+
+  app.get('/api/flows/:id', { schema: { tags: ['suites'], summary: 'Get reusable web flow' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const flow = await store.getFlow(params.id);
+    if (!flow || flow.organizationId !== requireOrganization(req.actor)) return reply.code(404).send({ error: 'Flow nao encontrado' });
+    return flow;
+  });
+
+  app.post('/api/flows', { schema: { tags: ['suites'], summary: 'Create reusable web flow' } }, async (req, reply) => {
+    const organizationId = requireOrganization(req.actor);
+    const input = flowInputSchema.parse(req.body);
+    try {
+      await validateFlowForActor({ ...input, steps: input.steps as WebFlow['steps'] }, req.actor);
+    } catch (error) {
+      if (error instanceof SpecValidationError) return reply.code(400).send({ error: error.message });
+      throw error;
+    }
+    return reply.code(201).send(await store.upsertFlow({ ...input, organizationId, steps: input.steps as WebFlow['steps'] }));
+  });
+
+  app.put('/api/flows/:id', { schema: { tags: ['suites'], summary: 'Update reusable web flow' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const organizationId = requireOrganization(req.actor);
+    const existing = await store.getFlow(params.id);
+    if (!existing || existing.organizationId !== organizationId) return reply.code(404).send({ error: 'Flow nao encontrado' });
+    const input = flowInputSchema.parse(req.body);
+    try {
+      await validateFlowForActor({ ...input, steps: input.steps as WebFlow['steps'] }, req.actor);
+    } catch (error) {
+      if (error instanceof SpecValidationError) return reply.code(400).send({ error: error.message });
+      throw error;
+    }
+    return store.upsertFlow({ ...input, id: params.id, organizationId, steps: input.steps as WebFlow['steps'] });
+  });
+
+  app.delete('/api/flows/:id', { schema: { tags: ['suites'], summary: 'Archive reusable web flow' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    if (!(await store.archiveFlow(requireOrganization(req.actor), params.id))) return reply.code(404).send({ error: 'Flow nao encontrado' });
+    return reply.code(204).send();
   });
 
   app.post('/api/import/openapi', { schema: { tags: ['suites'], summary: 'Import OpenAPI as API suite' } }, async (req, reply) => {
@@ -1053,7 +1148,7 @@ function permissionFor(method: string, url: string): Permission | null {
   }
   if (url.startsWith('/api/projects')) return 'project:write';
   if (url.startsWith('/api/environments')) return 'environment:write';
-  if (url.startsWith('/api/suites') || url.startsWith('/api/import/openapi') || url.startsWith('/api/spec/validate')) return 'suite:write';
+  if (url.startsWith('/api/suites') || url.startsWith('/api/flows') || url.startsWith('/api/import/openapi') || url.startsWith('/api/spec/validate')) return 'suite:write';
   if (url.startsWith('/api/runs')) return 'run:write';
   if (url.startsWith('/api/users/') && url.endsWith('/memberships')) return 'settings:write';
   if (url === '/api/organizations') return 'settings:write';
@@ -1066,6 +1161,15 @@ function permissionFor(method: string, url: string): Permission | null {
 function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function flowValidationSpec(steps: unknown[]): string {
+  return JSON.stringify({
+    version: 1,
+    type: 'web',
+    name: 'flow-validation',
+    tests: [{ name: 'flow', steps }],
+  });
 }
 
 function contentTypeFor(filePath: string): string | undefined {

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureDir, writeJson } from '../../shared/src/fs-utils.js';
+import type { FlowLibraryItem, WebFlow } from '../../shared/src/types.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 
 export type EntityStatus = 'active' | 'inactive';
@@ -145,6 +146,7 @@ export interface Database {
   suites: Suite[];
   runs: RunRecord[];
   aiConnections: AiConnection[];
+  flowLibrary: FlowLibraryItem[];
 }
 
 export interface Store {
@@ -198,6 +200,10 @@ export interface Store {
   revokePersonalAccessToken(userId: string, tokenId: string): Promise<boolean> | boolean;
   touchPersonalAccessToken(tokenId: string): Promise<PersonalAccessToken | undefined> | PersonalAccessToken | undefined;
   listProjectsForOrganization(organizationId: string): Promise<Project[]> | Project[];
+  listFlowsForOrganization(organizationId: string, namespace?: string): Promise<FlowLibraryItem[]> | FlowLibraryItem[];
+  getFlow(id: string): Promise<FlowLibraryItem | undefined> | FlowLibraryItem | undefined;
+  upsertFlow(input: Omit<FlowLibraryItem, 'id' | 'status' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<FlowLibraryItem> | FlowLibraryItem;
+  archiveFlow(organizationId: string, id: string): Promise<boolean> | boolean;
 }
 
 const emptyDb: Database = {
@@ -212,6 +218,7 @@ const emptyDb: Database = {
   suites: [],
   runs: [],
   aiConnections: [],
+  flowLibrary: [],
 };
 
 const LEGACY_ORGANIZATION_ID = 'legacy-local';
@@ -257,6 +264,7 @@ export class JsonStore {
         ...connection,
         organizationId: connection.organizationId ?? LEGACY_ORGANIZATION_ID,
       })),
+      flowLibrary: db.flowLibrary ?? [],
     };
   }
 
@@ -760,6 +768,48 @@ export class JsonStore {
       : this.read().aiConnections.find((item) => item.enabled && item.organizationId === organizationId);
     if (!connection) return undefined;
     return { ...connection, apiKey: connection.apiKey ? decryptSecret(connection.apiKey) : undefined };
+  }
+
+  listFlowsForOrganization(organizationId: string, namespace?: string): FlowLibraryItem[] {
+    return this.read().flowLibrary
+      .filter((flow) => flow.organizationId === organizationId && flow.status !== 'inactive' && (!namespace || flow.namespace === namespace));
+  }
+
+  getFlow(id: string): FlowLibraryItem | undefined {
+    return this.read().flowLibrary.find((flow) => flow.id === id && flow.status !== 'inactive');
+  }
+
+  upsertFlow(input: Omit<FlowLibraryItem, 'id' | 'status' | 'createdAt' | 'updatedAt'> & { id?: string }): FlowLibraryItem {
+    const db = this.read();
+    const now = nowIso();
+    const existingIndex = input.id
+      ? db.flowLibrary.findIndex((flow) => flow.id === input.id && flow.organizationId === input.organizationId && flow.status !== 'inactive')
+      : db.flowLibrary.findIndex((flow) => flow.organizationId === input.organizationId && flow.namespace === input.namespace && flow.name === input.name && flow.status !== 'inactive');
+    const flow: FlowLibraryItem = {
+      id: existingIndex >= 0 ? db.flowLibrary[existingIndex].id : (input.id ?? randomUUID()),
+      organizationId: input.organizationId,
+      namespace: input.namespace,
+      name: input.name,
+      description: input.description,
+      params: input.params,
+      steps: input.steps,
+      status: 'active',
+      createdAt: existingIndex >= 0 ? db.flowLibrary[existingIndex].createdAt : now,
+      updatedAt: now,
+    };
+    if (existingIndex >= 0) db.flowLibrary[existingIndex] = flow;
+    else db.flowLibrary.push(flow);
+    this.write(db);
+    return flow;
+  }
+
+  archiveFlow(organizationId: string, id: string): boolean {
+    const db = this.read();
+    const index = db.flowLibrary.findIndex((flow) => flow.id === id && flow.organizationId === organizationId && flow.status !== 'inactive');
+    if (index === -1) return false;
+    db.flowLibrary[index] = { ...db.flowLibrary[index], status: 'inactive', updatedAt: nowIso() };
+    this.write(db);
+    return true;
   }
 }
 

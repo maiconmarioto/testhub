@@ -5,7 +5,8 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { and, desc, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
 import { ensureDir } from '../../shared/src/fs-utils.js';
-import { aiConnections, environments, memberships, organizations, passwordResetTokens, personalAccessTokens, projects, runs, sessions, suites, users } from './schema.js';
+import { aiConnections, environments, flowLibrary, memberships, organizations, passwordResetTokens, personalAccessTokens, projects, runs, sessions, suites, users } from './schema.js';
+import type { FlowLibraryItem, WebStep } from '../../shared/src/types.js';
 import type { AiConnection, AuthSession, Database, Environment, MembershipRole, Organization, OrganizationMembership, PasswordResetToken, PersonalAccessToken, Project, RunRecord, Store, Suite, User } from './store.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 
@@ -38,7 +39,7 @@ export class PgStore implements Store {
   }
 
   async read(): Promise<Database> {
-    const [userRows, organizationRows, membershipRows, sessionRows, passwordResetRows, personalAccessRows, projectRows, environmentRows, suiteRows, runRows, aiRows] = await Promise.all([
+    const [userRows, organizationRows, membershipRows, sessionRows, passwordResetRows, personalAccessRows, projectRows, environmentRows, suiteRows, runRows, aiRows, flowRows] = await Promise.all([
       this.db.select().from(users),
       this.db.select().from(organizations),
       this.db.select().from(memberships),
@@ -50,6 +51,7 @@ export class PgStore implements Store {
       this.db.select().from(suites),
       this.db.select().from(runs).orderBy(desc(runs.createdAt)),
       this.db.select().from(aiConnections),
+      this.db.select().from(flowLibrary),
     ]);
     return {
       users: userRows.map(rowToUser),
@@ -63,6 +65,7 @@ export class PgStore implements Store {
       suites: suiteRows.map(rowToSuite),
       runs: runRows.map(rowToRun),
       aiConnections: aiRows.map(rowToAiSafe),
+      flowLibrary: flowRows.map(rowToFlow),
     };
   }
 
@@ -537,6 +540,48 @@ export class PgStore implements Store {
     if (!connection) return undefined;
     return { ...rowToAiSafe(connection), apiKey: connection.apiKey ? decryptSecret(connection.apiKey) : undefined };
   }
+
+  async listFlowsForOrganization(organizationId: string, namespace?: string): Promise<FlowLibraryItem[]> {
+    const conditions = [eq(flowLibrary.organizationId, organizationId), ne(flowLibrary.status, 'inactive')];
+    if (namespace) conditions.push(eq(flowLibrary.namespace, namespace));
+    const rows = await this.db.select().from(flowLibrary).where(and(...conditions)).orderBy(flowLibrary.namespace, flowLibrary.name);
+    return rows.map(rowToFlow);
+  }
+
+  async getFlow(id: string): Promise<FlowLibraryItem | undefined> {
+    const [flow] = await this.db.select().from(flowLibrary).where(and(eq(flowLibrary.id, id), ne(flowLibrary.status, 'inactive')));
+    return flow ? rowToFlow(flow) : undefined;
+  }
+
+  async upsertFlow(input: Omit<FlowLibraryItem, 'id' | 'status' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<FlowLibraryItem> {
+    const now = new Date();
+    const existing = input.id
+      ? (await this.db.select().from(flowLibrary).where(and(eq(flowLibrary.id, input.id), eq(flowLibrary.organizationId, input.organizationId), ne(flowLibrary.status, 'inactive'))))[0]
+      : (await this.db.select().from(flowLibrary).where(and(eq(flowLibrary.organizationId, input.organizationId), eq(flowLibrary.namespace, input.namespace), eq(flowLibrary.name, input.name), ne(flowLibrary.status, 'inactive'))))[0];
+    const flow = {
+      id: existing?.id ?? input.id ?? randomUUID(),
+      organizationId: input.organizationId,
+      namespace: input.namespace,
+      name: input.name,
+      description: input.description ?? null,
+      params: input.params ?? null,
+      steps: input.steps,
+      status: 'active',
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    if (existing) await this.db.update(flowLibrary).set(flow).where(eq(flowLibrary.id, flow.id));
+    else await this.db.insert(flowLibrary).values(flow);
+    return rowToFlow(flow);
+  }
+
+  async archiveFlow(organizationId: string, id: string): Promise<boolean> {
+    const archived = await this.db.update(flowLibrary)
+      .set({ status: 'inactive', updatedAt: new Date() })
+      .where(and(eq(flowLibrary.id, id), eq(flowLibrary.organizationId, organizationId), ne(flowLibrary.status, 'inactive')))
+      .returning({ id: flowLibrary.id });
+    return archived.length > 0;
+  }
 }
 
 function rowToUser(row: { id: string; email: string; name?: string | null; passwordHash: string; status: string; createdAt: Date | string; updatedAt: Date | string }): User {
@@ -654,6 +699,10 @@ function rowToRun(row: Record<string, unknown>): RunRecord {
 
 function rowToAiSafe(row: { id: string; organizationId: string; name: string; provider: string; apiKey?: string | null; model: string; baseUrl?: string | null; enabled: string | boolean; createdAt: Date | string; updatedAt: Date | string }): AiConnection {
   return { id: row.id, organizationId: row.organizationId, name: row.name, provider: row.provider as AiConnection['provider'], apiKey: row.apiKey ? '[REDACTED]' : undefined, model: row.model, baseUrl: row.baseUrl ?? undefined, enabled: row.enabled === true || row.enabled === 'true', createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
+}
+
+function rowToFlow(row: { id: string; organizationId: string; namespace: string; name: string; description?: string | null; params?: Record<string, string | number | boolean> | null; steps?: unknown[] | null; status: string; createdAt: Date | string; updatedAt: Date | string }): FlowLibraryItem {
+  return { id: row.id, organizationId: row.organizationId, namespace: row.namespace, name: row.name, description: row.description ?? undefined, params: row.params ?? undefined, steps: (row.steps ?? []) as WebStep[], status: row.status as FlowLibraryItem['status'], createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
 }
 
 function toIso(value: Date | string): string {

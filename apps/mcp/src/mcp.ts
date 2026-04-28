@@ -22,11 +22,134 @@ const server = new McpServer({
 const commandCatalog = {
   project: ['testhub_list_projects', 'testhub_create_project', 'testhub_get_project', 'testhub_update_project', 'testhub_archive_project'],
   environment: ['testhub_list_environments', 'testhub_create_environment', 'testhub_update_environment', 'testhub_archive_environment', 'testhub_get_environment', 'testhub_list_envs', 'testhub_create_env', 'list_environments', 'create_environment', 'get_environment'],
-  suite: ['testhub_list_suites', 'testhub_create_suite', 'testhub_get_suite', 'testhub_update_suite', 'testhub_validate_spec', 'testhub_import_openapi'],
+  suite: ['testhub_list_suites', 'testhub_create_suite', 'testhub_get_suite', 'testhub_update_suite', 'testhub_validate_spec', 'testhub_import_openapi', 'testhub_get_spec_examples'],
+  flow: ['testhub_list_flows', 'testhub_get_flow', 'testhub_create_flow', 'testhub_update_flow', 'testhub_archive_flow'],
   run: ['testhub_get_test_context', 'testhub_list_runs', 'testhub_run_suite', 'testhub_get_run_status', 'testhub_wait_run', 'testhub_get_run_report', 'testhub_get_artifacts', 'testhub_cancel_run'],
   ai: ['testhub_list_ai_connections', 'testhub_upsert_ai_connection', 'testhub_explain_failure'],
   maintenance: ['testhub_cleanup'],
 };
+
+const specExamples = {
+  api: String.raw`version: 1
+type: api
+name: health
+tests:
+  - name: status 200
+    request:
+      method: GET
+      path: /status/200
+    expect:
+      status: 200`,
+  web: String.raw`version: 1
+type: web
+name: invalid-login
+tests:
+  - name: invalid credentials
+    steps:
+      - goto: /login
+      - fill:
+          selector: input[type="email"]
+          value: wrong@example.com
+      - fill:
+          selector: input[type="password"]
+          value: wrong-password
+      - click: button[type="submit"]
+      - expectText:
+          text: Invalid email or password`,
+  'web-flow': String.raw`version: 1
+type: web
+name: checkout-completo
+defaults:
+  timeoutMs: 15000
+  retries: 1
+  video: retain-on-failure
+  trace: retain-on-failure
+flows:
+  login:
+    params:
+      email: \${USER_EMAIL}
+      password: \${USER_PASSWORD}
+    steps:
+      - goto: /login
+      - fill:
+          by: label
+          target: Email
+          value: \${email}
+      - fill:
+          by: label
+          target: Senha
+          value: \${password}
+      - click:
+          by: role
+          role: button
+          name: Entrar
+tests:
+  - name: compra produto com cartao
+    tags: [checkout, smoke]
+    steps:
+      - use: login
+      - goto: /produtos
+      - click:
+          by: text
+          target: Produto A
+      - click:
+          by: role
+          role: button
+          name: Adicionar ao carrinho
+      - goto: /checkout
+      - click:
+          by: role
+          role: button
+          name: Finalizar compra
+      - extract:
+          as: ORDER_ID
+          from:
+            by: testId
+            target: order-id
+          property: text
+      - expectText: \${ORDER_ID}`,
+  'web-extract': String.raw`version: 1
+type: web
+name: extract-web
+tests:
+  - name: captura dados dinamicos
+    steps:
+      - goto: /orders/new
+      - click:
+          by: role
+          role: button
+          name: Criar pedido
+      - extract:
+          as: ORDER_ID
+          from:
+            by: testId
+            target: order-id
+          property: text
+      - extract:
+          as: DETAIL_URL
+          from:
+            by: testId
+            target: order-link
+          property: attribute
+          attribute: href
+      - extract:
+          as: CURRENT_URL
+          property: url
+      - goto: \${DETAIL_URL}
+      - expectText: \${ORDER_ID}`,
+  'web-library-flow': String.raw`version: 1
+type: web
+name: checkout-com-flow-compartilhado
+tests:
+  - name: checkout reutilizando auth.login
+    steps:
+      - use: auth.login
+        with:
+          email: qa@example.com
+          password: \${USER_PASSWORD}
+      - goto: /checkout
+      - expectText: Checkout`,
+} as const;
 
 const operatorGuide = `# TestHub MCP operator guide
 
@@ -40,12 +163,13 @@ Use TestHub as a test-management and execution platform. Do not guess state. Alw
 5. Environment baseUrl is target app URL. Variables are secrets/config used by specs.
 6. Call testhub_list_suites with projectId.
 7. For an existing suite: call testhub_get_suite before editing.
-8. Validate YAML with testhub_validate_spec before create/update when possible.
-9. For a new suite: create YAML spec with testhub_create_suite.
-10. Run with testhub_run_suite using projectId, suiteId, and environmentId. If environmentId is missing, testhub_run_suite will first match environmentName, then use the first project environment, or create one when baseUrl is provided.
-11. Poll with testhub_wait_run. Use timeoutMs large enough for web tests.
-12. Fetch testhub_get_run_report.
-13. Fetch testhub_get_artifacts. For web runs, look for video/webm, screenshot/png, trace/report. For API runs, inspect request/response JSON.
+8. Before writing web suites, call testhub_list_flows. Reuse existing organization flows such as auth.login when they match the journey.
+9. Validate YAML with testhub_validate_spec before create/update when possible. Validation resolves organization flows when authenticated.
+10. For a new suite: create YAML spec with testhub_create_suite.
+11. Run with testhub_run_suite using projectId, suiteId, and environmentId. If environmentId is missing, testhub_run_suite will first match environmentName, then use the first project environment, or create one when baseUrl is provided.
+12. Poll with testhub_wait_run. Use timeoutMs large enough for web tests.
+13. Fetch testhub_get_run_report.
+14. Fetch testhub_get_artifacts. For web runs, look for video/webm, screenshot/png, trace/report. For API runs, inspect request/response JSON.
 
 ## Rules
 - Never hard delete. testhub_archive_project is soft delete, but still destructive to visible workspace. Ask user before using it unless archiving your own temporary smoke data.
@@ -56,6 +180,9 @@ Use TestHub as a test-management and execution platform. Do not guess state. Alw
 - Web/app tests should produce recording artifacts by default. Backend/API tests should expose request, response, payload, and report artifacts.
 - AI is optional. Use testhub_explain_failure only when an enabled AI connection exists or user asks for AI review.
 - Variables in specs use environment variables. Keep secrets inside environments, not YAML when possible.
+- For long web journeys, prefer flows + use + with instead of duplicating login/setup steps.
+- For organization-wide reuse, prefer Flow Library refs like use: auth.login. Use testhub_create_flow/update_flow to maintain shared flows.
+- For dynamic web data, use extract with property text, value, attribute, or url; then reuse with \${VARIABLE}.
 
 ## Suite YAML examples
 
@@ -75,28 +202,24 @@ tests:
 
 Web:
 \`\`\`yaml
-version: 1
-type: web
-name: invalid-login
-tests:
-  - name: invalid credentials
-    steps:
-      - goto: /login
-      - fill:
-          selector: input[type="email"]
-          value: wrong@example.com
-      - fill:
-          selector: input[type="password"]
-          value: wrong-password
-      - click: button[type="submit"]
-      - expectText:
-          text: Invalid email or password
+${specExamples.web}
+\`\`\`
+
+Web flow + extract:
+\`\`\`yaml
+${specExamples['web-flow']}
+\`\`\`
+
+Web suite using Flow Library:
+\`\`\`yaml
+${specExamples['web-library-flow']}
 \`\`\`
 
 ## Command catalog
 - Project: ${commandCatalog.project.join(', ')}
 - Environment: ${commandCatalog.environment.join(', ')}
 - Suite: ${commandCatalog.suite.join(', ')}
+- Flow Library: ${commandCatalog.flow.join(', ')}
 - Run: ${commandCatalog.run.join(', ')}
 - AI: ${commandCatalog.ai.join(', ')}
 - Maintenance: ${commandCatalog.maintenance.join(', ')}
@@ -135,6 +258,25 @@ server.tool('testhub_help', 'Mostra guia operacional e catalogo de comandos do T
     section,
     guide: sections[section],
     commands: commandCatalog,
+  });
+});
+
+server.tool('testhub_get_spec_examples', 'Retorna exemplos oficiais de YAML TestHub, incluindo Flow Library, flows web e extract web', {
+  example: z.enum(['all', 'api', 'web', 'web-flow', 'web-extract', 'web-library-flow']).default('all'),
+}, ({ example }) => {
+  const examples = example === 'all'
+    ? specExamples
+    : { [example]: specExamples[example as keyof typeof specExamples] };
+  return text({
+    example,
+    notes: [
+      'Sempre valide specContent com testhub_validate_spec antes de criar ou atualizar suite.',
+      'Use flows + use + with para fluxos web extensos e reutilizaveis.',
+      'Chame testhub_list_flows antes de criar suite web; use refs como auth.login quando houver flow compartilhado.',
+      'Use extract web para capturar text, value, attribute ou url e reutilizar como ${VARIAVEL}.',
+      'Mantenha secrets em environments; use variables/params apenas para valores nao sensiveis ou placeholders.',
+    ],
+    examples,
   });
 });
 
@@ -304,6 +446,46 @@ server.tool('testhub_validate_spec', 'Valida YAML TestHub sem salvar suite', {
   specContent: z.string(),
 }, async (input) => {
   return text(await api('/api/spec/validate', { method: 'POST', body: JSON.stringify(input) }));
+});
+
+server.tool('testhub_list_flows', 'Lista flows reutilizaveis da organizacao atual, opcionalmente por namespace', {
+  namespace: z.string().optional(),
+}, async ({ namespace }) => {
+  return text(await api(`/api/flows${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`));
+});
+
+server.tool('testhub_get_flow', 'Busca flow reutilizavel por ID', {
+  flowId: z.string(),
+}, async ({ flowId }) => {
+  return text(await api(`/api/flows/${encodeURIComponent(flowId)}`));
+});
+
+server.tool('testhub_create_flow', 'Cria flow web reutilizavel da organizacao atual', {
+  namespace: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  params: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  steps: z.array(z.unknown()).min(1),
+}, async (input) => {
+  return text(await api('/api/flows', { method: 'POST', body: JSON.stringify(input) }));
+});
+
+server.tool('testhub_update_flow', 'Atualiza flow web reutilizavel da organizacao atual', {
+  flowId: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  params: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  steps: z.array(z.unknown()).min(1),
+}, async ({ flowId, ...input }) => {
+  return text(await api(`/api/flows/${encodeURIComponent(flowId)}`, { method: 'PUT', body: JSON.stringify(input) }));
+});
+
+server.tool('testhub_archive_flow', 'Arquiva flow reutilizavel por soft delete', {
+  flowId: z.string(),
+}, async ({ flowId }) => {
+  await api(`/api/flows/${encodeURIComponent(flowId)}`, { method: 'DELETE' });
+  return text({ archived: true, flowId });
 });
 
 server.tool('testhub_import_openapi', 'Importa OpenAPI JSON como suite API basica', {

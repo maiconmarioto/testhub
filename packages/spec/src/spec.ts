@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { z } from 'zod';
-import type { TestHubSpec } from '../../shared/src/types.js';
+import type { TestHubSpec, WebFlow, WebStep } from '../../shared/src/types.js';
 
 const selectorSchema = z.union([
   z.string(),
@@ -36,6 +36,15 @@ const webStepSchema = z.union([
   z.object({ expectValue: selectorSchema }).strict(),
   z.object({ expectCount: selectorSchema }).strict(),
   z.object({ uploadFile: selectorSchema }).strict(),
+  z.object({ use: z.string().min(1), with: z.record(z.union([z.string(), z.number(), z.boolean()])).optional() }).strict(),
+  z.object({
+    extract: z.object({
+      as: z.string().regex(/^[A-Z0-9_]+$/i),
+      from: selectorSchema.optional(),
+      property: z.enum(['text', 'value', 'url', 'attribute']),
+      attribute: z.string().optional(),
+    }).strict(),
+  }).strict(),
 ]);
 
 const webSpecSchema = z
@@ -56,6 +65,10 @@ const webSpecSchema = z
       })
       .optional(),
     variables: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    flows: z.record(z.object({
+      params: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+      steps: z.array(webStepSchema).min(1),
+    }).strict()).optional(),
     beforeEach: z.array(webStepSchema).optional(),
     afterEach: z.array(webStepSchema).optional(),
     tests: z
@@ -156,13 +169,13 @@ export function loadEnvFile(envFile?: string): Record<string, string> {
   return env;
 }
 
-export function parseSpecFile(specPath: string): TestHubSpec {
+export function parseSpecFile(specPath: string, options: { externalFlows?: Record<string, WebFlow> } = {}): TestHubSpec {
   const absolute = path.resolve(specPath);
   const raw = fs.readFileSync(absolute, 'utf8');
-  return parseSpecContent(raw);
+  return parseSpecContent(raw, options);
 }
 
-export function parseSpecContent(raw: string): TestHubSpec {
+export function parseSpecContent(raw: string, options: { externalFlows?: Record<string, WebFlow> } = {}): TestHubSpec {
   const parsed = YAML.parse(raw) as unknown;
   const result = specSchema.safeParse(parsed);
   if (!result.success) {
@@ -171,7 +184,48 @@ export function parseSpecContent(raw: string): TestHubSpec {
       .join('\n');
     throw new SpecValidationError(`Spec invalida:\n${issues}`);
   }
+  if (result.data.type === 'web') validateWebFlows(result.data, options.externalFlows ?? {});
   return result.data as TestHubSpec;
+}
+
+function validateWebFlows(spec: Extract<TestHubSpec, { type: 'web' }>, externalFlows: Record<string, WebFlow>): void {
+  const flows = spec.flows ?? {};
+  const allFlows = { ...externalFlows, ...flows };
+  const validateStep = (step: WebStep) => {
+    if ('use' in step && !allFlows[step.use]) {
+      throw new SpecValidationError(`Spec invalida:\nflow "${step.use}" nao encontrado`);
+    }
+    if ('extract' in step && step.extract.property === 'attribute' && !step.extract.attribute) {
+      throw new SpecValidationError(`Spec invalida:\nextract "${step.extract.as}" com property attribute requer attribute`);
+    }
+    if ('extract' in step && step.extract.property !== 'url' && !step.extract.from) {
+      throw new SpecValidationError(`Spec invalida:\nextract "${step.extract.as}" requer from para property ${step.extract.property}`);
+    }
+  };
+  for (const step of [
+    ...(spec.beforeEach ?? []),
+    ...(spec.afterEach ?? []),
+    ...spec.tests.flatMap((test) => test.steps),
+    ...Object.values(allFlows).flatMap((flow) => flow.steps),
+  ]) {
+    validateStep(step);
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (name: string, path: string[]) => {
+    if (visited.has(name)) return;
+    if (visiting.has(name)) {
+      throw new SpecValidationError(`Spec invalida:\nciclo em flows: ${[...path, name].join(' -> ')}`);
+    }
+    visiting.add(name);
+    for (const step of allFlows[name]?.steps ?? []) {
+      if ('use' in step) visit(step.use, [...path, name]);
+    }
+    visiting.delete(name);
+    visited.add(name);
+  };
+  for (const name of Object.keys(allFlows)) visit(name, []);
 }
 
 export function resolveVariables<T>(value: T, env: Record<string, string | undefined>, options: { allowMissing?: boolean } = {}): T {

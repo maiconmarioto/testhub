@@ -6,6 +6,7 @@ export interface RunOptions {
   baseUrl?: string;
   reportDir: string;
   envFile?: string;
+  externalFlows?: Record<string, WebFlow>;
   headed?: boolean;
   project?: string;
   environment?: string;
@@ -88,9 +89,26 @@ export interface WebSpec {
     retries?: number;
   };
   variables?: Record<string, string | number | boolean>;
+  flows?: Record<string, WebFlow>;
   beforeEach?: WebStep[];
   afterEach?: WebStep[];
   tests: WebTest[];
+}
+
+export interface WebFlow {
+  params?: Record<string, string | number | boolean>;
+  steps: WebStep[];
+}
+
+export interface FlowLibraryItem extends WebFlow {
+  id: string;
+  organizationId: string;
+  namespace: string;
+  name: string;
+  description?: string;
+  status: 'active' | 'inactive';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface WebTest {
@@ -118,7 +136,16 @@ export type WebStep =
   | { expectAttribute: SelectorInput & { attribute?: string; value?: string } }
   | { expectValue: SelectorInput & { value?: string } }
   | { expectCount: SelectorInput & { count?: number } }
-  | { uploadFile: SelectorInput & { path?: string } };
+  | { uploadFile: SelectorInput & { path?: string } }
+  | { use: string; with?: Record<string, string | number | boolean> }
+  | { extract: WebExtractStep };
+
+export interface WebExtractStep {
+  as: string;
+  from?: SelectorInput;
+  property: 'text' | 'value' | 'url' | 'attribute';
+  attribute?: string;
+}
 
 export interface ApiSpec {
   version: number;

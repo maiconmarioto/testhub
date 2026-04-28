@@ -740,6 +740,138 @@ describe('server local auth', () => {
     expect(afterRevoke.statusCode).toBe(401);
   });
 
+  it('manages reusable flow library by organization and validates suites using it', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-flows-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = 'true';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const registerA = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'flows-a@example.com',
+        password: 'correct-horse',
+        organizationName: 'Flows Org A',
+      },
+    });
+    expect(registerA.statusCode).toBe(201);
+    const orgA = registerA.json() as { token: string; organization: { id: string } };
+
+    const registerB = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'flows-b@example.com',
+        password: 'correct-horse',
+        organizationName: 'Flows Org B',
+      },
+    });
+    expect(registerB.statusCode).toBe(201);
+    const orgB = registerB.json() as { token: string };
+
+    const authA = { authorization: `Bearer ${orgA.token}` };
+    const authB = { authorization: `Bearer ${orgB.token}` };
+
+    const createdFlow = await app.inject({
+      method: 'POST',
+      url: '/api/flows',
+      headers: authA,
+      payload: {
+        namespace: 'auth',
+        name: 'login',
+        description: 'Login compartilhado',
+        params: { email: '${USER_EMAIL}', password: '${USER_PASSWORD}' },
+        steps: [
+          { goto: '/login' },
+          { fill: { by: 'label', target: 'Email', value: '${email}' } },
+        ],
+      },
+    });
+    expect(createdFlow.statusCode).toBe(201);
+    const flow = createdFlow.json() as { id: string; organizationId: string; namespace: string; name: string };
+    expect(flow).toMatchObject({ organizationId: orgA.organization.id, namespace: 'auth', name: 'login' });
+
+    const selfCycle = await app.inject({
+      method: 'POST',
+      url: '/api/flows',
+      headers: authA,
+      payload: {
+        namespace: 'auth',
+        name: 'self',
+        steps: [{ use: 'auth.self' }],
+      },
+    });
+    expect(selfCycle.statusCode).toBe(400);
+    expect(selfCycle.json()).toMatchObject({ error: expect.stringContaining('ciclo em flows') });
+
+    const specContent = [
+      'version: 1',
+      'type: web',
+      'name: web-shared-flow',
+      'tests:',
+      '  - name: uses shared login',
+      '    steps:',
+      '      - use: auth.login',
+      '        with:',
+      '          email: qa@example.com',
+      '      - expectText: Dashboard',
+      '',
+    ].join('\n');
+
+    const validA = await app.inject({
+      method: 'POST',
+      url: '/api/spec/validate',
+      headers: authA,
+      payload: { specContent },
+    });
+    expect(validA.statusCode).toBe(200);
+    expect(validA.json()).toMatchObject({ valid: true, type: 'web', tests: 1 });
+
+    const invalidB = await app.inject({
+      method: 'POST',
+      url: '/api/spec/validate',
+      headers: authB,
+      payload: { specContent },
+    });
+    expect(invalidB.statusCode).toBe(400);
+    expect(invalidB.json()).toMatchObject({ valid: false });
+
+    const listB = await app.inject({ method: 'GET', url: '/api/flows', headers: authB });
+    expect(listB.statusCode).toBe(200);
+    expect(listB.json()).toEqual([]);
+
+    const project = await app.inject({ method: 'POST', url: '/api/projects', headers: authA, payload: { name: 'Flow Project' } });
+    expect(project.statusCode).toBe(201);
+    const suite = await app.inject({
+      method: 'POST',
+      url: '/api/suites',
+      headers: authA,
+      payload: {
+        projectId: (project.json() as { id: string }).id,
+        name: 'uses flow',
+        type: 'web',
+        specContent,
+      },
+    });
+    expect(suite.statusCode).toBe(201);
+
+    const archive = await app.inject({ method: 'DELETE', url: `/api/flows/${flow.id}`, headers: authA });
+    expect(archive.statusCode).toBe(204);
+
+    const invalidAfterArchive = await app.inject({
+      method: 'POST',
+      url: '/api/spec/validate',
+      headers: authA,
+      payload: { specContent },
+    });
+    expect(invalidAfterArchive.statusCode).toBe(400);
+    expect(invalidAfterArchive.json()).toMatchObject({ valid: false });
+  });
+
   it('does not treat auth route prefixes as public', async () => {
     process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-prefix-'));
     process.env.TESTHUB_AUTH_MODE = 'local';

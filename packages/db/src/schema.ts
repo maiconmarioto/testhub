@@ -123,3 +123,16 @@ export const aiConnections = pgTable('ai_connections', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 });
+
+export const flowLibrary = pgTable('flow_library', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  namespace: text('namespace').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  params: jsonb('params').$type<Record<string, string | number | boolean> | null>(),
+  steps: jsonb('steps').$type<unknown[]>(),
+  status: text('status').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+});
