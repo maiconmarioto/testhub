@@ -1167,7 +1167,7 @@ git commit -m "feat: add web auth flows"
 **Files:**
 - Modify: `apps/web/components/dashboard/v2-console.tsx`
 
-- [ ] **Step 1: Add member types and state**
+- [x] **Step 1: Add member types and state**
 
 Add:
 
@@ -1186,7 +1186,7 @@ Fetch members in `refresh()`:
 api<OrganizationMember[]>('/api/organizations/current/members').catch(() => [])
 ```
 
-- [ ] **Step 2: Add member creation action**
+- [x] **Step 2: Add member creation action**
 
 Add:
 
@@ -1208,7 +1208,7 @@ async function createMember() {
 }
 ```
 
-- [ ] **Step 3: Replace `Sessao local` card**
+- [x] **Step 3: Replace `Sessao local` card**
 
 In `SettingsWorkspace`, replace the manual token card with an `Organizacao` card listing:
 
@@ -1220,7 +1220,7 @@ In `SettingsWorkspace`, replace the manual token card with an `Organizacao` card
 
 Keep a collapsed "Token para CLI/MCP" section if needed, but do not make manual token the primary web login path.
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 Run:
 
@@ -1230,7 +1230,7 @@ npm run web:build
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/components/dashboard/v2-console.tsx
