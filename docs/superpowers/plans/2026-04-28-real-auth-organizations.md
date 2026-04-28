@@ -318,9 +318,12 @@ git commit -m "feat: add auth store primitives"
 - Modify: `packages/db/src/schema.ts`
 - Modify: `packages/db/src/migrate.ts`
 - Modify: `packages/db/src/pg-store.ts`
+- Modify: `apps/api/src/server.ts`
+- Modify: `tests/cleanup.test.ts`
+- Create: `tests/pg-store-auth.test.ts`
 - Test: `tests/auth-store.test.ts`
 
-- [ ] **Step 1: Write schema compile target**
+- [x] **Step 1: Write schema compile target**
 
 No new runtime test yet; `npm run typecheck` will fail until schema/store methods exist.
 
@@ -332,7 +335,7 @@ npm run typecheck
 
 Expected: FAIL because `PgStore` does not implement the extended `Store` interface.
 
-- [ ] **Step 2: Add Drizzle tables and columns**
+- [x] **Step 2: Add Drizzle tables and columns**
 
 In `packages/db/src/schema.ts`, add:
 
@@ -387,7 +390,7 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
 
 Add `organizationId: text('organization_id').notNull()` to `projects` and to `aiConnections` later in this task if org-scoping settings now. If adding `organizationId` to `aiConnections`, update `AiConnection` type and all callers in Task 7.
 
-- [ ] **Step 3: Add idempotent migrations**
+- [x] **Step 3: Add idempotent migrations**
 
 In `packages/db/src/migrate.ts`, add statements:
 
@@ -412,7 +415,7 @@ await pool.query(`update projects set organization_id = 'legacy-local' where org
 await pool.query(`alter table projects alter column organization_id set not null`);
 ```
 
-- [ ] **Step 4: Implement PgStore methods**
+- [x] **Step 4: Implement PgStore methods**
 
 In `packages/db/src/pg-store.ts`, import new tables and implement the same methods as `JsonStore`. Add row mappers:
 
@@ -437,7 +440,7 @@ const [session] = await this.db.select().from(sessions).where(eq(sessions.tokenH
 if (!session || session.expiresAt.getTime() <= Date.now()) return undefined;
 ```
 
-- [ ] **Step 5: Typecheck**
+- [x] **Step 5: Typecheck**
 
 Run:
 
@@ -447,7 +450,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/db/src/schema.ts packages/db/src/migrate.ts packages/db/src/pg-store.ts
