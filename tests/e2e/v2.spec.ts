@@ -1,8 +1,27 @@
-import { expect, test } from '@playwright/test';
+import fs from 'node:fs';
+import { expect, test, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:44321';
+const bootstrapUserPath = '.testhub-e2e/e2e-bootstrap-user.json';
+const userPassword = 'password-1234';
+
+type TestUser = {
+  email: string;
+  password: string;
+  organizationName: string;
+  token: string;
+};
+
+let bootstrapUser: TestUser | undefined;
+
+test('protected routes redirect anonymous user to login', async ({ page }) => {
+  await routeApi(page);
+  await page.goto('/v2');
+  await expect(page).toHaveURL(/\/login/);
+});
 
 test('v2 keeps shared query params and navigates real management pages', async ({ page }) => {
+  await login(page);
   const fixture = await seedWorkspace();
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
@@ -29,6 +48,7 @@ test('v2 keeps shared query params and navigates real management pages', async (
 });
 
 test('project screen edits retention and environment, then suite edit link opens selected suite', async ({ page }) => {
+  await login(page);
   const fixture = await seedWorkspace('crud-flow');
   await page.goto(`/projects?project=${fixture.project.id}`);
 
@@ -44,6 +64,7 @@ test('project screen edits retention and environment, then suite edit link opens
 });
 
 test('suites page imports OpenAPI with advanced options and saves Monaco YAML', async ({ page }) => {
+  await login(page);
   const fixture = await seedWorkspace('openapi-flow');
   await page.goto(`/suites?project=${fixture.project.id}&suite=${fixture.suite.id}`);
 
@@ -69,10 +90,11 @@ test('suites page imports OpenAPI with advanced options and saves Monaco YAML', 
 });
 
 test('settings cover AI connection, retention cleanup and audit export link', async ({ page }) => {
+  await login(page);
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: 'Sistema' })).toBeVisible();
 
-  await page.getByLabel('Nome').fill(`OpenRouter ${Date.now()}`);
+  await page.getByLabel('Nome').nth(1).fill(`OpenRouter ${Date.now()}`);
   await page.getByLabel('Modelo').fill('openai/gpt-4o-mini');
   await page.getByLabel('API key').fill('sk-test');
   await page.getByRole('button', { name: 'Salvar AI' }).click();
@@ -85,6 +107,7 @@ test('settings cover AI connection, retention cleanup and audit export link', as
 });
 
 test('evidence sheet exposes tabs and artifacts without duplicate request rows', async ({ page }) => {
+  await login(page);
   const fixture = await seedWorkspace('evidence-tabs');
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
@@ -97,10 +120,11 @@ test('evidence sheet exposes tabs and artifacts without duplicate request rows',
   await page.getByRole('tab', { name: 'Artifacts' }).click();
   await expect(page.getByRole('link', { name: /HTML report html/ }).first()).toBeVisible({ timeout: 20_000 });
   await page.getByRole('tab', { name: 'Payload' }).click();
-  await expect(page.getByText('Payload indisponivel para runs frontend.').or(page.getByText('loading...')).or(page.getByText(/status/).first())).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Payload indisponivel para runs frontend.').or(page.getByText('loading...')).or(page.getByText(/status/)).first()).toBeVisible({ timeout: 20_000 });
 });
 
 test('wizard creates a full workspace and ignores Escape', async ({ page }) => {
+  await login(page);
   await page.goto('/v2');
   await page.getByRole('button', { name: 'Wizard' }).click();
   await expect(page.getByRole('heading', { name: 'Wizard de configuracao' })).toBeVisible();
@@ -120,6 +144,7 @@ test('wizard creates a full workspace and ignores Escape', async ({ page }) => {
 });
 
 test('v2 run flow creates evidence', async ({ page }) => {
+  await login(page);
   const fixture = await seedWorkspace('run-flow');
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
@@ -131,14 +156,82 @@ test('v2 run flow creates evidence', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Evidence' })).toBeVisible();
 });
 
+async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
+  const organizationName = uniqueName('Team');
+  const formAlert = page.locator('p[role="alert"]');
+  await routeApi(page);
+  await page.goto('/register');
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Nome').fill('Web E2E');
+  await page.getByLabel('Senha').fill(userPassword);
+  await page.getByLabel('Organizacao').fill(organizationName);
+  await page.getByRole('button', { name: 'Criar conta' }).click();
+
+  const result = await Promise.race([
+    page.waitForURL(/\/v2/, { timeout: 10_000 }).then(() => 'registered' as const),
+    formAlert.waitFor({ state: 'visible', timeout: 10_000 }).then(() => 'error' as const),
+  ]);
+
+  if (result === 'error') {
+    await expect(formAlert).toContainText('Cadastro publico');
+    await createApiUser(email, userPassword, organizationName);
+    await page.goto('/login');
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Senha').fill(userPassword);
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(/\/v2/);
+  }
+
+  const token = await page.evaluate(() => window.localStorage.getItem('testhub.token'));
+  if (!token) throw new Error('Login did not persist testhub.token');
+  setBootstrapUser({ email, password: userPassword, organizationName, token });
+  return token;
+}
+
+async function routeApi(page: Page): Promise<void> {
+  await page.route(`${apiBase}/**`, async (route) => {
+    const request = route.request();
+    const origin = request.headers().origin ?? 'http://127.0.0.1:3335';
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: corsHeaders(origin, {
+          'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'access-control-allow-headers': request.headers()['access-control-request-headers'] ?? 'authorization, content-type',
+        }),
+      });
+      return;
+    }
+
+    const requestHeaders = await request.allHeaders();
+    delete requestHeaders.host;
+    const response = await fetch(request.url(), {
+      method: request.method(),
+      headers: requestHeaders,
+      body: ['GET', 'HEAD'].includes(request.method()) ? undefined : request.postDataBuffer(),
+      redirect: 'manual',
+    });
+    const responseHeaders = Object.fromEntries(response.headers.entries());
+    delete responseHeaders['content-encoding'];
+    delete responseHeaders['content-length'];
+    delete responseHeaders['transfer-encoding'];
+    await route.fulfill({
+      status: response.status,
+      headers: corsHeaders(origin, responseHeaders),
+      body: Buffer.from(await response.arrayBuffer()),
+    });
+  });
+}
+
 async function seedWorkspace(name = 'v2-e2e') {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const project = await post<{ id: string }>('/api/projects', { name: `${name}-${suffix}` });
+  const token = await createApiUser();
+  const project = await post<{ id: string }>('/api/projects', { name: `${name}-${suffix}` }, token);
   const environment = await post<{ id: string }>('/api/environments', {
     projectId: project.id,
     name: 'local-api',
     baseUrl: apiBase,
-  });
+  }, token);
   const suite = await post<{ id: string }>('/api/suites', {
     projectId: project.id,
     name: `api-health-${suffix}`,
@@ -153,16 +246,83 @@ tests:
       path: /api/health
     expect:
       status: 200`,
-  });
+  }, token);
   return { project, environment, suite, suiteName: `api-health-${suffix}` };
 }
 
-async function post<T>(path: string, payload: unknown): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
+async function createApiUser(email = uniqueEmail('api'), password = userPassword, organizationName = uniqueName('API Team')): Promise<string> {
+  const register = await fetch(`${apiBase}/api/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, name: 'API E2E', password, organizationName }),
+  });
+  if (register.ok) {
+    const body = await register.json() as { token: string };
+    setBootstrapUser({ email, password, organizationName, token: body.token });
+    return body.token;
+  }
+
+  const registerError = await register.text();
+  if (register.status !== 403 || !registerError.includes('Cadastro publico')) {
+    throw new Error(registerError);
+  }
+  bootstrapUser ??= readBootstrapUser();
+  if (!bootstrapUser) throw new Error('Public signup disabled before a bootstrap user was available');
+
+  await post('/api/organizations/current/members', {
+    email,
+    name: 'API E2E',
+    role: 'admin',
+    temporaryPassword: password,
+  }, bootstrapUser.token);
+
+  const loginResponse = await fetch(`${apiBase}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!loginResponse.ok) throw new Error(await loginResponse.text());
+  const body = await loginResponse.json() as { token: string };
+  return body.token;
+}
+
+async function post<T>(path: string, payload: unknown, token: string): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
   if (!response.ok) throw new Error(await response.text());
   return response.json() as Promise<T>;
+}
+
+function uniqueEmail(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
+}
+
+function uniqueName(prefix: string): string {
+  return `${prefix} ${Date.now()} ${Math.random().toString(16).slice(2)}`;
+}
+
+function setBootstrapUser(user: TestUser): void {
+  if (bootstrapUser) return;
+  bootstrapUser = user;
+  fs.writeFileSync(bootstrapUserPath, JSON.stringify(user), 'utf8');
+}
+
+function readBootstrapUser(): TestUser | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(bootstrapUserPath, 'utf8')) as TestUser;
+  } catch {
+    return undefined;
+  }
+}
+
+function corsHeaders(origin: string, headers: Record<string, string>): Record<string, string> {
+  return {
+    ...headers,
+    'access-control-allow-credentials': 'true',
+    'access-control-allow-origin': origin,
+    vary: 'Origin',
+  };
 }
