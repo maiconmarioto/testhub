@@ -4,7 +4,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 const TESTHUB_URL = process.env.TESTHUB_URL ?? 'http://localhost:4321';
-const TESTHUB_TOKEN = process.env.TESTHUB_TOKEN ?? process.env.TESTHUB_SESSION_TOKEN;
+const TESTHUB_TOKEN = process.env.TESTHUB_TOKEN ?? process.env.TESTHUB_PAT ?? process.env.TESTHUB_SESSION_TOKEN;
+const TESTHUB_ORGANIZATION_ID = process.env.TESTHUB_ORGANIZATION_ID;
 
 type EnvironmentSummary = {
   id: string;
@@ -480,6 +481,7 @@ async function api(path: string, options: RequestInit = {}): Promise<unknown> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
   if (TESTHUB_TOKEN) headers.set('authorization', `Bearer ${TESTHUB_TOKEN}`);
+  if (TESTHUB_ORGANIZATION_ID) headers.set('x-testhub-organization-id', TESTHUB_ORGANIZATION_ID);
   const response = await fetch(`${TESTHUB_URL}${path}`, {
     ...options,
     headers,

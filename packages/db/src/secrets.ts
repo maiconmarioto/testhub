@@ -38,6 +38,6 @@ export function maskVariables(variables?: Record<string, string>): Record<string
 }
 
 function getKey(): Buffer {
-  const raw = process.env.TESTHUB_SECRET_KEY ?? 'testhub-dev-secret-key-change-me';
+  const raw = process.env.TESTHUB_SECRET_KEY ?? '';
   return crypto.createHash('sha256').update(raw).digest();
 }

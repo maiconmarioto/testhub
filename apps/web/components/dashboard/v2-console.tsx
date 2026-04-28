@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Database, FileCode2, FolderKanban, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
+import { BookOpen, Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Database, FileCode2, FolderKanban, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
 import YAML from 'yaml';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,10 +34,31 @@ type SecurityStatus = {
   network: { allowedHosts: string[]; allowAllWhenEmpty: boolean };
   retention: { days: number };
 };
-type AuthMe = { user: { email: string; name?: string }; organization: { id: string; name: string }; membership: { role: 'admin' | 'editor' | 'viewer' }; organizations: Array<{ id: string; name: string }> };
+type Role = 'admin' | 'editor' | 'viewer';
+type Organization = { id: string; name: string; slug?: string; status?: string; createdAt?: string; updatedAt?: string };
+type AuthMe = { user: { id?: string; email: string; name?: string; status?: string }; organization: { id: string; name: string; slug?: string; status?: string }; membership: { id?: string; role: Role }; organizations: Organization[] };
 type OrganizationMember = {
   user: { id: string; email: string; name?: string };
-  membership: { id: string; role: 'admin' | 'editor' | 'viewer' };
+  membership: { id: string; role: Role };
+};
+type UserManagementItem = {
+  user: { id: string; email: string; name?: string; status: string; createdAt: string; updatedAt: string };
+  memberships: Array<{ id: string; userId: string; organizationId: string; role: Role; createdAt: string; updatedAt: string }>;
+  organizations: Organization[];
+};
+type PersonalAccessToken = {
+  id: string;
+  userId: string;
+  name: string;
+  token: string;
+  tokenPreview: string;
+  tokenMasked: string;
+  organizationIds?: string[];
+  defaultOrganizationId: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string;
 };
 type AuditEntry = { id: string; action: string; actor: string; status: 'ok' | 'blocked' | 'error'; target?: string; createdAt: string; detail?: Record<string, unknown> };
 type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
@@ -69,7 +90,7 @@ type RunReport = {
 };
 type EvidenceTab = 'overview' | 'timeline' | 'artifacts' | 'payload';
 type MenuSheet = 'evidence' | null;
-type V2View = 'run' | 'projects' | 'suites' | 'settings';
+type V2View = 'run' | 'projects' | 'suites' | 'settings' | 'docs';
 type SuiteWithContent = Suite & { specContent: string };
 type ValidationResult = { valid: true; type: 'api' | 'web'; name: string; tests: number } | { valid: false; error: string };
 type WizardDraft = {
@@ -83,9 +104,11 @@ type WizardDraft = {
   specContent: string;
 };
 type OpenApiDraft = { name: string; spec: string; baseUrl: string; authTemplate: 'none' | 'bearer' | 'apiKey'; headers: string; tags: string; selectedOperations: string; includeBodyExamples: boolean };
+type MembershipEdit = Record<string, Record<string, Role | ''>>;
 
 const controlClass = 'h-10 border-[#d7d2c4] bg-white text-[#1f241f] shadow-none placeholder:text-[#8a877c] focus-visible:ring-[#426b4d]';
 const darkSelectClass = `min-w-52 ${controlClass}`;
+const roles: Role[] = ['admin', 'editor', 'viewer'];
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 const defaultSpec = `version: 1
 type: api
@@ -107,6 +130,9 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [security, setSecurity] = useState<SecurityStatus | null>(null);
   const [me, setMe] = useState<AuthMe | null>(null);
   const [members, setMembers] = useState<OrganizationMember[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [managedUsers, setManagedUsers] = useState<UserManagementItem[]>([]);
+  const [personalTokens, setPersonalTokens] = useState<PersonalAccessToken[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [projectId, setProjectId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
@@ -125,6 +151,10 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [envDraft, setEnvDraft] = useState({ id: '', name: '', baseUrl: '', variables: '' });
   const [aiDraft, setAiDraft] = useState({ id: '', name: 'OpenRouter', provider: 'openrouter' as AiConnection['provider'], apiKey: '', model: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1', enabled: true });
   const [memberDraft, setMemberDraft] = useState({ email: '', name: '', role: 'viewer' as OrganizationMember['membership']['role'], temporaryPassword: '' });
+  const [profileDraft, setProfileDraft] = useState({ name: '', email: '', currentPassword: '', newPassword: '' });
+  const [orgDraft, setOrgDraft] = useState({ name: '' });
+  const [membershipEdit, setMembershipEdit] = useState<MembershipEdit>({});
+  const [tokenDraft, setTokenDraft] = useState({ name: 'mcp-local', scope: 'all' as 'all' | 'selected', organizationIds: [] as string[] });
   const [aiOutput, setAiOutput] = useState('');
   const [cleanupDays, setCleanupDays] = useState('30');
   const [cleanupResult, setCleanupResult] = useState('');
@@ -167,9 +197,10 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   async function refresh() {
     setError('');
     try {
-      const [nextMe, nextMembers, nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
+      const [nextMe, nextMembers, nextTokens, nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
         api<AuthMe>('/api/auth/me', { redirectOnUnauthorized: false }).catch(() => null),
         api<OrganizationMember[]>('/api/organizations/current/members', { redirectOnUnauthorized: false }).catch(() => []),
+        api<PersonalAccessToken[]>('/api/users/me/tokens', { redirectOnUnauthorized: false }).catch(() => []),
         api<Project[]>('/api/projects'),
         api<Environment[]>('/api/environments'),
         api<Suite[]>('/api/suites'),
@@ -180,6 +211,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       ]);
       setMe(nextMe);
       setMembers(nextMembers);
+      setPersonalTokens(nextTokens);
       setProjects(nextProjects);
       setEnvs(nextEnvs);
       setSuites(nextSuites);
@@ -195,6 +227,19 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
         }
         return nextProjects[0]?.id ?? '';
       });
+      if (nextMe?.membership.role === 'admin') {
+        const [nextOrganizations, nextManagedUsers] = await Promise.all([
+          api<Organization[]>('/api/organizations', { redirectOnUnauthorized: false }).catch(() => []),
+          api<UserManagementItem[]>('/api/users', { redirectOnUnauthorized: false }).catch(() => []),
+        ]);
+        setOrganizations(nextOrganizations);
+        setManagedUsers(nextManagedUsers);
+        setMembershipEdit((current) => mergeMembershipEdit(current, nextManagedUsers, nextOrganizations));
+      } else {
+        setOrganizations(nextMe?.organizations ?? []);
+        setManagedUsers([]);
+        setMembershipEdit({});
+      }
     } catch (nextError) {
       setError(messageOf(nextError));
     }
@@ -218,6 +263,15 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     const id = setInterval(refresh, 3000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    setProfileDraft((current) => ({
+      name: current.name === '' || current.name === me?.user.name ? (me?.user.name ?? '') : current.name,
+      email: current.email === '' || current.email === me?.user.email ? (me?.user.email ?? '') : current.email,
+      currentPassword: current.currentPassword,
+      newPassword: current.newPassword,
+    }));
+  }, [me?.user.email, me?.user.name]);
 
   useEffect(() => {
     const current = projects.find((project) => project.id === projectId);
@@ -512,6 +566,88 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     }, 'Membro criado.');
   }
 
+  async function saveProfile() {
+    await mutate(async () => {
+      const result = await api<{ user: AuthMe['user'] }>('/api/users/me', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: profileDraft.name.trim() || undefined,
+          email: profileDraft.email.trim() || undefined,
+          currentPassword: profileDraft.currentPassword || undefined,
+          newPassword: profileDraft.newPassword || undefined,
+        }),
+      });
+      setMe((current) => current ? { ...current, user: { ...current.user, ...result.user } } : current);
+      setProfileDraft((current) => ({ ...current, currentPassword: '', newPassword: '' }));
+    }, 'Perfil atualizado.');
+  }
+
+  async function createOrganization() {
+    const name = orgDraft.name.trim();
+    if (!name) return;
+    await mutate(async () => {
+      await api<Organization>('/api/organizations', { method: 'POST', body: JSON.stringify({ name }) });
+      setOrgDraft({ name: '' });
+    }, 'Organizacao criada.');
+  }
+
+  async function switchOrganization(organizationId: string) {
+    await mutate(async () => {
+      const result = await api<{ user: AuthMe['user']; organization: AuthMe['organization']; membership: AuthMe['membership']; organizations: Organization[]; token?: string }>('/api/auth/switch-organization', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId }),
+      });
+      if (result.token) window.localStorage.setItem('testhub.token', result.token);
+      setMe({ user: result.user, organization: result.organization, membership: result.membership, organizations: result.organizations });
+    }, 'Organizacao alterada.');
+  }
+
+  function setEditedMembership(userId: string, organizationId: string, roleValue: Role | '') {
+    setMembershipEdit((current) => ({
+      ...current,
+      [userId]: {
+        ...(current[userId] ?? {}),
+        [organizationId]: roleValue,
+      },
+    }));
+  }
+
+  async function saveUserMemberships(userId: string) {
+    const userMemberships = membershipEdit[userId] ?? {};
+    await mutate(() => api(`/api/users/${userId}/memberships`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        memberships: Object.entries(userMemberships)
+          .filter((entry): entry is [string, Role] => Boolean(entry[1]))
+          .map(([organizationId, membershipRole]) => ({ organizationId, role: membershipRole })),
+      }),
+    }), 'Memberships atualizadas.');
+  }
+
+  async function createPersonalToken() {
+    const name = tokenDraft.name.trim();
+    if (!name) return;
+    await mutate(async () => {
+      const token = await api<PersonalAccessToken>('/api/users/me/tokens', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          organizationIds: tokenDraft.scope === 'selected' ? tokenDraft.organizationIds : undefined,
+          defaultOrganizationId: tokenDraft.scope === 'selected' ? tokenDraft.organizationIds[0] : me?.organization.id,
+        }),
+      });
+      setPersonalTokens((current) => [token, ...current.filter((item) => item.id !== token.id)]);
+      setTokenDraft({ name: 'mcp-local', scope: 'all', organizationIds: [] });
+    }, 'Token criado.');
+  }
+
+  async function revokePersonalToken(tokenId: string) {
+    await mutate(async () => {
+      await api(`/api/users/me/tokens/${tokenId}`, { method: 'DELETE' });
+      setPersonalTokens((current) => current.filter((token) => token.id !== tokenId));
+    }, 'Token revogado.');
+  }
+
   async function explainFailure(run?: Run) {
     await runAi('explain-failure', run, 'Analise IA gerada.');
   }
@@ -577,7 +713,9 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       ? 'Suites'
       : view === 'settings'
         ? 'Sistema'
-        : 'Run workspace';
+        : view === 'docs'
+          ? 'Documentacao'
+          : 'Run workspace';
 
   return (
     <main className="min-h-screen bg-[#f4f2eb] text-[#1f241f]">
@@ -591,6 +729,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               <RailLink icon={Play} active={view === 'run'} label="Run" href="/v2" />
               <RailLink icon={FolderKanban} active={view === 'projects'} label="Projetos" href={projectId ? `/projects?project=${projectId}` : '/projects'} />
               <RailLink icon={FileCode2} active={view === 'suites'} label="Suites" href={projectId ? `/suites?project=${projectId}` : '/suites'} />
+              <RailLink icon={BookOpen} active={view === 'docs'} label="Docs" href="/docs" />
               <RailLink icon={Settings2} active={view === 'settings'} label="Sistema" href="/settings" />
             </div>
             <Button asChild variant="outline" size="icon" className="rounded-lg border-white/15 bg-transparent text-[#f7f6f0] hover:bg-white/10">
@@ -748,11 +887,18 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 onApprovedAiPatchChange={setApprovedAiPatch}
                 onImportOpenApi={importOpenApi}
               />
-            ) : (
+            ) : view === 'settings' ? (
               <SettingsWorkspace
                 me={me}
                 members={members}
+                organizations={organizations}
+                managedUsers={managedUsers}
                 memberDraft={memberDraft}
+                profileDraft={profileDraft}
+                orgDraft={orgDraft}
+                membershipEdit={membershipEdit}
+                personalTokens={personalTokens}
+                tokenDraft={tokenDraft}
                 aiConnections={aiConnections}
                 aiDraft={aiDraft}
                 security={security}
@@ -764,12 +910,24 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 canAdmin={canAdmin}
                 onMemberDraftChange={setMemberDraft}
                 onCreateMember={createMember}
+                onProfileDraftChange={setProfileDraft}
+                onSaveProfile={saveProfile}
+                onOrgDraftChange={setOrgDraft}
+                onCreateOrganization={createOrganization}
+                onSwitchOrganization={switchOrganization}
+                onMembershipEditChange={setEditedMembership}
+                onSaveUserMemberships={saveUserMemberships}
+                onTokenDraftChange={setTokenDraft}
+                onCreatePersonalToken={createPersonalToken}
+                onRevokePersonalToken={revokePersonalToken}
                 onAiDraftChange={setAiDraft}
                 onEditAiConnection={editAiConnection}
                 onSaveAiConnection={saveAiConnection}
                 onCleanupDaysChange={setCleanupDays}
                 onCleanup={cleanupRuns}
               />
+            ) : (
+              <DocumentationWorkspace />
             )}
           </div>
           <Sheet open={openSheet === 'evidence'} onOpenChange={(open) => setOpenSheet(open ? 'evidence' : null)}>
@@ -1210,7 +1368,14 @@ function SuitesWorkspace(props: {
 function SettingsWorkspace(props: {
   me: AuthMe | null;
   members: OrganizationMember[];
+  organizations: Organization[];
+  managedUsers: UserManagementItem[];
   memberDraft: { email: string; name: string; role: OrganizationMember['membership']['role']; temporaryPassword: string };
+  profileDraft: { name: string; email: string; currentPassword: string; newPassword: string };
+  orgDraft: { name: string };
+  membershipEdit: MembershipEdit;
+  personalTokens: PersonalAccessToken[];
+  tokenDraft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] };
   aiConnections: AiConnection[];
   aiDraft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean };
   security: SecurityStatus | null;
@@ -1222,6 +1387,16 @@ function SettingsWorkspace(props: {
   canAdmin: boolean;
   onMemberDraftChange: (draft: { email: string; name: string; role: OrganizationMember['membership']['role']; temporaryPassword: string }) => void;
   onCreateMember: () => void;
+  onProfileDraftChange: (draft: { name: string; email: string; currentPassword: string; newPassword: string }) => void;
+  onSaveProfile: () => void;
+  onOrgDraftChange: (draft: { name: string }) => void;
+  onCreateOrganization: () => void;
+  onSwitchOrganization: (organizationId: string) => void;
+  onMembershipEditChange: (userId: string, organizationId: string, roleValue: Role | '') => void;
+  onSaveUserMemberships: (userId: string) => void;
+  onTokenDraftChange: (draft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] }) => void;
+  onCreatePersonalToken: () => void;
+  onRevokePersonalToken: (tokenId: string) => void;
   onAiDraftChange: (draft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean }) => void;
   onEditAiConnection: (connection: AiConnection) => void;
   onSaveAiConnection: () => void;
@@ -1229,34 +1404,99 @@ function SettingsWorkspace(props: {
   onCleanup: () => void;
 }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-      <div className="grid gap-4">
-        <Card>
-          <CardHeader className="pb-3"><CardTitle>Seguranca empresa</CardTitle><CardDescription>OIDC, RBAC, allowlist, secrets e retention.</CardDescription></CardHeader>
-          <CardContent className="grid gap-2 md:grid-cols-2">
-            <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
-            <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
-            <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'viewer'} />
-            <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
-            <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
-            <SecurityLine label="Retention" ok value={`${props.security?.retention.days ?? props.cleanupDays} dias`} />
-          </CardContent>
-        </Card>
+    <Tabs defaultValue="profile" className="grid gap-4">
+      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+        <TabsTrigger value="profile">Perfil</TabsTrigger>
+        <TabsTrigger value="organizations">Organizacoes</TabsTrigger>
+        <TabsTrigger value="users">Usuarios</TabsTrigger>
+        <TabsTrigger value="security">Seguranca</TabsTrigger>
+        <TabsTrigger value="ai">AI</TabsTrigger>
+        <TabsTrigger value="audit">Audit</TabsTrigger>
+      </TabsList>
 
+      <TabsContent value="profile" className="m-0">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Organizacao</CardTitle>
-            <CardDescription>{props.me?.organization.name ?? 'Organizacao atual'} · {props.members.length} membros</CardDescription>
+            <CardTitle>Perfil</CardTitle>
+            <CardDescription>{props.me?.user.email ?? 'Sessao nao carregada'}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 md:grid-cols-3">
               <InfoLine label="Usuario" value={props.me?.user.email ?? 'sem sessao'} />
-              <InfoLine label="Time" value={props.me?.organization.name ?? 'nao carregado'} />
+              <InfoLine label="Organizacao" value={props.me?.organization.name ?? 'nao carregado'} />
               <InfoLine label="Role" value={props.me?.membership.role ?? 'viewer'} />
             </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Nome"><Input value={props.profileDraft.name} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, name: event.target.value })} /></Field>
+              <Field label="Email"><Input type="email" value={props.profileDraft.email} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, email: event.target.value })} /></Field>
+              <Field label="Senha atual"><Input type="password" value={props.profileDraft.currentPassword} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, currentPassword: event.target.value })} placeholder="Obrigatoria para trocar senha" /></Field>
+              <Field label="Nova senha"><Input type="password" value={props.profileDraft.newPassword} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, newPassword: event.target.value })} /></Field>
+            </div>
+            <Button className="w-fit" onClick={props.onSaveProfile} disabled={props.busy || !props.profileDraft.email.trim() || Boolean(props.profileDraft.newPassword && !props.profileDraft.currentPassword)}>Salvar perfil</Button>
+          </CardContent>
+        </Card>
+      </TabsContent>
 
-            {props.canAdmin ? (
-              <div className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-[#fbfaf6] p-3">
+      <TabsContent value="organizations" className="m-0">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid gap-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Organizacoes</CardTitle>
+                <CardDescription>{props.me?.organization.name ?? 'Organizacao atual'} · {props.organizations.length} disponiveis</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-2 md:grid-cols-2">
+                {props.organizations.map((organization) => (
+                  <div key={organization.id} className={cn('grid gap-3 rounded-lg border bg-white p-3', organization.id === props.me?.organization.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{organization.name}</p>
+                        <p className="font-mono text-xs text-[#66705f]">{organization.slug || shortId(organization.id)}</p>
+                      </div>
+                      <Badge variant={organization.status === 'active' ? 'success' : 'outline'}>{organization.status ?? 'ativa'}</Badge>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => props.onSwitchOrganization(organization.id)} disabled={props.busy || organization.id === props.me?.organization.id}>Usar</Button>
+                  </div>
+                ))}
+                {props.organizations.length === 0 ? <DarkEmpty text="Nenhuma organizacao." /> : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3"><CardTitle>Membros da organizacao atual</CardTitle><CardDescription>{props.members.length} membros carregados.</CardDescription></CardHeader>
+              <CardContent className="grid gap-2 md:grid-cols-2">
+                {props.members.map((member) => (
+                  <div key={member.membership.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{member.user.email}</p>
+                      {member.user.name ? <p className="truncate text-xs text-[#66705f]">{member.user.name}</p> : null}
+                    </div>
+                    <Badge variant={member.membership.role === 'admin' ? 'success' : member.membership.role === 'editor' ? 'secondary' : 'outline'}>{member.membership.role}</Badge>
+                  </div>
+                ))}
+                {props.members.length === 0 ? <DarkEmpty text="Nenhum membro carregado." /> : null}
+              </CardContent>
+            </Card>
+          </div>
+
+          {props.canAdmin ? (
+            <Card>
+              <CardHeader className="pb-3"><CardTitle>Nova organizacao</CardTitle><CardDescription>Cria time/workspace compartilhado.</CardDescription></CardHeader>
+              <CardContent className="grid gap-3">
+                <Field label="Nome"><Input value={props.orgDraft.name} onChange={(event) => props.onOrgDraftChange({ name: event.target.value })} placeholder="Nome" /></Field>
+                <Button onClick={props.onCreateOrganization} disabled={props.busy || !props.orgDraft.name.trim()}>Criar org</Button>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      </TabsContent>
+
+      <TabsContent value="users" className="m-0">
+        <div className="grid gap-4">
+          {props.canAdmin ? (
+            <Card>
+              <CardHeader className="pb-3"><CardTitle>Novo membro</CardTitle><CardDescription>Cria usuario na organizacao atual.</CardDescription></CardHeader>
+              <CardContent className="grid gap-3">
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_160px]">
                   <Field label="Email"><Input type="email" value={props.memberDraft.email} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, email: event.target.value })} placeholder="user@empresa.com" /></Field>
                   <Field label="Nome"><Input value={props.memberDraft.name} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, name: event.target.value })} placeholder="Opcional" /></Field>
@@ -1275,124 +1515,757 @@ function SettingsWorkspace(props: {
                   <Field label="Senha temporaria"><Input type="password" value={props.memberDraft.temporaryPassword} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, temporaryPassword: event.target.value })} placeholder="Opcional" /></Field>
                   <Button className="self-end" onClick={props.onCreateMember} disabled={props.busy || !props.canAdmin || !props.memberDraft.email.trim()}>Criar membro</Button>
                 </div>
-              </div>
-            ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
-            <div className="grid gap-2">
-              {props.members.map((member) => (
-                <div key={member.membership.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{member.user.email}</p>
-                    {member.user.name ? <p className="truncate text-xs text-[#66705f]">{member.user.name}</p> : null}
+          {props.canAdmin ? (
+            <Card>
+              <CardHeader className="pb-3"><CardTitle>Gestao de acessos</CardTitle><CardDescription>Organizacoes e roles por usuario.</CardDescription></CardHeader>
+              <CardContent className="grid gap-3">
+                {props.managedUsers.map((item) => (
+                  <div key={item.user.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{item.user.email}</p>
+                        <p className="truncate text-xs text-[#66705f]">{item.user.name || 'Sem nome'} · {item.user.status}</p>
+                      </div>
+                      <Button size="sm" onClick={() => props.onSaveUserMemberships(item.user.id)} disabled={props.busy}>Salvar acessos</Button>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {props.organizations.map((organization) => {
+                        const value = props.membershipEdit[item.user.id]?.[organization.id] ?? '';
+                        return (
+                          <div key={`${item.user.id}:${organization.id}`} className="grid gap-2 rounded-md border border-[#e1ddd1] bg-[#fbfaf6] p-2">
+                            <label className="flex min-w-0 items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(value)}
+                                onChange={(event) => props.onMembershipEditChange(item.user.id, organization.id, event.target.checked ? 'viewer' : '')}
+                              />
+                              <span className="truncate font-semibold">{organization.name}</span>
+                            </label>
+                            <Select value={value || 'viewer'} onValueChange={(nextRole) => props.onMembershipEditChange(item.user.id, organization.id, nextRole as Role)} disabled={!value}>
+                              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {roles.map((membershipRole) => <SelectItem key={membershipRole} value={membershipRole}>{membershipRole}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <Badge variant={member.membership.role === 'admin' ? 'success' : member.membership.role === 'editor' ? 'secondary' : 'outline'}>{member.membership.role}</Badge>
+                ))}
+                {props.managedUsers.length === 0 ? <DarkEmpty text="Nenhum usuario carregado." /> : null}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      </TabsContent>
+
+      <TabsContent value="security" className="m-0">
+        <div className="grid gap-4">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Seguranca empresa</CardTitle><CardDescription>OIDC, RBAC, allowlist, secrets e retention.</CardDescription></CardHeader>
+            <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
+              <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
+              <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'viewer'} />
+              <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
+              <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
+              <SecurityLine label="Retention" ok value={`${props.security?.retention.days ?? props.cleanupDays} dias`} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Tokens CLI/MCP</CardTitle><CardDescription>Bearer tokens pessoais para CLI, MCP e automacoes.</CardDescription></CardHeader>
+            <CardContent>
+              <PersonalTokenControl
+                tokens={props.personalTokens}
+                organizations={props.me?.organizations ?? props.organizations}
+                draft={props.tokenDraft}
+                busy={props.busy}
+                onDraftChange={props.onTokenDraftChange}
+                onCreate={props.onCreatePersonalToken}
+                onRevoke={props.onRevokePersonalToken}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="ai" className="m-0">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>AI connections</CardTitle><CardDescription>{props.aiConnections.length} configuradas.</CardDescription></CardHeader>
+            <CardContent className="grid gap-2">
+              {props.aiConnections.map((connection) => (
+                <button key={connection.id} type="button" onClick={() => props.onEditAiConnection(connection)} className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 text-left hover:border-[#9fb25a]">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-semibold">{connection.name}</span>
+                    <Badge variant={connection.enabled ? 'success' : 'muted'}>{connection.enabled ? 'ativa' : 'off'}</Badge>
+                  </div>
+                  <p className="font-mono text-xs text-[#66705f]">{connection.provider} · {connection.model}</p>
+                </button>
+              ))}
+              {props.aiConnections.length === 0 ? <DarkEmpty text="Nenhuma AI connection." /> : null}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>{props.aiDraft.id ? 'Editar AI' : 'Nova AI'}</CardTitle><CardDescription>Usada no explain failure.</CardDescription></CardHeader>
+            <CardContent className="grid gap-3">
+              <Field label="Nome"><Input value={props.aiDraft.name} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, name: event.target.value })} /></Field>
+              <Field label="Provider">
+                <Select value={props.aiDraft.provider} onValueChange={(value) => props.onAiDraftChange({ ...props.aiDraft, provider: value as AiConnection['provider'] })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openrouter">OpenRouter</SelectItem>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                    <SelectItem value="anthropic">Anthropic</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Modelo"><Input value={props.aiDraft.model} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, model: event.target.value })} /></Field>
+              <Field label="Base URL"><Input value={props.aiDraft.baseUrl} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, baseUrl: event.target.value })} /></Field>
+              <Field label="API key"><Input type="password" value={props.aiDraft.apiKey} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, apiKey: event.target.value })} placeholder={props.aiDraft.id ? '[REDACTED]' : 'sk-...'} /></Field>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.aiDraft.enabled} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, enabled: event.target.checked })} /> Ativa</label>
+              <Button onClick={props.onSaveAiConnection} disabled={props.busy || !props.canAdmin || !props.aiDraft.name || !props.aiDraft.model}>Salvar AI</Button>
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="audit" className="m-0">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Audit log</CardTitle><CardDescription>Mutacoes recentes na API.</CardDescription></CardHeader>
+            <CardContent className="grid gap-2">
+              <div className="flex justify-end">
+                <Button asChild variant="outline" size="sm">
+                  <a href={`${apiBase}/api/audit/export`} target="_blank">Export CSV</a>
+                </Button>
+              </div>
+              {props.audit.map((entry) => (
+                <div key={entry.id} className="grid gap-1 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-bold">{entry.action}</span>
+                    <Badge variant={entry.status === 'ok' ? 'success' : entry.status === 'blocked' ? 'warning' : 'destructive'}>{entry.status}</Badge>
+                  </div>
+                  <p className="font-mono text-xs text-[#66705f]">{formatDate(entry.createdAt)} · {entry.actor}{entry.target ? ` · ${entry.target}` : ''}</p>
                 </div>
               ))}
-              {props.members.length === 0 ? <DarkEmpty text="Nenhum membro carregado." /> : null}
-            </div>
+              {props.audit.length === 0 ? <DarkEmpty text="Audit vazio." /> : null}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Cleanup</CardTitle><CardDescription>Aplica politica de retention.</CardDescription></CardHeader>
+            <CardContent className="grid gap-3">
+              <Field label="Dias"><Input type="number" min={1} value={props.cleanupDays} onChange={(event) => props.onCleanupDaysChange(event.target.value)} /></Field>
+              <Button variant="destructive" onClick={props.onCleanup} disabled={props.busy || !props.canAdmin || Number(props.cleanupDays) < 1}>Executar cleanup</Button>
+              {props.cleanupResult ? <Signal tone="good" text={props.cleanupResult} /> : null}
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+}
 
-            <Collapsible>
-              <CollapsibleTrigger asChild>
-                <Button variant="outline" size="sm" className="w-fit">
-                  <ChevronDown className="h-4 w-4" />
-                  Token para CLI/MCP
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-3">
-                <div className="grid gap-2 rounded-lg border border-dashed border-[#d7d2c4] bg-white p-3">
-                  <p className="text-xs text-[#66705f]">Fallback dev para ferramentas locais. Login web usa sessao autenticada.</p>
-                  <ApiTokenControl />
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3"><CardTitle>Audit log</CardTitle><CardDescription>Mutacoes recentes na API.</CardDescription></CardHeader>
-          <CardContent className="grid gap-2">
-            <div className="flex justify-end">
-              <Button asChild variant="outline" size="sm">
-                <a href={`${apiBase}/api/audit/export`} target="_blank">Export CSV</a>
-              </Button>
-            </div>
-            {props.audit.map((entry) => (
-              <div key={entry.id} className="grid gap-1 rounded-lg border border-[#e1ddd1] bg-white p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-mono text-xs font-bold">{entry.action}</span>
-                  <Badge variant={entry.status === 'ok' ? 'success' : entry.status === 'blocked' ? 'warning' : 'destructive'}>{entry.status}</Badge>
-                </div>
-                <p className="font-mono text-xs text-[#66705f]">{formatDate(entry.createdAt)} · {entry.actor}{entry.target ? ` · ${entry.target}` : ''}</p>
-              </div>
+function PersonalTokenControl(props: {
+  tokens: PersonalAccessToken[];
+  organizations: Organization[];
+  draft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] };
+  busy: boolean;
+  onDraftChange: (draft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] }) => void;
+  onCreate: () => void;
+  onRevoke: (tokenId: string) => void;
+}) {
+  const selectedOrganizations = props.organizations.filter((organization) => props.draft.organizationIds.includes(organization.id));
+  const canCreate = props.draft.name.trim() && (props.draft.scope === 'all' || props.draft.organizationIds.length > 0);
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-[#fbfaf6] p-3">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+          <Field label="Nome"><Input value={props.draft.name} onChange={(event) => props.onDraftChange({ ...props.draft, name: event.target.value })} placeholder="mcp-local" /></Field>
+          <Field label="Escopo">
+            <Select value={props.draft.scope} onValueChange={(value) => props.onDraftChange({ ...props.draft, scope: value as 'all' | 'selected', organizationIds: value === 'all' ? [] : props.draft.organizationIds })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas minhas orgs</SelectItem>
+                <SelectItem value="selected">Orgs especificas</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
+        {props.draft.scope === 'selected' ? (
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {props.organizations.map((organization) => (
+              <label key={organization.id} className="flex min-w-0 items-center gap-2 rounded-md border border-[#e1ddd1] bg-white p-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={props.draft.organizationIds.includes(organization.id)}
+                  onChange={(event) => props.onDraftChange({
+                    ...props.draft,
+                    organizationIds: event.target.checked
+                      ? [...props.draft.organizationIds, organization.id]
+                      : props.draft.organizationIds.filter((id) => id !== organization.id),
+                  })}
+                />
+                <span className="truncate font-semibold">{organization.name}</span>
+              </label>
             ))}
-            {props.audit.length === 0 ? <DarkEmpty text="Audit vazio." /> : null}
-          </CardContent>
-        </Card>
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-[#66705f]">{props.draft.scope === 'all' ? 'Token acompanha todas organizacoes que voce tem acesso.' : `${selectedOrganizations.length} org(s) selecionada(s).`}</p>
+          <Button onClick={props.onCreate} disabled={props.busy || !canCreate}>Criar token</Button>
+        </div>
       </div>
 
-      <div className="grid content-start gap-4">
-        <Card>
-          <CardHeader className="pb-3"><CardTitle>AI connections</CardTitle><CardDescription>{props.aiConnections.length} configuradas.</CardDescription></CardHeader>
-          <CardContent className="grid gap-2">
-            {props.aiConnections.map((connection) => (
-              <button key={connection.id} type="button" onClick={() => props.onEditAiConnection(connection)} className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 text-left hover:border-[#9fb25a]">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-semibold">{connection.name}</span>
-                  <Badge variant={connection.enabled ? 'success' : 'muted'}>{connection.enabled ? 'ativa' : 'off'}</Badge>
-                </div>
-                <p className="font-mono text-xs text-[#66705f]">{connection.provider} · {connection.model}</p>
-              </button>
-            ))}
-            {props.aiConnections.length === 0 ? <DarkEmpty text="Nenhuma AI connection." /> : null}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3"><CardTitle>{props.aiDraft.id ? 'Editar AI' : 'Nova AI'}</CardTitle><CardDescription>Usada no explain failure.</CardDescription></CardHeader>
-          <CardContent className="grid gap-3">
-            <Field label="Nome"><Input value={props.aiDraft.name} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, name: event.target.value })} /></Field>
-            <Field label="Provider">
-              <Select value={props.aiDraft.provider} onValueChange={(value) => props.onAiDraftChange({ ...props.aiDraft, provider: value as AiConnection['provider'] })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="openrouter">OpenRouter</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Modelo"><Input value={props.aiDraft.model} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, model: event.target.value })} /></Field>
-            <Field label="Base URL"><Input value={props.aiDraft.baseUrl} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, baseUrl: event.target.value })} /></Field>
-            <Field label="API key"><Input type="password" value={props.aiDraft.apiKey} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, apiKey: event.target.value })} placeholder={props.aiDraft.id ? '[REDACTED]' : 'sk-...'} /></Field>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.aiDraft.enabled} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, enabled: event.target.checked })} /> Ativa</label>
-            <Button onClick={props.onSaveAiConnection} disabled={props.busy || !props.canAdmin || !props.aiDraft.name || !props.aiDraft.model}>Salvar AI</Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3"><CardTitle>Cleanup</CardTitle><CardDescription>Aplica politica de retention.</CardDescription></CardHeader>
-          <CardContent className="grid gap-3">
-            <Field label="Dias"><Input type="number" min={1} value={props.cleanupDays} onChange={(event) => props.onCleanupDaysChange(event.target.value)} /></Field>
-            <Button variant="destructive" onClick={props.onCleanup} disabled={props.busy || !props.canAdmin || Number(props.cleanupDays) < 1}>Executar cleanup</Button>
-            {props.cleanupResult ? <Signal tone="good" text={props.cleanupResult} /> : null}
-          </CardContent>
-        </Card>
+      <div className="grid gap-2">
+        {props.tokens.map((token) => (
+          <div key={token.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-semibold">{token.name}</p>
+                <p className="font-mono text-xs text-[#66705f]">{token.tokenPreview}</p>
+              </div>
+              <Badge variant={token.organizationIds?.length ? 'secondary' : 'success'}>{token.organizationIds?.length ? `${token.organizationIds.length} orgs` : 'todas orgs'}</Badge>
+            </div>
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <Input readOnly type="password" value={token.token} />
+              <Button variant="outline" onClick={() => navigator.clipboard.writeText(token.token)}>Copiar</Button>
+              <Button variant="destructive" onClick={() => props.onRevoke(token.id)} disabled={props.busy}>Revogar</Button>
+            </div>
+            <p className="text-xs text-[#66705f]">Criado {formatDate(token.createdAt)}{token.lastUsedAt ? ` · ultimo uso ${formatDate(token.lastUsedAt)}` : ''}</p>
+          </div>
+        ))}
+        {props.tokens.length === 0 ? <DarkEmpty text="Nenhum token pessoal." /> : null}
       </div>
     </div>
   );
 }
 
-function ApiTokenControl() {
-  const [token, setToken] = useState('');
-  useEffect(() => {
-    setToken(window.localStorage.getItem('testhub.token') ?? '');
-  }, []);
+function DocumentationWorkspace() {
   return (
-    <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-      <Input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Bearer token / OIDC access token" />
-      <Button onClick={() => window.localStorage.setItem('testhub.token', token)}>Salvar token</Button>
-      <Button variant="outline" onClick={() => { window.localStorage.removeItem('testhub.token'); setToken(''); }}>Limpar</Button>
+    <Tabs defaultValue="start" className="grid gap-4">
+      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
+        <TabsTrigger value="start">Inicio</TabsTrigger>
+        <TabsTrigger value="yaml">YAML</TabsTrigger>
+        <TabsTrigger value="syntax">Sintaxes</TabsTrigger>
+        <TabsTrigger value="api">API suites</TabsTrigger>
+        <TabsTrigger value="web">Web suites</TabsTrigger>
+        <TabsTrigger value="ai">IA</TabsTrigger>
+        <TabsTrigger value="auth">Auth/MCP</TabsTrigger>
+        <TabsTrigger value="debug">Debug</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="start" className="m-0">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Modelo mental</CardTitle><CardDescription>Como TestHub organiza testes e execucoes.</CardDescription></CardHeader>
+            <CardContent className="grid gap-3">
+              <DocStep title="1. Projeto" text="Agrupa suites, ambientes e runs de um produto, app ou squad." />
+              <DocStep title="2. Ambiente" text="Define baseUrl e variaveis seguras usadas pelas suites." />
+              <DocStep title="3. Suite" text="Arquivo YAML versionado pela UI. Pode ser API ou Web." />
+              <DocStep title="4. Run" text="Execucao de uma suite em um ambiente. Gera report, videos, screenshots e payloads." />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Fluxo recomendado</CardTitle><CardDescription>Sequencia normal para comecar.</CardDescription></CardHeader>
+            <CardContent className="grid gap-3 text-sm text-[#4b5348]">
+              <p>Crie projeto, crie ambiente, importe OpenAPI ou escreva suite YAML, valide, rode, revise evidence.</p>
+              <CodeBlock code={`1. Projetos -> Novo projeto
+2. Projetos -> Novo ambiente
+3. Suites -> Nova suite
+4. Validar spec
+5. Run workspace -> Rodar
+6. Evidence -> Report/artifacts`} />
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="yaml" className="m-0">
+        <div className="grid gap-4">
+          <DocAccordion title="Estrutura base">
+            <CodeBlock code={`version: 1
+type: api # api | web
+name: minha-suite
+tests:
+  - name: health
+    request:
+      method: GET
+      path: /health
+    expect:
+      status: 200`} />
+          </DocAccordion>
+          <DocAccordion title="Variaveis de ambiente">
+            <CodeBlock code={`# Ambiente
+API_TOKEN=secret
+TENANT_ID=qa
+
+# Suite
+request:
+  method: GET
+  path: /tenants/{TENANT_ID}/users
+  headers:
+    Authorization: Bearer \${API_TOKEN}`} />
+          </DocAccordion>
+          <DocAccordion title="Boas praticas">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p>Use nomes estaveis, valide antes de salvar, mantenha secrets em ambientes, nao dentro do YAML.</p>
+              <p>Separe suites pequenas por fluxo: smoke, auth, checkout, regressao API.</p>
+            </div>
+          </DocAccordion>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="syntax" className="m-0">
+        <div className="grid gap-4">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Sintaxe suportada</CardTitle><CardDescription>DSL YAML do TestHub. Web roda em Playwright por baixo, mas voce escreve estes steps.</CardDescription></CardHeader>
+            <CardContent className="grid gap-3 text-sm text-[#4b5348]">
+              <p>Use `type: web` para navegacao e asserts visuais. Use `type: api` para HTTP, asserts de contrato e extracao de valores.</p>
+              <p>Campos comuns: `version`, `type`, `name`, `description`, `baseUrl`, `defaults`, `variables`, `beforeEach`, `afterEach`, `tests`.</p>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <DocAccordion title="Web steps disponiveis">
+              <CodeBlock code={`steps:
+  - goto: /login
+  - click: button[type="submit"]
+  - fill:
+      selector: input[name="email"]
+      value: qa@example.com
+  - select:
+      selector: select[name="role"]
+      value: admin
+  - check:
+      by: label
+      target: Aceito termos
+  - press: Enter
+  - press:
+      by: testId
+      target: search-input
+      key: Control+A
+  - waitFor: 500
+  - waitFor: networkidle
+  - expectText: Dashboard
+  - expectUrlContains: /dashboard
+  - expectVisible:
+      by: role
+      role: heading
+      name: Dashboard
+  - expectHidden:
+      selector: .loading
+  - expectAttribute:
+      selector: button[type="submit"]
+      attribute: disabled
+      value: "true"
+  - expectValue:
+      selector: input[name="email"]
+      value: qa@example.com
+  - expectCount:
+      selector: .todo-item
+      count: 3
+  - uploadFile:
+      selector: input[type="file"]
+      path: ./fixtures/avatar.png`} />
+            </DocAccordion>
+
+            <DocAccordion title="Seletores estilo Playwright">
+              <CodeBlock code={`# CSS direto
+- click: button[type="submit"]
+- click:
+    selector: '[data-testid="save"]'
+
+# Texto visivel
+- expectVisible:
+    by: text
+    target: Salvo com sucesso
+    exact: true
+
+# Label de input
+- fill:
+    by: label
+    target: Email
+    value: qa@example.com
+
+# Role acessivel
+- click:
+    by: role
+    role: button
+    name: Entrar
+
+# data-testid
+- click:
+    by: testId
+    target: submit-login
+
+# Placeholder
+- fill:
+    by: placeholder
+    target: Buscar
+    value: pedido 123`} />
+            </DocAccordion>
+
+            <DocAccordion title="Defaults, hooks e controle">
+              <CodeBlock code={`defaults:
+  timeoutMs: 10000
+  retries: 1
+  screenshotOnFailure: true
+  screenshotOnSuccess: false
+  video: retain-on-failure
+  trace: retain-on-failure
+
+beforeEach:
+  - goto: /login
+  - fill:
+      by: label
+      target: Email
+      value: \${USER_EMAIL}
+  - fill:
+      by: label
+      target: Senha
+      value: \${USER_PASSWORD}
+  - click:
+      by: role
+      role: button
+      name: Entrar
+
+tests:
+  - name: dashboard carrega
+    tags: [smoke, web]
+    retries: 2
+    steps:
+      - expectVisible:
+          by: role
+          role: heading
+          name: Dashboard`} />
+            </DocAccordion>
+
+            <DocAccordion title="API request, expect e extract">
+              <CodeBlock code={`tests:
+  - name: login extrai token
+    request:
+      method: POST
+      path: /login
+      body:
+        email: qa@example.com
+        password: secret
+    expect:
+      status: 200
+      maxMs: 1500
+      headers:
+        content-type: application/json
+      bodyPathExists:
+        - token
+      bodyPathMatches:
+        token: "^ey"
+    extract:
+      AUTH_TOKEN: body.token
+
+  - name: usa token extraido
+    request:
+      method: GET
+      path: /me
+      headers:
+        Authorization: Bearer \${AUTH_TOKEN}
+      query:
+        expand: profile
+    expect:
+      status: 200
+      body:
+        email: qa@example.com`} />
+            </DocAccordion>
+
+            <DocAccordion title="Asserts API disponiveis">
+              <CodeBlock code={`expect:
+  status: 201
+  maxMs: 2000
+  headers:
+    x-request-id: abc
+  body:
+    user.email: qa@example.com
+  bodyContains:
+    status: active
+  bodyPathExists:
+    - user.id
+    - permissions
+  bodyPathMatches:
+    user.id: "^[a-z0-9-]+$"
+  jsonSchema:
+    type: object
+    required: [id, email]
+    properties:
+      id:
+        type: string
+      email:
+        type: string`} />
+            </DocAccordion>
+
+            <DocAccordion title="Variaveis e extracoes">
+              <div className="grid gap-3">
+                <p className="text-sm text-[#4b5348]">Variaveis podem vir da suite, do ambiente ou de `extract`. Referencie com `${'{NOME_DA_VARIAVEL}'}`.</p>
+                <CodeBlock code={`variables:
+  TENANT_ID: qa
+
+tests:
+  - name: cria pedido
+    request:
+      method: POST
+      path: /tenants/\${TENANT_ID}/orders
+    extract:
+      ORDER_ID: body.id
+
+  - name: consulta pedido
+    request:
+      method: GET
+      path: /orders/\${ORDER_ID}
+    expect:
+      status: 200`} />
+              </div>
+            </DocAccordion>
+          </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="api" className="m-0">
+        <div className="grid gap-4">
+          <DocAccordion title="Suite API minima">
+            <CodeBlock code={`version: 1
+type: api
+name: api-smoke
+tests:
+  - name: status 200
+    request:
+      method: GET
+      path: /status/200
+    expect:
+      status: 200`} />
+          </DocAccordion>
+          <DocAccordion title="Headers, body e asserts">
+            <CodeBlock code={`tests:
+  - name: cria usuario
+    request:
+      method: POST
+      path: /users
+      headers:
+        Content-Type: application/json
+        Authorization: Bearer \${API_TOKEN}
+      body:
+        name: Maria
+        email: maria@example.com
+    expect:
+      status: 201
+      json:
+        email: maria@example.com`} />
+          </DocAccordion>
+          <DocAccordion title="Import OpenAPI">
+            <p className="text-sm text-[#4b5348]">Use Sistema/Projetos ou Suites para importar OpenAPI JSON. O import cria suite API com paths selecionados e pode aplicar auth bearer/apiKey.</p>
+          </DocAccordion>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="web" className="m-0">
+        <div className="grid gap-4">
+          <DocAccordion title="Suite Web minima">
+            <CodeBlock code={`version: 1
+type: web
+name: login-invalido
+tests:
+  - name: mostra erro
+    steps:
+      - goto: /login
+      - fill:
+          selector: input[type="email"]
+          value: wrong@example.com
+      - fill:
+          selector: input[type="password"]
+          value: wrong-password
+      - click: button[type="submit"]
+      - expectText:
+          text: Invalid email or password`} />
+          </DocAccordion>
+          <DocAccordion title="Seletores">
+            <div className="grid gap-3">
+              <p className="text-sm text-[#4b5348]">Prefira seletores estaveis: `data-testid`, role/name, labels. Evite classes geradas.</p>
+              <CodeBlock code={`- click: '[data-testid="submit-login"]'
+- fill:
+    selector: input[name="email"]
+    value: qa@example.com
+- expectText:
+    text: Dashboard`} />
+            </div>
+          </DocAccordion>
+          <DocAccordion title="Artifacts Web">
+            <p className="text-sm text-[#4b5348]">Runs web podem gerar video, screenshot e trace. Use Evidence para revisar falhas visualmente.</p>
+          </DocAccordion>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="ai" className="m-0">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <DocAccordion title="O que a IA faz hoje">
+            <div className="grid gap-3 text-sm text-[#4b5348]">
+              <p><strong>Explain failure</strong>: pega contexto sanitizado de uma run falhada e classifica causa provavel.</p>
+              <p><strong>Suggest test fix</strong>: sugere ajuste no YAML do teste quando a falha parece estar na suite.</p>
+              <p><strong>Suggest test cases</strong>: sugere poucos casos novos de alto valor, focados em smoke e contrato critico.</p>
+              <p><strong>Apply test fix</strong>: aplica uma sugestao no YAML somente depois de aprovacao humana na UI.</p>
+            </div>
+          </DocAccordion>
+
+          <DocAccordion title="Onde configurar">
+            <div className="grid gap-3">
+              <p className="text-sm text-[#4b5348]">Configure em Sistema / AI. Cada organizacao tem suas proprias conexoes.</p>
+              <CodeBlock code={`Provider: OpenRouter | OpenAI | Anthropic
+Modelo: openai/gpt-4o-mini, gpt-4o-mini, claude-3-5-sonnet...
+Base URL: opcional, use quando o provider exigir endpoint custom
+API key: armazenada criptografada quando TESTHUB_SECRET_KEY esta configurado`} />
+            </div>
+          </DocAccordion>
+
+          <DocAccordion title="Formato esperado do retorno">
+            <CodeBlock code={`# explain-failure
+{
+  "classification": "app_bug | test_broken | environment_down | auth_or_secret | data_issue | contract_changed | flaky | unknown",
+  "confidence": 0.82,
+  "summary": "Motivo provavel da falha",
+  "evidence": ["sinais usados"],
+  "nextAction": "proxima acao recomendada"
+}
+
+# suggest-test-fix
+suggestion:
+  type: test_broken
+  reason: seletor mudou
+  before: "- click: .old-button"
+  after: "- click:\\n    by: role\\n    role: button\\n    name: Entrar"
+  confidence: 0.74`} />
+          </DocAccordion>
+
+          <DocAccordion title="Limites importantes">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p>A IA nao executa teste sozinha; ela analisa contexto e sugere.</p>
+              <p>O contexto enviado e sanitizado com redaction de secrets antes do prompt.</p>
+              <p>Sem AI connection ativa, os botoes de IA retornam erro de configuracao.</p>
+              <p>Em producao, gravar API key com `TESTHUB_SECRET_KEY` default e bloqueado.</p>
+            </div>
+          </DocAccordion>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="auth" className="m-0">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <DocAccordion title="Personal Access Tokens">
+            <div className="grid gap-3">
+              <p className="text-sm text-[#4b5348]">Crie tokens em Sistema / Seguranca / Tokens CLI/MCP. O token pode valer para todas suas orgs ou apenas orgs selecionadas.</p>
+              <CodeBlock code={`export TESTHUB_URL=http://localhost:4321
+export TESTHUB_PAT=th_pat_xxx
+export TESTHUB_ORGANIZATION_ID=<org-id> # opcional para token multi-org`} />
+            </div>
+          </DocAccordion>
+          <DocAccordion title="MCP">
+            <div className="grid gap-3">
+              <p className="text-sm text-[#4b5348]">MCP usa o mesmo bearer token da API. Configure `TESTHUB_PAT` no processo que inicia o servidor MCP.</p>
+              <CodeBlock code={`TESTHUB_URL=http://localhost:4321 \\
+TESTHUB_PAT=th_pat_xxx \\
+npm run mcp`} />
+            </div>
+          </DocAccordion>
+          <DocAccordion title="Adicionar MCP em agentes de IA">
+            <div className="grid gap-3">
+              <p className="text-sm text-[#4b5348]">Use um Personal Access Token e a URL da API. Em agentes com suporte a MCP stdio, adicione um servidor `testhub` apontando para o pacote/command do MCP.</p>
+              <CodeBlock code={`{
+  "mcpServers": {
+    "testhub": {
+      "command": "npx",
+      "args": ["testhub-mcp"],
+      "env": {
+        "TESTHUB_URL": "http://localhost:4321",
+        "TESTHUB_PAT": "th_pat_xxx",
+        "TESTHUB_ORGANIZATION_ID": "<org-id-opcional>"
+      }
+    }
+  }
+}`} />
+              <p className="text-sm text-[#4b5348]">Depois de conectar, chame `testhub_help` no agente para ver tools, fluxo recomendado e exemplos operacionais.</p>
+            </div>
+          </DocAccordion>
+          <DocAccordion title="Organizacoes e RBAC">
+            <p className="text-sm text-[#4b5348]">Projetos, ambientes, suites, runs, AI connections e audit ficam no escopo da organizacao ativa. Roles: admin gerencia tudo; editor escreve testes/runs; viewer apenas le.</p>
+          </DocAccordion>
+          <DocAccordion title="Reset de senha">
+            <p className="text-sm text-[#4b5348]">Sem email configurado, o reset exibe token apenas fora de producao ou com `TESTHUB_ALLOW_DISPLAY_RESET=true`.</p>
+          </DocAccordion>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="debug" className="m-0">
+        <div className="grid gap-4">
+          <DocAccordion title="Estados de run">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p><strong>queued/running</strong>: aguardando ou executando.</p>
+              <p><strong>passed/failed</strong>: teste completou com asserts ok/falhando.</p>
+              <p><strong>error</strong>: problema de infraestrutura, config, spec ou runtime.</p>
+              <p><strong>canceled/deleted</strong>: cancelada ou arquivada por cleanup.</p>
+            </div>
+          </DocAccordion>
+          <DocAccordion title="Checklist de falha">
+            <CodeBlock code={`1. Abra Evidence
+2. Veja summary e erro principal
+3. Para API: request/response/payload
+4. Para Web: screenshot/video/trace
+5. Confirme baseUrl do ambiente
+6. Confirme variaveis e secrets
+7. Rode novamente apos ajustar suite ou ambiente`} />
+          </DocAccordion>
+          <DocAccordion title="Cleanup e retention">
+            <p className="text-sm text-[#4b5348]">Cleanup arquiva runs antigas. Retention global vem de `TESTHUB_RETENTION_DAYS`; projetos podem ajustar politica de retencao e limpeza de artifacts.</p>
+          </DocAccordion>
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function DocStep({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-lg border border-[#e1ddd1] bg-white p-3">
+      <p className="font-semibold">{title}</p>
+      <p className="mt-1 text-sm text-[#4b5348]">{text}</p>
     </div>
+  );
+}
+
+function DocAccordion({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Card>
+        <CollapsibleTrigger asChild>
+          <button type="button" className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left">
+            <div>
+              <CardTitle className="text-base">{title}</CardTitle>
+            </div>
+            <ChevronDown className={cn('h-4 w-4 shrink-0 transition', open ? 'rotate-180' : '')} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0">{children}</CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
+
+function CodeBlock({ code }: { code: string }) {
+  return (
+    <pre className="overflow-auto rounded-lg border border-[#d8d3c5] bg-[#111611] p-3 text-xs leading-relaxed text-[#f7f6f0]">
+      <code>{code}</code>
+    </pre>
   );
 }
 
@@ -2415,6 +3288,21 @@ function parseVars(input: string): Record<string, string> {
 
 function splitList(input: string): string[] {
   return input.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function mergeMembershipEdit(current: MembershipEdit, users: UserManagementItem[], organizations: Organization[]): MembershipEdit {
+  const organizationIds = new Set(organizations.map((organization) => organization.id));
+  return Object.fromEntries(users.map((item) => {
+    const existing = current[item.user.id] ?? {};
+    const memberships = Object.fromEntries(item.memberships
+      .filter((membership) => organizationIds.has(membership.organizationId))
+      .map((membership) => [membership.organizationId, membership.role]));
+    const merged = Object.fromEntries(organizations.map((organization) => {
+      const currentValue = existing[organization.id];
+      return [organization.id, currentValue !== undefined ? currentValue : (memberships[organization.id] ?? '')];
+    }));
+    return [item.user.id, merged];
+  }));
 }
 
 function messageOf(error: unknown): string {

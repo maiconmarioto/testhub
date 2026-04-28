@@ -33,6 +33,30 @@ describe('JsonStore auth and organization methods', () => {
     expect(usedAgain).toBeUndefined();
   });
 
+  it('creates reusable personal access tokens and revokes them', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-auth-pat-'));
+    const store = new JsonStore(root);
+    const user = store.createUser({ email: 'pat-store@example.com', name: 'PAT', passwordHash: 'hash' });
+    const organization = store.createOrganization({ name: 'PAT Store' });
+    const token = store.createPersonalAccessToken({
+      userId: user.id,
+      name: 'mcp',
+      tokenHash: hashToken('th_pat_secret'),
+      token: 'th_pat_secret',
+      organizationIds: [organization.id],
+      defaultOrganizationId: organization.id,
+    });
+
+    expect(token.token).toBe('th_pat_secret');
+    expect(token.tokenPreview).toContain('...');
+    expect(store.read().personalAccessTokens[0].token).not.toBe('th_pat_secret');
+    expect(store.listPersonalAccessTokensForUser(user.id)).toEqual([expect.objectContaining({ id: token.id, token: 'th_pat_secret' })]);
+    expect(store.findPersonalAccessTokenByHash(hashToken('th_pat_secret'))).toMatchObject({ id: token.id, defaultOrganizationId: organization.id });
+    expect(store.touchPersonalAccessToken(token.id)?.lastUsedAt).toBeTruthy();
+    expect(store.revokePersonalAccessToken(user.id, token.id)).toBe(true);
+    expect(store.findPersonalAccessTokenByHash(hashToken('th_pat_secret'))).toBeUndefined();
+  });
+
   it('scopes AI connections to an organization', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-auth-ai-'));
     const store = new JsonStore(root);

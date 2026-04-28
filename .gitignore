@@ -1,6 +1,9 @@
 node_modules/
 dist/
 apps/web/.next/
+.env
+.env.*
+!.env.example
 .testhub-runs*
 .testhub-data/
 playwright-report/

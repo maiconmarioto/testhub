@@ -24,6 +24,10 @@ export function createSessionToken(): string {
   return randomBytes(24).toString('hex');
 }
 
+export function createPersonalAccessToken(): string {
+  return `th_pat_${randomBytes(32).toString('base64url')}`;
+}
+
 export function createResetToken(): string {
   return randomBytes(20).toString('hex');
 }

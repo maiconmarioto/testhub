@@ -8,7 +8,7 @@ import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { buildFailurePrompt, buildFixPrompt, buildTestSuggestionPrompt, callAi } from '../../../packages/ai/src/ai.js';
-import { createResetToken, createSessionToken, hashPassword, hashToken, resetExpiresAt, sessionExpiresAt, verifyPassword } from '../../../packages/db/src/auth.js';
+import { createPersonalAccessToken, createResetToken, createSessionToken, hashPassword, hashToken, resetExpiresAt, sessionExpiresAt, verifyPassword } from '../../../packages/db/src/auth.js';
 import { cleanupOldRuns } from '../../../packages/db/src/cleanup.js';
 import { auditCsv, readAudit, writeAudit } from '../../../packages/db/src/audit.js';
 import { createRunQueue } from '../../../packages/shared/src/jobs.js';
@@ -19,7 +19,7 @@ import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
 import { actorFromAuthorization, actorLabel, authMode, hasPermission, isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus, type AuthActor, type Permission } from '../../../packages/db/src/security.js';
 import { createStore } from '../../../packages/db/src/store-factory.js';
-import type { Database, Environment, MembershipRole, Project, RunRecord, Suite, User } from '../../../packages/db/src/store.js';
+import type { Database, Environment, MembershipRole, OrganizationMembership, PersonalAccessToken, Project, RunRecord, Suite, User } from '../../../packages/db/src/store.js';
 
 const sessionCookieName = 'testhub_session';
 const passwordSchema = z.string().min(8).max(200);
@@ -130,7 +130,7 @@ export function createApp() {
     const token = tokenFromRequest(req);
     if (!token) return null;
     const session = await store.findSessionByTokenHash(hashToken(token));
-    if (!session) return null;
+    if (!session) return actorFromPersonalAccessToken(token, req.headers['x-testhub-organization-id']);
     const user = await store.findUserById(session.userId);
     const membership = user ? await store.findMembership(user.id, session.organizationId) : undefined;
     if (!user || !membership) return null;
@@ -145,6 +145,35 @@ export function createApp() {
     };
   }
 
+  async function actorFromPersonalAccessToken(token: string, requestedOrganizationId?: string | string[]): Promise<AuthActor | null> {
+    const accessToken = await store.findPersonalAccessTokenByHash(hashToken(token));
+    if (!accessToken) return null;
+    const user = await store.findUserById(accessToken.userId);
+    if (!user) return null;
+    const memberships = await store.listMembershipsForUser(user.id);
+    const memberOrganizationIds = new Set(memberships.map((membership) => membership.organizationId));
+    const scopedIds = accessToken.organizationIds?.length ? accessToken.organizationIds.filter((id) => memberOrganizationIds.has(id)) : [...memberOrganizationIds];
+    const requested = Array.isArray(requestedOrganizationId) ? requestedOrganizationId[0] : requestedOrganizationId;
+    const organizationId = requested && scopedIds.includes(requested)
+      ? requested
+      : scopedIds.includes(accessToken.defaultOrganizationId)
+        ? accessToken.defaultOrganizationId
+        : scopedIds[0];
+    if (!organizationId) return null;
+    const membership = memberships.find((item) => item.organizationId === organizationId);
+    if (!membership) return null;
+    await store.touchPersonalAccessToken(accessToken.id);
+    return {
+      id: accessToken.id,
+      userId: user.id,
+      organizationId,
+      email: user.email,
+      name: user.name,
+      role: membership.role,
+      source: 'token',
+    };
+  }
+
   function requireOrganization(actor?: AuthActor): string {
     if (!actor) throw new Error('Unauthorized');
     if (actor.source === 'local' && authMode() !== 'off') {
@@ -152,6 +181,14 @@ export function createApp() {
       return actor.organizationId;
     }
     return actor.organizationId ?? 'legacy-local';
+  }
+
+  async function managedUser(user: User): Promise<{ user: Omit<User, 'passwordHash'>; memberships: OrganizationMembership[]; organizations: Awaited<ReturnType<typeof store.listOrganizationsForUser>> }> {
+    const [memberships, organizations] = await Promise.all([
+      store.listMembershipsForUser(user.id),
+      store.listOrganizationsForUser(user.id),
+    ]);
+    return { user: publicUser(user), memberships, organizations };
   }
 
   async function getDb(): Promise<Database> {
@@ -273,26 +310,42 @@ export function createApp() {
       email: z.string().email(),
       name: z.string().min(1).max(200).optional(),
       password: passwordSchema,
-      organizationName: z.string().min(1).max(200),
+      organizationName: z.string().min(1).max(200).optional(),
+      organizationIds: z.array(z.string().min(1)).default([]),
     }).parse(req.body);
-    if ((await store.hasActiveUsers()) && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
+    const hasActiveUsers = await store.hasActiveUsers();
+    if (hasActiveUsers && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
       return reply.code(403).send({ error: 'Cadastro publico desabilitado' });
     }
     const existing = await store.findUserByEmail(input.email);
     if (existing) return reply.code(409).send({ error: 'Email ja cadastrado' });
+    const selectedOrganizations = input.organizationIds.length > 0
+      ? (await store.listOrganizations()).filter((organization) => input.organizationIds.includes(organization.id))
+      : [];
+    if (input.organizationIds.length > 0 && selectedOrganizations.length !== new Set(input.organizationIds).size) {
+      return reply.code(400).send({ error: 'Organizacao invalida' });
+    }
+    if (selectedOrganizations.length === 0 && !input.organizationName) {
+      return reply.code(400).send({ error: 'Organizacao obrigatoria' });
+    }
 
     const user = await store.createUser({
       email: input.email,
       name: input.name,
       passwordHash: await hashPassword(input.password),
     });
-    const organization = await store.createOrganization({ name: input.organizationName });
-    const membership = await store.createMembership({ userId: user.id, organizationId: organization.id, role: 'admin' });
+    const organizations = selectedOrganizations.length > 0
+      ? selectedOrganizations
+      : [await store.createOrganization({ name: input.organizationName! })];
+    const role: MembershipRole = selectedOrganizations.length > 0 ? 'viewer' : 'admin';
+    const memberships = await Promise.all(organizations.map((organization) => store.createMembership({ userId: user.id, organizationId: organization.id, role })));
+    const organization = organizations[0];
+    const membership = memberships[0];
     const token = createSessionToken();
     const expiresAt = sessionExpiresAt();
     await store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: hashToken(token), expiresAt });
     setSessionCookie(reply, token, expiresAt);
-    return reply.code(201).send({ user: publicUser(user), organization, membership, token });
+    return reply.code(201).send({ user: publicUser(user), organization, membership, organizations, memberships, token });
   });
 
   app.post('/api/auth/login', { schema: { tags: ['system'], summary: 'Login local account' } }, async (req, reply) => {
@@ -323,6 +376,151 @@ export function createApp() {
     const membership = await store.findMembership(actor.userId, actor.organizationId);
     if (!user || !organization || !membership) return reply.code(401).send({ error: 'Unauthorized' });
     return { user: publicUser(user), organization, membership, organizations };
+  });
+
+  app.get('/api/auth/organizations', { schema: { tags: ['system'], summary: 'List signup organizations' } }, async () => store.listOrganizations());
+
+  app.post('/api/auth/switch-organization', { schema: { tags: ['system'], summary: 'Switch local organization session' } }, async (req, reply) => {
+    const actor = req.actor;
+    if (!actor?.userId) return reply.code(401).send({ error: 'Unauthorized' });
+    const input = z.object({ organizationId: z.string().min(1) }).parse(req.body);
+    const membership = await store.findMembership(actor.userId, input.organizationId);
+    if (!membership) return reply.code(403).send({ error: 'Usuario sem acesso a organizacao' });
+    const user = await store.findUserById(actor.userId);
+    const organizations = await store.listOrganizationsForUser(actor.userId);
+    const organization = organizations.find((item) => item.id === input.organizationId);
+    if (!user || !organization) return reply.code(404).send({ error: 'Organizacao nao encontrada' });
+    const currentToken = tokenFromRequest(req);
+    if (currentToken) {
+      const currentSession = await store.findSessionByTokenHash(hashToken(currentToken));
+      if (currentSession) await store.deleteSession(currentSession.id);
+    }
+    const token = createSessionToken();
+    const expiresAt = sessionExpiresAt();
+    await store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: hashToken(token), expiresAt });
+    setSessionCookie(reply, token, expiresAt);
+    return { user: publicUser(user), organization, membership, organizations, token };
+  });
+
+  app.put('/api/users/me', { schema: { tags: ['system'], summary: 'Update current local account' } }, async (req, reply) => {
+    const actor = req.actor;
+    if (!actor?.userId) return reply.code(401).send({ error: 'Unauthorized' });
+    const input = z.object({
+      email: z.string().email().optional(),
+      name: z.string().min(1).max(200).optional(),
+      currentPassword: z.string().optional(),
+      newPassword: passwordSchema.optional(),
+    }).parse(req.body);
+    let user = await store.findUserById(actor.userId);
+    if (!user) return reply.code(401).send({ error: 'Unauthorized' });
+    if (input.newPassword) {
+      if (!input.currentPassword || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+        return reply.code(401).send({ error: 'Senha atual invalida' });
+      }
+    }
+    try {
+      user = await store.updateUserProfile(actor.userId, { email: input.email, name: input.name });
+    } catch (error) {
+      if (messageOf(error).includes('Email ja cadastrado')) return reply.code(409).send({ error: 'Email ja cadastrado' });
+      throw error;
+    }
+    if (!user) return reply.code(401).send({ error: 'Unauthorized' });
+    if (input.newPassword) {
+      user = await store.updateUserPassword(actor.userId, await hashPassword(input.newPassword));
+      await store.deleteSessionsForUser(actor.userId);
+      const token = createSessionToken();
+      const expiresAt = sessionExpiresAt();
+      await store.createSession({ userId: actor.userId, organizationId: actor.organizationId!, tokenHash: hashToken(token), expiresAt });
+      setSessionCookie(reply, token, expiresAt);
+      return { user: publicUser(user!), token };
+    }
+    return { user: publicUser(user) };
+  });
+
+  app.get('/api/users/me/tokens', { schema: { tags: ['system'], summary: 'List current user personal access tokens' } }, async (req, reply) => {
+    const actor = req.actor;
+    if (!actor?.userId) return reply.code(401).send({ error: 'Unauthorized' });
+    const tokens = await store.listPersonalAccessTokensForUser(actor.userId);
+    return tokens.map(publicAccessToken);
+  });
+
+  app.post('/api/users/me/tokens', { schema: { tags: ['system'], summary: 'Create current user personal access token' } }, async (req, reply) => {
+    const actor = req.actor;
+    if (!actor?.userId) return reply.code(401).send({ error: 'Unauthorized' });
+    const input = z.object({
+      name: z.string().min(1).max(120),
+      organizationIds: z.array(z.string().min(1)).optional(),
+      defaultOrganizationId: z.string().min(1).optional(),
+    }).parse(req.body);
+    const memberships = await store.listMembershipsForUser(actor.userId);
+    const memberOrganizationIds = new Set(memberships.map((membership) => membership.organizationId));
+    const requestedOrganizationIds = input.organizationIds?.length ? [...new Set(input.organizationIds)] : undefined;
+    if (requestedOrganizationIds?.some((id) => !memberOrganizationIds.has(id))) {
+      return reply.code(400).send({ error: 'Organizacao invalida' });
+    }
+    const allowedOrganizationIds = requestedOrganizationIds ?? [...memberOrganizationIds];
+    const defaultOrganizationId = input.defaultOrganizationId ?? actor.organizationId ?? allowedOrganizationIds[0];
+    if (!defaultOrganizationId || !allowedOrganizationIds.includes(defaultOrganizationId)) {
+      return reply.code(400).send({ error: 'Organizacao padrao invalida' });
+    }
+    const rawToken = createPersonalAccessToken();
+    const token = await store.createPersonalAccessToken({
+      userId: actor.userId,
+      name: input.name,
+      tokenHash: hashToken(rawToken),
+      token: rawToken,
+      organizationIds: requestedOrganizationIds,
+      defaultOrganizationId,
+    });
+    return reply.code(201).send(publicAccessToken(token));
+  });
+
+  app.delete('/api/users/me/tokens/:id', { schema: { tags: ['system'], summary: 'Revoke current user personal access token' } }, async (req, reply) => {
+    const actor = req.actor;
+    if (!actor?.userId) return reply.code(401).send({ error: 'Unauthorized' });
+    const params = z.object({ id: z.string().min(1) }).parse(req.params);
+    const revoked = await store.revokePersonalAccessToken(actor.userId, params.id);
+    return revoked ? reply.code(204).send() : reply.code(404).send({ error: 'Token nao encontrado' });
+  });
+
+  app.get('/api/organizations', { schema: { tags: ['system'], summary: 'List organizations' } }, async () => store.listOrganizations());
+
+  app.post('/api/organizations', { schema: { tags: ['system'], summary: 'Create organization' } }, async (req, reply) => {
+    const input = z.object({ name: z.string().min(1).max(200) }).parse(req.body);
+    return reply.code(201).send(await store.createOrganization({ name: input.name }));
+  });
+
+  app.get('/api/users', { schema: { tags: ['system'], summary: 'List users with organizations' } }, async () => {
+    const users = await store.listUsers();
+    return Promise.all(users.map((user) => managedUser(user)));
+  });
+
+  app.patch('/api/users/:id/memberships', { schema: { tags: ['system'], summary: 'Replace user organization memberships' } }, async (req, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(req.params);
+    const input = z.object({
+      memberships: z.array(z.object({
+        organizationId: z.string().min(1),
+        role: z.enum(['admin', 'editor', 'viewer']),
+      })).min(1),
+    }).parse(req.body);
+    const user = await store.findUserById(params.id);
+    if (!user) return reply.code(404).send({ error: 'Usuario nao encontrado' });
+    const organizations = await store.listOrganizations();
+    const organizationIds = new Set(organizations.map((organization) => organization.id));
+    if (input.memberships.some((membership) => !organizationIds.has(membership.organizationId))) {
+      return reply.code(400).send({ error: 'Organizacao invalida' });
+    }
+    const requested = new Map(input.memberships.map((membership) => [membership.organizationId, membership.role as MembershipRole]));
+    const current = await store.listMembershipsForUser(user.id);
+    await Promise.all(current
+      .filter((membership) => !requested.has(membership.organizationId))
+      .map((membership) => store.deleteMembership(user.id, membership.organizationId)));
+    await Promise.all([...requested.entries()].map(async ([organizationId, role]) => {
+      const existing = current.find((membership) => membership.organizationId === organizationId);
+      if (existing) return store.updateMembershipRole(user.id, organizationId, role);
+      return store.createMembership({ userId: user.id, organizationId, role });
+    }));
+    return managedUser(user);
   });
 
   app.get('/api/organizations/current/members', { schema: { tags: ['system'], summary: 'List current organization members' } }, async (req) => {
@@ -783,6 +981,7 @@ function isPublicRoute(url: string): boolean {
     || path.startsWith('/docs/')
     || path === '/openapi.json'
     || path === '/api/system/security'
+    || path === '/api/auth/organizations'
     || path === '/api/auth/register'
     || path === '/api/auth/login'
     || path === '/api/auth/logout'
@@ -799,6 +998,14 @@ function tokenFromRequest(req: FastifyRequest): string | undefined {
 function publicUser(user: User): Omit<User, 'passwordHash'> {
   const { passwordHash: _passwordHash, ...safeUser } = user;
   return safeUser;
+}
+
+function publicAccessToken(token: PersonalAccessToken): Omit<PersonalAccessToken, 'tokenHash'> & { tokenMasked: string } {
+  const { tokenHash: _tokenHash, ...safeToken } = token;
+  return {
+    ...safeToken,
+    tokenMasked: token.tokenPreview,
+  };
 }
 
 function setSessionCookie(reply: FastifyReply, token: string, expiresAt: string): void {
@@ -839,11 +1046,17 @@ function corsOrigins(): Set<string> {
 }
 
 function permissionFor(method: string, url: string): Permission | null {
-  if (method === 'GET') return url.startsWith('/api/audit') ? 'audit:read' : null;
+  if (method === 'GET') {
+    if (url.startsWith('/api/audit')) return 'audit:read';
+    if (url === '/api/users' || url === '/api/organizations') return 'settings:write';
+    return null;
+  }
   if (url.startsWith('/api/projects')) return 'project:write';
   if (url.startsWith('/api/environments')) return 'environment:write';
   if (url.startsWith('/api/suites') || url.startsWith('/api/import/openapi') || url.startsWith('/api/spec/validate')) return 'suite:write';
   if (url.startsWith('/api/runs')) return 'run:write';
+  if (url.startsWith('/api/users/') && url.endsWith('/memberships')) return 'settings:write';
+  if (url === '/api/organizations') return 'settings:write';
   if (url.startsWith('/api/organizations/current/members')) return 'settings:write';
   if (url.startsWith('/api/ai/connections') || url.startsWith('/api/cleanup')) return 'settings:write';
   if (url.startsWith('/api/ai/')) return 'ai:write';

@@ -170,27 +170,32 @@ npm run web:build
 Rodar stack completa:
 
 ```bash
+cp .env.example .env
+# edite os secrets em .env antes de subir ambiente compartilhado/producao
 docker compose up --build
 ```
 
 Migrar DB manualmente:
 
 ```bash
-DATABASE_URL=postgres://testhub:testhub@localhost:55432/testhub npm run migrate
+set -a; source .env; set +a
+DATABASE_URL="$TESTHUB_LOCAL_DATABASE_URL" npm run migrate
 ```
 
 Variaveis principais:
 
 ```text
-DATABASE_URL=postgres://...
-REDIS_URL=redis://...
-TESTHUB_SECRET_KEY=change-me
-S3_BUCKET=testhub
-S3_ENDPOINT=http://localhost:9000
-S3_ACCESS_KEY_ID=testhub
-S3_SECRET_ACCESS_KEY=testhubsecret
-S3_FORCE_PATH_STYLE=true
+DATABASE_URL=<postgres-url>
+REDIS_URL=<redis-url>
+TESTHUB_SECRET_KEY=<random-secret>
+S3_BUCKET=<bucket>
+S3_ENDPOINT=<s3-endpoint>
+S3_ACCESS_KEY_ID=<access-key>
+S3_SECRET_ACCESS_KEY=<secret-key>
+S3_FORCE_PATH_STYLE=true|false
 ```
+
+Secrets ficam no `.env` local, que nao deve ser commitado. Use `.env.example` como template.
 
 API basica:
 
@@ -210,7 +215,9 @@ Modos e variaveis:
 
 ```text
 TESTHUB_AUTH_MODE=local|token|oidc|off
-TESTHUB_TOKEN=secret
+TESTHUB_TOKEN=<shared-api-token>
+TESTHUB_PAT=<personal-access-token>
+TESTHUB_ORGANIZATION_ID=<organization-id>
 TESTHUB_ALLOW_DISPLAY_RESET=true
 TESTHUB_ROLE=admin|editor|viewer
 AUTH_OIDC_ISSUER=https://issuer.example.com
@@ -222,8 +229,10 @@ TESTHUB_VIEWER_GROUPS=readers
 
 CLI/MCP:
 
-- Em auth local, login retorna um token de sessao. Use como bearer; MCP tambem aceita `TESTHUB_SESSION_TOKEN=<token>`.
-- Em modo token, exporte `TESTHUB_AUTH_MODE=token` e `TESTHUB_TOKEN=secret`; use `authorization: Bearer secret`.
+- Em auth local, gere tokens pessoais em `/settings` -> `Seguranca` -> `Tokens CLI/MCP`.
+- MCP/CLI aceitam `TESTHUB_PAT=<th_pat_...>` como bearer. Para token com multiplas organizacoes, use `TESTHUB_ORGANIZATION_ID=<organization-id>` para escolher a org ativa.
+- Token de sessao ainda funciona para dev via `TESTHUB_SESSION_TOKEN=<token>`, mas PAT e o caminho recomendado para MCP.
+- Em modo token, exporte `TESTHUB_AUTH_MODE=token` e `TESTHUB_TOKEN=<shared-api-token>`; use `authorization: Bearer <shared-api-token>`.
 
 Permissões:
 
@@ -231,7 +240,7 @@ Permissões:
 - `editor`: projetos/ambientes/suites/runs/import/AI assistant.
 - `viewer`: leitura.
 
-Na UI, salve bearer token/OIDC access token em `/settings` -> `Sessao local` quando auth estiver ligada.
+Na UI, tokens pessoais ficam mascarados, mas podem ser copiados novamente enquanto ativos.
 
 Operacoes uteis:
 
@@ -320,7 +329,7 @@ curl -X POST http://localhost:4321/api/ai/explain-failure \\
 Rodar MCP:
 
 ```bash
-TESTHUB_URL=http://localhost:4321 npx testhub-mcp
+TESTHUB_URL=http://localhost:4321 TESTHUB_PAT=th_pat_xxx npx testhub-mcp
 ```
 
 Tools:

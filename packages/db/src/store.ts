@@ -56,6 +56,21 @@ export interface PasswordResetToken {
   createdAt: string;
 }
 
+export interface PersonalAccessToken {
+  id: string;
+  userId: string;
+  name: string;
+  tokenHash: string;
+  token: string;
+  tokenPreview: string;
+  organizationIds?: string[];
+  defaultOrganizationId: string;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string;
+}
+
 export interface Project {
   id: string;
   organizationId: string;
@@ -124,6 +139,7 @@ export interface Database {
   memberships: OrganizationMembership[];
   sessions: AuthSession[];
   passwordResetTokens: PasswordResetToken[];
+  personalAccessTokens: PersonalAccessToken[];
   projects: Project[];
   environments: Environment[];
   suites: Suite[];
@@ -154,13 +170,18 @@ export interface Store {
   getEnvironmentVariables(environmentId: string): Promise<Record<string, string>> | Record<string, string>;
   getAiConnection(organizationId: string, connectionId?: string): Promise<AiConnection | undefined> | AiConnection | undefined;
   createUser(input: { email: string; name?: string; passwordHash: string }): Promise<User> | User;
+  listUsers(): Promise<User[]> | User[];
   hasActiveUsers(): Promise<boolean> | boolean;
   findUserByEmail(email: string): Promise<User | undefined> | User | undefined;
   findUserById(id: string): Promise<User | undefined> | User | undefined;
+  updateUserProfile(userId: string, input: { email?: string; name?: string }): Promise<User | undefined> | User | undefined;
   updateUserPassword(userId: string, passwordHash: string): Promise<User | undefined> | User | undefined;
   createOrganization(input: { name: string; slug?: string }): Promise<Organization> | Organization;
+  listOrganizations(): Promise<Organization[]> | Organization[];
   listOrganizationsForUser(userId: string): Promise<Organization[]> | Organization[];
   createMembership(input: { userId: string; organizationId: string; role: MembershipRole }): Promise<OrganizationMembership> | OrganizationMembership;
+  updateMembershipRole(userId: string, organizationId: string, role: MembershipRole): Promise<OrganizationMembership | undefined> | OrganizationMembership | undefined;
+  deleteMembership(userId: string, organizationId: string): Promise<boolean> | boolean;
   listMembershipsForUser(userId: string): Promise<OrganizationMembership[]> | OrganizationMembership[];
   findMembership(userId: string, organizationId: string): Promise<OrganizationMembership | undefined> | OrganizationMembership | undefined;
   listMembershipsForOrganization(organizationId: string): Promise<OrganizationMembership[]> | OrganizationMembership[];
@@ -171,6 +192,11 @@ export interface Store {
   createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): Promise<PasswordResetToken> | PasswordResetToken;
   findPasswordResetByTokenHash(tokenHash: string): Promise<PasswordResetToken | undefined> | PasswordResetToken | undefined;
   markPasswordResetUsed(id: string): Promise<PasswordResetToken | undefined> | PasswordResetToken | undefined;
+  createPersonalAccessToken(input: { userId: string; name: string; tokenHash: string; token: string; organizationIds?: string[]; defaultOrganizationId: string }): Promise<PersonalAccessToken> | PersonalAccessToken;
+  listPersonalAccessTokensForUser(userId: string): Promise<PersonalAccessToken[]> | PersonalAccessToken[];
+  findPersonalAccessTokenByHash(tokenHash: string): Promise<PersonalAccessToken | undefined> | PersonalAccessToken | undefined;
+  revokePersonalAccessToken(userId: string, tokenId: string): Promise<boolean> | boolean;
+  touchPersonalAccessToken(tokenId: string): Promise<PersonalAccessToken | undefined> | PersonalAccessToken | undefined;
   listProjectsForOrganization(organizationId: string): Promise<Project[]> | Project[];
 }
 
@@ -180,6 +206,7 @@ const emptyDb: Database = {
   memberships: [],
   sessions: [],
   passwordResetTokens: [],
+  personalAccessTokens: [],
   projects: [],
   environments: [],
   suites: [],
@@ -218,6 +245,7 @@ export class JsonStore {
       memberships: db.memberships ?? [],
       sessions: db.sessions ?? [],
       passwordResetTokens: db.passwordResetTokens ?? [],
+      personalAccessTokens: db.personalAccessTokens ?? [],
       projects: (db.projects ?? []).map((project) => ({
         ...project,
         organizationId: project.organizationId ?? LEGACY_ORGANIZATION_ID,
@@ -261,10 +289,12 @@ export class JsonStore {
 
   createUser(input: { email: string; name?: string; passwordHash: string }): User {
     const db = this.read();
+    const email = normalizeEmail(input.email);
+    if (db.users.some((user) => user.email === email && user.status === 'active')) throw new Error('Email ja cadastrado');
     const now = nowIso();
     const user: User = {
       id: randomUUID(),
-      email: normalizeEmail(input.email),
+      email,
       name: input.name,
       passwordHash: input.passwordHash,
       status: 'active',
@@ -274,6 +304,10 @@ export class JsonStore {
     db.users.push(user);
     this.write(db);
     return user;
+  }
+
+  listUsers(): User[] {
+    return this.read().users.filter((user) => user.status === 'active');
   }
 
   hasActiveUsers(): boolean {
@@ -287,6 +321,23 @@ export class JsonStore {
 
   findUserById(id: string): User | undefined {
     return this.read().users.find((user) => user.id === id && user.status === 'active');
+  }
+
+  updateUserProfile(userId: string, input: { email?: string; name?: string }): User | undefined {
+    const db = this.read();
+    const index = db.users.findIndex((user) => user.id === userId && user.status === 'active');
+    if (index === -1) return undefined;
+    const email = input.email ? normalizeEmail(input.email) : db.users[index].email;
+    if (db.users.some((user) => user.id !== userId && user.email === email && user.status === 'active')) throw new Error('Email ja cadastrado');
+    const user: User = {
+      ...db.users[index],
+      email,
+      name: input.name ?? db.users[index].name,
+      updatedAt: nowIso(),
+    };
+    db.users[index] = user;
+    this.write(db);
+    return user;
   }
 
   updateUserPassword(userId: string, passwordHash: string): User | undefined {
@@ -306,10 +357,15 @@ export class JsonStore {
   createOrganization(input: { name: string; slug?: string }): Organization {
     const db = this.read();
     const now = nowIso();
+    const baseSlug = slugify(input.slug ?? input.name);
+    let slug = baseSlug;
+    for (let attempt = 2; db.organizations.some((organization) => organization.slug === slug); attempt += 1) {
+      slug = `${baseSlug}-${attempt}`;
+    }
     const organization: Organization = {
       id: randomUUID(),
       name: input.name,
-      slug: input.slug ?? slugify(input.name),
+      slug,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -317,6 +373,10 @@ export class JsonStore {
     db.organizations.push(organization);
     this.write(db);
     return organization;
+  }
+
+  listOrganizations(): Organization[] {
+    return this.read().organizations.filter((organization) => organization.status === 'active');
   }
 
   listOrganizationsForUser(userId: string): Organization[] {
@@ -327,6 +387,8 @@ export class JsonStore {
 
   createMembership(input: { userId: string; organizationId: string; role: MembershipRole }): OrganizationMembership {
     const db = this.read();
+    const existing = db.memberships.find((membership) => membership.userId === input.userId && membership.organizationId === input.organizationId);
+    if (existing) return existing;
     const now = nowIso();
     const membership: OrganizationMembership = {
       id: randomUUID(),
@@ -339,6 +401,25 @@ export class JsonStore {
     db.memberships.push(membership);
     this.write(db);
     return membership;
+  }
+
+  updateMembershipRole(userId: string, organizationId: string, role: MembershipRole): OrganizationMembership | undefined {
+    const db = this.read();
+    const index = db.memberships.findIndex((membership) => membership.userId === userId && membership.organizationId === organizationId);
+    if (index === -1) return undefined;
+    const membership: OrganizationMembership = { ...db.memberships[index], role, updatedAt: nowIso() };
+    db.memberships[index] = membership;
+    this.write(db);
+    return membership;
+  }
+
+  deleteMembership(userId: string, organizationId: string): boolean {
+    const db = this.read();
+    const before = db.memberships.length;
+    db.memberships = db.memberships.filter((membership) => !(membership.userId === userId && membership.organizationId === organizationId));
+    if (db.memberships.length === before) return false;
+    this.write(db);
+    return true;
   }
 
   listMembershipsForUser(userId: string): OrganizationMembership[] {
@@ -425,6 +506,57 @@ export class JsonStore {
     db.passwordResetTokens[index] = resetToken;
     this.write(db);
     return resetToken;
+  }
+
+  createPersonalAccessToken(input: { userId: string; name: string; tokenHash: string; token: string; organizationIds?: string[]; defaultOrganizationId: string }): PersonalAccessToken {
+    const db = this.read();
+    const now = nowIso();
+    const token: PersonalAccessToken = {
+      id: randomUUID(),
+      userId: input.userId,
+      name: input.name,
+      tokenHash: input.tokenHash,
+      token: encryptSecret(input.token),
+      tokenPreview: tokenPreview(input.token),
+      organizationIds: input.organizationIds,
+      defaultOrganizationId: input.defaultOrganizationId,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.personalAccessTokens.push(token);
+    this.write(db);
+    return { ...token, token: input.token };
+  }
+
+  listPersonalAccessTokensForUser(userId: string): PersonalAccessToken[] {
+    return this.read().personalAccessTokens
+      .filter((token) => token.userId === userId && token.status === 'active')
+      .map((token) => ({ ...token, token: decryptSecret(token.token) }));
+  }
+
+  findPersonalAccessTokenByHash(tokenHash: string): PersonalAccessToken | undefined {
+    const token = this.read().personalAccessTokens.find((item) => item.tokenHash === tokenHash && item.status === 'active');
+    return token ? { ...token, token: decryptSecret(token.token) } : undefined;
+  }
+
+  revokePersonalAccessToken(userId: string, tokenId: string): boolean {
+    const db = this.read();
+    const index = db.personalAccessTokens.findIndex((token) => token.id === tokenId && token.userId === userId && token.status === 'active');
+    if (index === -1) return false;
+    db.personalAccessTokens[index] = { ...db.personalAccessTokens[index], status: 'inactive', updatedAt: nowIso() };
+    this.write(db);
+    return true;
+  }
+
+  touchPersonalAccessToken(tokenId: string): PersonalAccessToken | undefined {
+    const db = this.read();
+    const index = db.personalAccessTokens.findIndex((token) => token.id === tokenId && token.status === 'active');
+    if (index === -1) return undefined;
+    const token = { ...db.personalAccessTokens[index], lastUsedAt: nowIso(), updatedAt: nowIso() };
+    db.personalAccessTokens[index] = token;
+    this.write(db);
+    return { ...token, token: decryptSecret(token.token) };
   }
 
   listProjectsForOrganization(organizationId: string): Project[] {
@@ -645,6 +777,10 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'team';
+}
+
+function tokenPreview(token: string): string {
+  return `${token.slice(0, 10)}...${token.slice(-6)}`;
 }
 
 function cleanupRunArtifacts(allowedRoot: string, ...paths: Array<string | undefined>): void {

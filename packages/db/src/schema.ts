@@ -59,6 +59,21 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
 });
 
+export const personalAccessTokens = pgTable('personal_access_tokens', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  token: text('token').notNull(),
+  tokenPreview: text('token_preview').notNull(),
+  organizationIds: jsonb('organization_ids').$type<string[] | null>(),
+  defaultOrganizationId: text('default_organization_id').notNull(),
+  status: text('status').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+});
+
 export const environments = pgTable('environments', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull(),

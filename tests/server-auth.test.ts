@@ -405,6 +405,341 @@ describe('server local auth', () => {
     expect((members.json() as Array<{ user: { passwordHash?: string } }>).every((member) => member.user.passwordHash === undefined)).toBe(true);
   });
 
+  it('supports organization selection at signup and organization switching', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-org-select-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = 'true';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const ownerRegister = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'owner-select@example.com',
+        password: 'correct-horse',
+        organizationName: 'Prime Org',
+      },
+    });
+    expect(ownerRegister.statusCode).toBe(201);
+    const owner = ownerRegister.json() as { token: string; organization: { id: string } };
+
+    const secondOrgResponse = await app.inject({
+      method: 'POST',
+      url: '/api/organizations',
+      headers: { authorization: `Bearer ${owner.token}` },
+      payload: { name: 'Second Org' },
+    });
+    expect(secondOrgResponse.statusCode).toBe(201);
+    const secondOrg = secondOrgResponse.json() as { id: string; name: string };
+
+    const publicOrganizations = await app.inject({ method: 'GET', url: '/api/auth/organizations' });
+    expect(publicOrganizations.statusCode).toBe(200);
+    expect(publicOrganizations.json()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: owner.organization.id, name: 'Prime Org' }),
+      expect.objectContaining({ id: secondOrg.id, name: 'Second Org' }),
+    ]));
+
+    const teammateRegister = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'teammate-select@example.com',
+        name: 'Teammate',
+        password: 'correct-horse',
+        organizationIds: [owner.organization.id, secondOrg.id],
+      },
+    });
+    expect(teammateRegister.statusCode).toBe(201);
+    expect(teammateRegister.json()).toMatchObject({
+      membership: { organizationId: owner.organization.id, role: 'viewer' },
+      organizations: [
+        expect.objectContaining({ id: owner.organization.id }),
+        expect.objectContaining({ id: secondOrg.id }),
+      ],
+    });
+
+    const teammate = teammateRegister.json() as { token: string };
+    const switchResponse = await app.inject({
+      method: 'POST',
+      url: '/api/auth/switch-organization',
+      headers: { authorization: `Bearer ${teammate.token}` },
+      payload: { organizationId: secondOrg.id },
+    });
+    expect(switchResponse.statusCode).toBe(200);
+    const switched = switchResponse.json() as { token: string; organization: { id: string }; membership: { role: string } };
+    expect(switched.organization.id).toBe(secondOrg.id);
+    expect(switched.membership.role).toBe('viewer');
+    expect(switched.token).toEqual(expect.any(String));
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/api/auth/me',
+      headers: { authorization: `Bearer ${switched.token}` },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json()).toMatchObject({ organization: { id: secondOrg.id } });
+  });
+
+  it('lets admins manage user organization memberships', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-user-management-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const register = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'admin-users@example.com',
+        password: 'correct-horse',
+        organizationName: 'Admin Org',
+      },
+    });
+    expect(register.statusCode).toBe(201);
+    const admin = register.json() as { token: string; organization: { id: string } };
+
+    const createdOrg = await app.inject({
+      method: 'POST',
+      url: '/api/organizations',
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: { name: 'Managed Org' },
+    });
+    expect(createdOrg.statusCode).toBe(201);
+    const managedOrg = createdOrg.json() as { id: string };
+
+    const createMember = await app.inject({
+      method: 'POST',
+      url: '/api/organizations/current/members',
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: {
+        email: 'managed@example.com',
+        name: 'Managed',
+        role: 'viewer',
+        temporaryPassword: 'temporary-password',
+      },
+    });
+    expect(createMember.statusCode).toBe(201);
+    const member = createMember.json() as { user: { id: string } };
+
+    const usersBefore = await app.inject({
+      method: 'GET',
+      url: '/api/users',
+      headers: { authorization: `Bearer ${admin.token}` },
+    });
+    expect(usersBefore.statusCode).toBe(200);
+    expect(usersBefore.json()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        user: expect.objectContaining({ email: 'managed@example.com' }),
+        organizations: [expect.objectContaining({ id: admin.organization.id })],
+      }),
+    ]));
+
+    const updateMemberships = await app.inject({
+      method: 'PATCH',
+      url: `/api/users/${member.user.id}/memberships`,
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: {
+        memberships: [
+          { organizationId: managedOrg.id, role: 'editor' },
+        ],
+      },
+    });
+    expect(updateMemberships.statusCode).toBe(200);
+    expect(updateMemberships.json()).toMatchObject({
+      user: { id: member.user.id, email: 'managed@example.com' },
+      memberships: [expect.objectContaining({ organizationId: managedOrg.id, role: 'editor' })],
+      organizations: [expect.objectContaining({ id: managedOrg.id })],
+    });
+
+    const loginMember = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'managed@example.com', password: 'temporary-password' },
+    });
+    expect(loginMember.statusCode).toBe(200);
+    expect(loginMember.json()).toMatchObject({ membership: { organizationId: managedOrg.id, role: 'editor' } });
+  });
+
+  it('lets the current user update profile and password with current password', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-profile-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const register = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'profile@example.com',
+        name: 'Profile',
+        password: 'correct-horse',
+        organizationName: 'Profile Org',
+      },
+    });
+    expect(register.statusCode).toBe(201);
+    const session = register.json() as { token: string };
+
+    const wrongPassword = await app.inject({
+      method: 'PUT',
+      url: '/api/users/me',
+      headers: { authorization: `Bearer ${session.token}` },
+      payload: {
+        name: 'Profile Updated',
+        currentPassword: 'wrong-password',
+        newPassword: 'new-password-1',
+      },
+    });
+    expect(wrongPassword.statusCode).toBe(401);
+
+    const update = await app.inject({
+      method: 'PUT',
+      url: '/api/users/me',
+      headers: { authorization: `Bearer ${session.token}` },
+      payload: {
+        email: 'profile-updated@example.com',
+        name: 'Profile Updated',
+        currentPassword: 'correct-horse',
+        newPassword: 'new-password-1',
+      },
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.json()).toMatchObject({ user: { email: 'profile-updated@example.com', name: 'Profile Updated' } });
+    expect((update.json() as { user: { passwordHash?: string } }).user.passwordHash).toBeUndefined();
+
+    const oldLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'profile@example.com', password: 'correct-horse' },
+    });
+    expect(oldLogin.statusCode).toBe(401);
+
+    const newLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'profile-updated@example.com', password: 'new-password-1' },
+    });
+    expect(newLogin.statusCode).toBe(200);
+  });
+
+  it('creates reusable personal access tokens for MCP scoped by organization', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-pat-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const register = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'pat@example.com',
+        password: 'correct-horse',
+        organizationName: 'PAT Org A',
+      },
+    });
+    expect(register.statusCode).toBe(201);
+    const owner = register.json() as { token: string; organization: { id: string } };
+
+    const orgBResponse = await app.inject({
+      method: 'POST',
+      url: '/api/organizations',
+      headers: { authorization: `Bearer ${owner.token}` },
+      payload: { name: 'PAT Org B' },
+    });
+    expect(orgBResponse.statusCode).toBe(201);
+    const orgB = orgBResponse.json() as { id: string };
+
+    const updateMemberships = await app.inject({
+      method: 'PATCH',
+      url: `/api/users/${(register.json() as { user: { id: string } }).user.id}/memberships`,
+      headers: { authorization: `Bearer ${owner.token}` },
+      payload: {
+        memberships: [
+          { organizationId: owner.organization.id, role: 'admin' },
+          { organizationId: orgB.id, role: 'admin' },
+        ],
+      },
+    });
+    expect(updateMemberships.statusCode).toBe(200);
+
+    const createAllToken = await app.inject({
+      method: 'POST',
+      url: '/api/users/me/tokens',
+      headers: { authorization: `Bearer ${owner.token}` },
+      payload: { name: 'mcp-all', defaultOrganizationId: owner.organization.id },
+    });
+    expect(createAllToken.statusCode).toBe(201);
+    const allToken = createAllToken.json() as { id: string; token: string; tokenHash?: string; tokenMasked: string; organizationIds?: string[] };
+    expect(allToken.token).toMatch(/^th_pat_/);
+    expect(allToken.tokenHash).toBeUndefined();
+    expect(allToken.tokenMasked).toEqual(expect.stringContaining('...'));
+    expect(allToken.organizationIds).toBeUndefined();
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/users/me/tokens',
+      headers: { authorization: `Bearer ${owner.token}` },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual([expect.objectContaining({ id: allToken.id, token: allToken.token })]);
+
+    const projectB = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: {
+        authorization: `Bearer ${allToken.token}`,
+        'x-testhub-organization-id': orgB.id,
+      },
+      payload: { name: 'Project via PAT' },
+    });
+    expect(projectB.statusCode).toBe(201);
+    expect(projectB.json()).toMatchObject({ organizationId: orgB.id });
+
+    const scopedTokenResponse = await app.inject({
+      method: 'POST',
+      url: '/api/users/me/tokens',
+      headers: { authorization: `Bearer ${owner.token}` },
+      payload: { name: 'mcp-org-a', organizationIds: [owner.organization.id], defaultOrganizationId: owner.organization.id },
+    });
+    expect(scopedTokenResponse.statusCode).toBe(201);
+    const scopedToken = scopedTokenResponse.json() as { id: string; token: string; organizationIds: string[] };
+    expect(scopedToken.organizationIds).toEqual([owner.organization.id]);
+
+    const scopedProject = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: {
+        authorization: `Bearer ${scopedToken.token}`,
+        'x-testhub-organization-id': orgB.id,
+      },
+      payload: { name: 'Should land in Org A' },
+    });
+    expect(scopedProject.statusCode).toBe(201);
+    expect(scopedProject.json()).toMatchObject({ organizationId: owner.organization.id });
+
+    const revoke = await app.inject({
+      method: 'DELETE',
+      url: `/api/users/me/tokens/${scopedToken.id}`,
+      headers: { authorization: `Bearer ${owner.token}` },
+    });
+    expect(revoke.statusCode).toBe(204);
+
+    const afterRevoke = await app.inject({
+      method: 'GET',
+      url: '/api/projects',
+      headers: { authorization: `Bearer ${scopedToken.token}` },
+    });
+    expect(afterRevoke.statusCode).toBe(401);
+  });
+
   it('does not treat auth route prefixes as public', async () => {
     process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-prefix-'));
     process.env.TESTHUB_AUTH_MODE = 'local';

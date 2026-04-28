@@ -18,6 +18,8 @@ const statements = [
   `create unique index if not exists auth_sessions_token_hash_unique on auth_sessions (token_hash)`,
   `create table if not exists password_reset_tokens (id text primary key, user_id text not null, token_hash text not null, expires_at timestamptz not null, used_at timestamptz, created_at timestamptz not null)`,
   `create unique index if not exists password_reset_tokens_hash_unique on password_reset_tokens (token_hash)`,
+  `create table if not exists personal_access_tokens (id text primary key, user_id text not null, name text not null, token_hash text not null, token text not null, token_preview text not null, organization_ids jsonb, default_organization_id text not null, status text not null, created_at timestamptz not null, updated_at timestamptz not null, last_used_at timestamptz)`,
+  `create unique index if not exists personal_access_tokens_hash_unique on personal_access_tokens (token_hash)`,
   `create table if not exists environments (id text primary key, project_id text not null, name text not null, base_url text not null, status text not null, variables jsonb, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create table if not exists suites (id text primary key, project_id text not null, name text not null, type text not null, spec_path text not null, status text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create table if not exists runs (id text primary key, project_id text not null, environment_id text not null, suite_id text not null, status text not null, report_path text, report_html_path text, error text, created_at timestamptz not null, started_at timestamptz, finished_at timestamptz, summary jsonb)`,

@@ -5,8 +5,8 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { and, desc, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
 import { ensureDir } from '../../shared/src/fs-utils.js';
-import { aiConnections, environments, memberships, organizations, passwordResetTokens, projects, runs, sessions, suites, users } from './schema.js';
-import type { AiConnection, AuthSession, Database, Environment, MembershipRole, Organization, OrganizationMembership, PasswordResetToken, Project, RunRecord, Store, Suite, User } from './store.js';
+import { aiConnections, environments, memberships, organizations, passwordResetTokens, personalAccessTokens, projects, runs, sessions, suites, users } from './schema.js';
+import type { AiConnection, AuthSession, Database, Environment, MembershipRole, Organization, OrganizationMembership, PasswordResetToken, PersonalAccessToken, Project, RunRecord, Store, Suite, User } from './store.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 
 const { Pool } = pg;
@@ -38,12 +38,13 @@ export class PgStore implements Store {
   }
 
   async read(): Promise<Database> {
-    const [userRows, organizationRows, membershipRows, sessionRows, passwordResetRows, projectRows, environmentRows, suiteRows, runRows, aiRows] = await Promise.all([
+    const [userRows, organizationRows, membershipRows, sessionRows, passwordResetRows, personalAccessRows, projectRows, environmentRows, suiteRows, runRows, aiRows] = await Promise.all([
       this.db.select().from(users),
       this.db.select().from(organizations),
       this.db.select().from(memberships),
       this.db.select().from(sessions),
       this.db.select().from(passwordResetTokens),
+      this.db.select().from(personalAccessTokens),
       this.db.select().from(projects),
       this.db.select().from(environments),
       this.db.select().from(suites),
@@ -56,6 +57,7 @@ export class PgStore implements Store {
       memberships: membershipRows.map(rowToMembership),
       sessions: sessionRows.map(rowToSession),
       passwordResetTokens: passwordResetRows.map(rowToPasswordResetToken),
+      personalAccessTokens: personalAccessRows.map(rowToPersonalAccessToken),
       projects: projectRows.map(rowToProject),
       environments: environmentRows.map(rowToEnvironmentSafe),
       suites: suiteRows.map(rowToSuite),
@@ -109,6 +111,11 @@ export class PgStore implements Store {
     return rowToUser(user);
   }
 
+  async listUsers(): Promise<User[]> {
+    const rows = await this.db.select().from(users).where(eq(users.status, 'active'));
+    return rows.map(rowToUser);
+  }
+
   async hasActiveUsers(): Promise<boolean> {
     const [user] = await this.db.select({ id: users.id }).from(users).where(eq(users.status, 'active')).limit(1);
     return Boolean(user);
@@ -121,6 +128,22 @@ export class PgStore implements Store {
 
   async findUserById(id: string): Promise<User | undefined> {
     const [user] = await this.db.select().from(users).where(and(eq(users.id, id), eq(users.status, 'active')));
+    return user ? rowToUser(user) : undefined;
+  }
+
+  async updateUserProfile(userId: string, input: { email?: string; name?: string }): Promise<User | undefined> {
+    const values: Partial<typeof users.$inferInsert> = { updatedAt: new Date() };
+    if (input.email !== undefined) {
+      const email = normalizeEmail(input.email);
+      const [existing] = await this.db.select({ id: users.id }).from(users).where(and(eq(sql<string>`lower(${users.email})`, email), ne(users.id, userId), eq(users.status, 'active')));
+      if (existing) throw new Error('Email ja cadastrado');
+      values.email = email;
+    }
+    if (input.name !== undefined) values.name = input.name || null;
+    const [user] = await this.db.update(users)
+      .set(values)
+      .where(and(eq(users.id, userId), eq(users.status, 'active')))
+      .returning();
     return user ? rowToUser(user) : undefined;
   }
 
@@ -157,6 +180,11 @@ export class PgStore implements Store {
     throw new Error('Slug de organizacao ja cadastrado');
   }
 
+  async listOrganizations(): Promise<Organization[]> {
+    const rows = await this.db.select().from(organizations).where(eq(organizations.status, 'active'));
+    return rows.map(rowToOrganization);
+  }
+
   async listOrganizationsForUser(userId: string): Promise<Organization[]> {
     const [membershipRows, organizationRows] = await Promise.all([
       this.db.select().from(memberships).where(eq(memberships.userId, userId)),
@@ -188,6 +216,21 @@ export class PgStore implements Store {
       throw error;
     }
     return rowToMembership(membership);
+  }
+
+  async updateMembershipRole(userId: string, organizationId: string, role: MembershipRole): Promise<OrganizationMembership | undefined> {
+    const [membership] = await this.db.update(memberships)
+      .set({ role, updatedAt: new Date() })
+      .where(and(eq(memberships.userId, userId), eq(memberships.organizationId, organizationId)))
+      .returning();
+    return membership ? rowToMembership(membership) : undefined;
+  }
+
+  async deleteMembership(userId: string, organizationId: string): Promise<boolean> {
+    const deleted = await this.db.delete(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.organizationId, organizationId)))
+      .returning({ id: memberships.id });
+    return deleted.length > 0;
   }
 
   async listMembershipsForUser(userId: string): Promise<OrganizationMembership[]> {
@@ -275,6 +318,59 @@ export class PgStore implements Store {
       .returning();
     if (resetToken) return rowToPasswordResetToken(resetToken);
     return undefined;
+  }
+
+  async createPersonalAccessToken(input: { userId: string; name: string; tokenHash: string; token: string; organizationIds?: string[]; defaultOrganizationId: string }): Promise<PersonalAccessToken> {
+    const now = new Date();
+    const row = {
+      id: randomUUID(),
+      userId: input.userId,
+      name: input.name,
+      tokenHash: input.tokenHash,
+      token: encryptSecret(input.token),
+      tokenPreview: tokenPreview(input.token),
+      organizationIds: input.organizationIds ?? null,
+      defaultOrganizationId: input.defaultOrganizationId,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: null,
+    };
+    await this.db.insert(personalAccessTokens).values(row);
+    return { ...rowToPersonalAccessToken(row), token: input.token };
+  }
+
+  async listPersonalAccessTokensForUser(userId: string): Promise<PersonalAccessToken[]> {
+    const rows = await this.db.select().from(personalAccessTokens).where(and(eq(personalAccessTokens.userId, userId), eq(personalAccessTokens.status, 'active')));
+    return rows.map((row) => {
+      const token = rowToPersonalAccessToken(row);
+      return { ...token, token: decryptSecret(token.token) };
+    });
+  }
+
+  async findPersonalAccessTokenByHash(tokenHash: string): Promise<PersonalAccessToken | undefined> {
+    const [row] = await this.db.select().from(personalAccessTokens).where(and(eq(personalAccessTokens.tokenHash, tokenHash), eq(personalAccessTokens.status, 'active')));
+    if (!row) return undefined;
+    const token = rowToPersonalAccessToken(row);
+    return { ...token, token: decryptSecret(token.token) };
+  }
+
+  async revokePersonalAccessToken(userId: string, tokenId: string): Promise<boolean> {
+    const revoked = await this.db.update(personalAccessTokens)
+      .set({ status: 'inactive', updatedAt: new Date() })
+      .where(and(eq(personalAccessTokens.id, tokenId), eq(personalAccessTokens.userId, userId), eq(personalAccessTokens.status, 'active')))
+      .returning({ id: personalAccessTokens.id });
+    return revoked.length > 0;
+  }
+
+  async touchPersonalAccessToken(tokenId: string): Promise<PersonalAccessToken | undefined> {
+    const [row] = await this.db.update(personalAccessTokens)
+      .set({ lastUsedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(personalAccessTokens.id, tokenId), eq(personalAccessTokens.status, 'active')))
+      .returning();
+    if (!row) return undefined;
+    const token = rowToPersonalAccessToken(row);
+    return { ...token, token: decryptSecret(token.token) };
   }
 
   async listProjectsForOrganization(organizationId: string): Promise<Project[]> {
@@ -500,6 +596,23 @@ function rowToPasswordResetToken(row: { id: string; userId: string; tokenHash: s
   };
 }
 
+function rowToPersonalAccessToken(row: { id: string; userId: string; name: string; tokenHash: string; token: string; tokenPreview: string; organizationIds?: string[] | null; defaultOrganizationId: string; status: string; createdAt: Date | string; updatedAt: Date | string; lastUsedAt?: Date | string | null }): PersonalAccessToken {
+  return {
+    id: row.id,
+    userId: row.userId,
+    name: row.name,
+    tokenHash: row.tokenHash,
+    token: row.token,
+    tokenPreview: row.tokenPreview,
+    organizationIds: row.organizationIds ?? undefined,
+    defaultOrganizationId: row.defaultOrganizationId,
+    status: row.status as PersonalAccessToken['status'],
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+    lastUsedAt: row.lastUsedAt ? toIso(row.lastUsedAt) : undefined,
+  };
+}
+
 function rowToProject(row: { id: string; organizationId?: string | null; name: string; description?: string | null; retentionDays?: number | null; cleanupArtifacts?: boolean | null; status: string; createdAt: Date | string; updatedAt: Date | string }): Project {
   return {
     id: row.id,
@@ -557,6 +670,10 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'team';
+}
+
+function tokenPreview(token: string): string {
+  return `${token.slice(0, 10)}...${token.slice(-6)}`;
 }
 
 function isUniqueViolation(error: unknown): boolean {

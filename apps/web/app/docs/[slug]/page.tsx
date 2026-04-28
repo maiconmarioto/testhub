@@ -1,4 +1,4 @@
-import { redirect } from 'next/navigation';
+import { V2Console } from '@/components/dashboard/v2-console';
 
 const slugs = [
   'quick-start',
@@ -23,5 +23,5 @@ export function generateStaticParams() {
 export default async function DocsSubPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   void slug;
-  redirect('/v2');
+  return <V2Console view="docs" />;
 }

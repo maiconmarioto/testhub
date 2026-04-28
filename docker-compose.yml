@@ -2,28 +2,28 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: testhub
-      POSTGRES_PASSWORD: testhub
-      POSTGRES_DB: testhub
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "55432:5432"
+      - '55432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - '6379:6379'
 
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: testhub
-      MINIO_ROOT_PASSWORD: testhubsecret
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - '9000:9000'
+      - '9001:9001'
     volumes:
       - minio:/data
 
@@ -34,25 +34,40 @@ services:
     entrypoint: >
       /bin/sh -c "
       sleep 5;
-      mc alias set local http://minio:9000 testhub testhubsecret;
-      mc mb -p local/testhub || true;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb -p local/${S3_BUCKET} || true;
       exit 0;
       "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
 
   api:
     build: .
-    command: ["sh", "-lc", "node dist/packages/db/src/migrate.js && node dist/apps/cli/src/cli.js server --port 4321"]
+    command:
+      [
+        'sh',
+        '-lc',
+        'node dist/packages/db/src/migrate.js && node dist/apps/cli/src/cli.js server --port 4321',
+      ]
     environment:
-      DATABASE_URL: postgres://testhub:testhub@postgres:5432/testhub
-      REDIS_URL: redis://redis:6379
-      TESTHUB_SECRET_KEY: change-me
-      S3_BUCKET: testhub
-      S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY_ID: testhub
-      S3_SECRET_ACCESS_KEY: testhubsecret
-      S3_FORCE_PATH_STYLE: "true"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      TESTHUB_SECRET_KEY: ${TESTHUB_SECRET_KEY}
+      TESTHUB_AUTH_MODE: ${TESTHUB_AUTH_MODE:-local}
+      TESTHUB_TOKEN: ${TESTHUB_TOKEN:-}
+      TESTHUB_ALLOW_DISPLAY_RESET: ${TESTHUB_ALLOW_DISPLAY_RESET:-false}
+      TESTHUB_ROLE: ${TESTHUB_ROLE:-admin}
+      TESTHUB_WEB_URL: ${TESTHUB_WEB_URL:-http://localhost:3333}
+      TESTHUB_CORS_ORIGINS: ${TESTHUB_CORS_ORIGINS:-http://localhost:3333,http://127.0.0.1:3333}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
     ports:
-      - "4321:4321"
+      - '4321:4321'
     volumes:
       - testhub-data:/app/.testhub-data
     depends_on:
@@ -63,16 +78,17 @@ services:
 
   worker:
     build: .
-    command: ["node", "dist/apps/worker/src/worker.js"]
+    command: ['node', 'dist/apps/worker/src/worker.js']
     environment:
-      DATABASE_URL: postgres://testhub:testhub@postgres:5432/testhub
-      REDIS_URL: redis://redis:6379
-      TESTHUB_SECRET_KEY: change-me
-      S3_BUCKET: testhub
-      S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY_ID: testhub
-      S3_SECRET_ACCESS_KEY: testhubsecret
-      S3_FORCE_PATH_STYLE: "true"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      TESTHUB_SECRET_KEY: ${TESTHUB_SECRET_KEY}
+      TESTHUB_AUTH_MODE: ${TESTHUB_AUTH_MODE:-local}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
     volumes:
       - testhub-data:/app/.testhub-data
     depends_on:
@@ -84,10 +100,11 @@ services:
       context: .
       dockerfile: Dockerfile.web
     environment:
-      NEXT_PUBLIC_TESTHUB_API_URL: http://localhost:4321
-      PORT: 3333
+      NEXT_PUBLIC_TESTHUB_API_URL: ${NEXT_PUBLIC_TESTHUB_API_URL:-http://localhost:4321}
+      NEXT_PUBLIC_TESTHUB_TOKEN: ${NEXT_PUBLIC_TESTHUB_TOKEN:-}
+      PORT: ${PORT:-3333}
     ports:
-      - "3333:3333"
+      - '3333:3333'
     depends_on:
       - api
 

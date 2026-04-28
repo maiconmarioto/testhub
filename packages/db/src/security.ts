@@ -1,4 +1,4 @@
-export const defaultSecretKey = 'testhub-dev-secret-key-change-me';
+export const defaultSecretKey = '';
 
 export type RbacRole = 'admin' | 'editor' | 'viewer';
 export type Permission =
