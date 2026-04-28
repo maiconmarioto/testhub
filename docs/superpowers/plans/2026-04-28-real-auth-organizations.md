@@ -1420,7 +1420,7 @@ git commit -m "docs: document real auth setup"
 **Files:**
 - No planned source changes unless verification fails.
 
-- [ ] **Step 1: Run unit and API suite**
+- [x] **Step 1: Run unit and API suite**
 
 Run:
 
@@ -1430,7 +1430,7 @@ npm test
 
 Expected: PASS.
 
-- [ ] **Step 2: Run typecheck and build**
+- [x] **Step 2: Run typecheck and build**
 
 Run:
 
@@ -1442,7 +1442,7 @@ npm run web:build
 
 Expected: PASS.
 
-- [ ] **Step 3: Run auth smoke manually**
+- [x] **Step 3: Run auth smoke manually**
 
 Start API and web:
 
@@ -1465,7 +1465,7 @@ Manual browser flow:
 7. Login as viewer and verify write buttons are disabled.
 8. Use forgot password for viewer, reset password, login with new password.
 
-- [ ] **Step 4: Commit any verification fixes**
+- [x] **Step 4: Commit any verification fixes**
 
 Only if fixes were needed:
 
