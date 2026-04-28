@@ -62,6 +62,18 @@ describe('server local auth', () => {
     });
     expect(duplicate.statusCode).toBe(409);
 
+    const publicSignup = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'teammate@example.com',
+        password: 'correct-horse',
+        organizationName: 'Second Team',
+      },
+    });
+    expect(publicSignup.statusCode).toBe(403);
+    expect(publicSignup.json()).toMatchObject({ error: 'Cadastro publico desabilitado' });
+
     const meWithBearer = await app.inject({
       method: 'GET',
       url: '/api/auth/me',
@@ -125,6 +137,78 @@ describe('server local auth', () => {
 
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({});
+  });
+
+  it('does not treat auth route prefixes as public', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-prefix-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const getResponse = await app.inject({ method: 'GET', url: '/api/auth/login-extra' });
+    expect(getResponse.statusCode).toBe(401);
+
+    const postResponse = await app.inject({ method: 'POST', url: '/api/auth/login-extra' });
+    expect(postResponse.statusCode).toBe(401);
+  });
+
+  it('does not reuse password reset tokens', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-reset-reuse-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const register = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'reset@example.com',
+        password: 'initial-password',
+        organizationName: 'Reset Team',
+      },
+    });
+    expect(register.statusCode).toBe(201);
+
+    const request = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password-reset/request',
+      payload: { email: 'reset@example.com' },
+    });
+    expect(request.statusCode).toBe(202);
+    const resetToken = (request.json() as { resetToken?: string }).resetToken;
+    expect(resetToken).toEqual(expect.any(String));
+
+    const confirm = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password-reset/confirm',
+      payload: { resetToken, password: 'new-password-1' },
+    });
+    expect(confirm.statusCode).toBe(204);
+
+    const reused = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password-reset/confirm',
+      payload: { resetToken, password: 'new-password-2' },
+    });
+    expect(reused.statusCode).toBe(400);
+
+    const firstPasswordLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'reset@example.com', password: 'new-password-1' },
+    });
+    expect(firstPasswordLogin.statusCode).toBe(200);
+
+    const secondPasswordLogin = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'reset@example.com', password: 'new-password-2' },
+    });
+    expect(secondPasswordLogin.statusCode).toBe(401);
   });
 });
 

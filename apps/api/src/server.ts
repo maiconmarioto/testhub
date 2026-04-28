@@ -211,6 +211,9 @@ export function createApp() {
     }).parse(req.body);
     const existing = await store.findUserByEmail(input.email);
     if (existing) return reply.code(409).send({ error: 'Email ja cadastrado' });
+    if ((await store.read()).users.length > 0 && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
+      return reply.code(403).send({ error: 'Cadastro publico desabilitado' });
+    }
 
     const user = await store.createUser({
       email: input.email,
@@ -285,9 +288,10 @@ export function createApp() {
     }).parse(req.body);
     const resetToken = await store.findPasswordResetByTokenHash(hashToken(input.resetToken));
     if (!resetToken) return reply.code(400).send({ error: 'Token invalido ou expirado' });
+    const usedToken = await store.markPasswordResetUsed(resetToken.id);
+    if (!usedToken) return reply.code(400).send({ error: 'Token invalido ou expirado' });
     const user = await store.updateUserPassword(resetToken.userId, await hashPassword(input.password));
     if (!user) return reply.code(400).send({ error: 'Token invalido ou expirado' });
-    await store.markPasswordResetUsed(resetToken.id);
     return reply.code(204).send();
   });
 
@@ -609,15 +613,17 @@ declare module 'fastify' {
 }
 
 function isPublicRoute(url: string): boolean {
-  return url === '/'
-    || url.startsWith('/api/health')
-    || url.startsWith('/docs')
-    || url.startsWith('/openapi.json')
-    || url.startsWith('/api/system/security')
-    || url.startsWith('/api/auth/register')
-    || url.startsWith('/api/auth/login')
-    || url.startsWith('/api/auth/password-reset/request')
-    || url.startsWith('/api/auth/password-reset/confirm');
+  const path = url.split('?')[0];
+  return path === '/'
+    || path === '/api/health'
+    || path === '/docs'
+    || path.startsWith('/docs/')
+    || path === '/openapi.json'
+    || path === '/api/system/security'
+    || path === '/api/auth/register'
+    || path === '/api/auth/login'
+    || path === '/api/auth/password-reset/request'
+    || path === '/api/auth/password-reset/confirm';
 }
 
 function tokenFromRequest(req: FastifyRequest): string | undefined {
