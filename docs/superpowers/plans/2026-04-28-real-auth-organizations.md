@@ -1046,7 +1046,7 @@ git commit -m "feat: add organization member management"
 - Create: `apps/web/app/reset-password/page.tsx`
 - Modify: `apps/web/components/dashboard/v2-console.tsx`
 
-- [ ] **Step 1: Create shared API wrapper**
+- [x] **Step 1: Create shared API wrapper**
 
 Create `apps/web/lib/api.ts`:
 
@@ -1076,7 +1076,7 @@ Remove the local `api` and `apiBase` definitions from `v2-console.tsx` and impor
 import { api, apiBase } from '@/lib/api';
 ```
 
-- [ ] **Step 2: Create auth shell**
+- [x] **Step 2: Create auth shell**
 
 Create `apps/web/components/auth/auth-shell.tsx`:
 
@@ -1095,7 +1095,7 @@ export function AuthShell({ title, children }: { title: string; children: React.
 }
 ```
 
-- [ ] **Step 3: Create login/register/reset pages**
+- [x] **Step 3: Create login/register/reset pages**
 
 Each page should be a client component using existing `Button`, `Input`, `Label`, and `api`.
 
@@ -1116,7 +1116,7 @@ For `forgot-password/page.tsx`, call `/api/auth/password-reset/request`; if resp
 
 For `reset-password/page.tsx`, call `/api/auth/password-reset/confirm` with `resetToken` and `password`, then route to `/login`.
 
-- [ ] **Step 4: Add auth guard and logout to console**
+- [x] **Step 4: Add auth guard and logout to console**
 
 In `V2Console`, add state:
 
@@ -1144,7 +1144,7 @@ Add logout button in the header:
 }}>Sair</Button>
 ```
 
-- [ ] **Step 5: Typecheck**
+- [x] **Step 5: Typecheck**
 
 Run:
 
@@ -1155,7 +1155,7 @@ npm run web:build
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/lib/api.ts apps/web/components/auth/auth-shell.tsx apps/web/app/login/page.tsx apps/web/app/register/page.tsx apps/web/app/forgot-password/page.tsx apps/web/app/reset-password/page.tsx apps/web/components/dashboard/v2-console.tsx
