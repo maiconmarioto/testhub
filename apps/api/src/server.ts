@@ -8,12 +8,14 @@ import Fastify from 'fastify';
 import { z, ZodError } from 'zod';
 import { buildFailurePrompt, buildFixPrompt, buildTestSuggestionPrompt, callAi } from '../../../packages/ai/src/ai.js';
 import { cleanupOldRuns } from '../../../packages/db/src/cleanup.js';
+import { readAudit, writeAudit } from '../../../packages/db/src/audit.js';
 import { createRunQueue } from '../../../packages/shared/src/jobs.js';
 import { openApiToSuite } from '../../../packages/spec/src/openapi-import.js';
 import { parseSpecContent, SpecValidationError } from '../../../packages/spec/src/spec.js';
 import { redactDeep } from '../../../packages/shared/src/redact.js';
 import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
+import { isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus } from '../../../packages/db/src/security.js';
 import { createStore } from '../../../packages/db/src/store-factory.js';
 
 const openApiDocument = {
@@ -77,6 +79,8 @@ const openApiDocument = {
     },
     '/api/ai/{kind}': { post: { tags: ['ai'], summary: 'Run AI assistant task', responses: { '200': { description: 'OK' } } } },
     '/api/cleanup': { post: { tags: ['system'], summary: 'Delete old runs and local artifacts', responses: { '200': { description: 'OK' } } } },
+    '/api/system/security': { get: { tags: ['system'], summary: 'Security status', responses: { '200': { description: 'OK' } } } },
+    '/api/audit': { get: { tags: ['system'], summary: 'Audit log', responses: { '200': { description: 'OK' } } } },
   },
 };
 
@@ -115,6 +119,17 @@ export function createApp() {
     return reply.code(401).send({ error: 'Unauthorized' });
   });
 
+  app.addHook('onResponse', async (req, reply) => {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return;
+    if (req.url.startsWith('/docs') || req.url.startsWith('/api/health')) return;
+    writeAudit({
+      action: `${req.method} ${req.url.split('?')[0]}`,
+      actor: req.headers.authorization ? 'api-token' : 'anonymous',
+      status: reply.statusCode >= 400 ? 'error' : 'ok',
+      detail: { statusCode: reply.statusCode },
+    }, store.rootDir);
+  });
+
   app.get('/', {
     schema: {
       tags: ['system'],
@@ -142,6 +157,13 @@ export function createApp() {
       summary: 'Health check',
     },
   }, async () => ({ ok: true }));
+
+  app.get('/api/system/security', { schema: { tags: ['system'], summary: 'Security status' } }, async () => systemSecurityStatus());
+
+  app.get('/api/audit', { schema: { tags: ['system'], summary: 'Audit log' } }, async (req) => {
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query);
+    return readAudit(query.limit, store.rootDir);
+  });
 
   app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async () => (await store.read()).projects.filter((project) => project.status !== 'inactive'));
   app.post('/api/projects', { schema: { tags: ['projects'], summary: 'Create project' } }, async (req, reply) => {
@@ -187,6 +209,9 @@ export function createApp() {
       baseUrl: z.string().url(),
       variables: z.record(z.string()).optional(),
     }).parse(req.body);
+    if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.variables && Object.keys(input.variables).length > 0) {
+      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de secrets em producao.' });
+    }
     return reply.code(201).send(await store.createEnvironment(input));
   });
   app.put('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Update environment' } }, async (req, reply) => {
@@ -196,6 +221,9 @@ export function createApp() {
       baseUrl: z.string().url(),
       variables: z.record(z.string()).optional(),
     }).parse(req.body);
+    if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.variables && Object.keys(input.variables).length > 0) {
+      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de secrets em producao.' });
+    }
     const environment = await store.updateEnvironment(params.id, input);
     if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
     return environment;
@@ -262,8 +290,12 @@ export function createApp() {
       name: z.string().min(1).default('openapi-import'),
       spec: z.unknown(),
     }).parse(req.body);
-    const specContent = openApiToSuite(input.spec, input.name);
-    return reply.code(201).send(await store.createSuite({ projectId: input.projectId, name: input.name, type: 'api', specContent }));
+    try {
+      const specContent = openApiToSuite(input.spec, input.name);
+      return reply.code(201).send(await store.createSuite({ projectId: input.projectId, name: input.name, type: 'api', specContent }));
+    } catch (error) {
+      return reply.code(400).send({ error: messageOf(error) });
+    }
   });
 
   app.get('/api/runs', { schema: { tags: ['runs'], summary: 'List runs' } }, async (req) => {
@@ -282,6 +314,15 @@ export function createApp() {
     const environment = db.environments.find((item) => item.id === input.environmentId);
     const suite = db.suites.find((item) => item.id === input.suiteId);
     if (!environment || !suite || environment.status === 'inactive' || suite.status === 'inactive') return reply.code(400).send({ error: 'Environment ou suite invalido' });
+    if (!isHostAllowed(environment.baseUrl)) {
+      writeAudit({
+        action: 'run.blocked.host_allowlist',
+        actor: req.headers.authorization ? 'api-token' : 'anonymous',
+        target: environment.baseUrl,
+        status: 'blocked',
+      }, store.rootDir);
+      return reply.code(403).send({ error: `Host fora da allowlist: ${new URL(environment.baseUrl).hostname}` });
+    }
     const createdRun = await store.createRun(input);
     if (runQueue) await runQueue.add('run', { runId: createdRun.id });
     else void executeRun(store, createdRun.id);
@@ -307,7 +348,7 @@ export function createApp() {
   });
 
   app.post('/api/cleanup', { schema: { tags: ['system'], summary: 'Delete old runs and local artifacts' } }, async (req, reply) => {
-    const input = z.object({ days: z.number().int().min(1).default(30) }).parse(req.body ?? {});
+    const input = z.object({ days: z.number().int().min(1).default(retentionDays()) }).parse(req.body ?? {});
     return reply.send(await cleanupOldRuns(store, input.days));
   });
 
@@ -335,6 +376,9 @@ export function createApp() {
       baseUrl: z.string().url().optional(),
       enabled: z.boolean().default(true),
     }).parse(req.body);
+    if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.apiKey) {
+      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de API key em producao.' });
+    }
     return reply.code(201).send(await store.upsertAiConnection(input));
   });
   app.post('/api/ai/:kind', { schema: { tags: ['ai'], summary: 'Run AI assistant task' } }, async (req, reply) => {
@@ -354,6 +398,11 @@ export function createApp() {
   return app;
 }
 
+function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 function contentTypeFor(filePath: string): string | undefined {
   if (filePath.endsWith('.webm')) return 'video/webm';
   if (filePath.endsWith('.json')) return 'application/json; charset=utf-8';
@@ -364,7 +413,9 @@ function contentTypeFor(filePath: string): string | undefined {
   return undefined;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isCliEntry = process.argv.some((arg) => arg.endsWith('apps/api/src/server.ts') || arg.endsWith('apps/api/src/server.js'));
+
+if (isCliEntry) {
   const app = createApp();
   const port = Number(process.env.PORT ?? 4321);
   await app.listen({ port, host: '0.0.0.0' });

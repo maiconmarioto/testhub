@@ -1,4 +1,4 @@
-import { DashboardClient } from '@/components/dashboard/dashboard-client';
+import { redirect } from 'next/navigation';
 
 const slugs = [
   'quick-start',
@@ -22,5 +22,6 @@ export function generateStaticParams() {
 
 export default async function DocsSubPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  return <DashboardClient view="docs" docsPage={slug} />;
+  void slug;
+  redirect('/v2');
 }

@@ -1,5 +1,5 @@
-import { DashboardClient } from '@/components/dashboard/dashboard-client';
+import { redirect } from 'next/navigation';
 
 export default function DocsPage() {
-  return <DashboardClient view="docs" docsPage="quick-start" />;
+  redirect('/v2');
 }

@@ -1,5 +1,5 @@
-import { DashboardClient } from '@/components/dashboard/dashboard-client';
+import { V2Console } from '@/components/dashboard/v2-console';
 
 export default function SettingsPage() {
-  return <DashboardClient view="settings" />;
+  return <V2Console view="settings" />;
 }

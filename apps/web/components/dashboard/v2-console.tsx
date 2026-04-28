@@ -1,42 +1,38 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import {
-  Archive,
-  CheckCircle2,
-  ChevronRight,
-  ClipboardCheck,
-  Code2,
-  Database,
-  FileCode2,
-  Globe2,
-  Loader2,
-  Pencil,
-  Play,
-  Save,
-  Scissors,
-  ShieldCheck,
-  Square,
-  TerminalSquare,
-  Trash2,
-  Video,
-  XCircle,
-  type LucideIcon,
-} from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Database, FileCode2, FolderKanban, Loader2, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 type Project = { id: string; name: string; description?: string };
 type Environment = { id: string; projectId: string; name: string; baseUrl: string; variables?: Record<string, string> };
 type Suite = { id: string; projectId: string; name: string; type: 'api' | 'web'; specPath?: string };
-type SuiteWithContent = Suite & { specContent: string };
+type AiConnection = { id: string; name: string; provider: 'openrouter' | 'openai' | 'anthropic'; apiKey?: string; model: string; baseUrl?: string; enabled: boolean };
+type SecurityStatus = {
+  oidc: { configured: boolean; issuer: string | null };
+  auth: { apiTokenEnabled: boolean; rbacRole: string };
+  secrets: { defaultKey: boolean; blockedInProduction: boolean };
+  network: { allowedHosts: string[]; allowAllWhenEmpty: boolean };
+  retention: { days: number };
+};
+type AuditEntry = { id: string; action: string; actor: string; status: 'ok' | 'blocked' | 'error'; target?: string; createdAt: string; detail?: Record<string, unknown> };
 type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
 type Run = {
   id: string;
@@ -64,81 +60,45 @@ type RunReport = {
     steps?: Array<{ index?: number; name: string; status: RunStatus; error?: string; durationMs?: number }>;
   }>;
 };
-type ValidationResult = { valid: true; type: 'api' | 'web'; name: string; tests: number } | { valid: false; error: string };
 type EvidenceTab = 'overview' | 'timeline' | 'artifacts' | 'payload';
-
-const apiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localhost:4321';
-const darkInputClass = 'border-transparent bg-[#111812]/85 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_0_10px_26px_rgba(0,0,0,0.18)] placeholder:text-[#8f9989] focus-visible:ring-[#c7d957]';
-const darkSelectClass = `h-11 min-w-56 ${darkInputClass}`;
-
-const templates = {
-  api: {
-    label: 'API smoke',
-    type: 'api' as const,
-    spec: `version: 1
-type: api
-name: api-smoke
-tests:
-  - name: health
-    request:
-      method: GET
-      path: /health
-    expect:
-      status: 200
-`,
-  },
-  webLogin: {
-    label: 'Web login',
-    type: 'web' as const,
-    spec: `version: 1
-type: web
-name: login-invalid
-defaults:
-  timeoutMs: 15000
-  video: on
-  trace: retain-on-failure
-tests:
-  - name: invalid login
-    steps:
-      - goto: /login
-      - fill:
-          selector: input[type="email"]
-          value: wrong@example.com
-      - fill:
-          selector: input[type="password"]
-          value: wrong-password
-      - click: button[type="submit"]
-      - expectText:
-          text: Invalid email or password
-`,
-  },
-  legacy: {
-    label: 'Legacy checkpoint',
-    type: 'web' as const,
-    spec: `version: 1
-type: web
-name: legacy-critical-path
-defaults:
-  timeoutMs: 20000
-  screenshotOnFailure: true
-  video: on
-tests:
-  - name: page contract
-    steps:
-      - goto: /
-      - expectVisible:
-          selector: body
-      - expectText:
-          text: Dashboard
-`,
-  },
+type MenuSheet = 'evidence' | null;
+type V2View = 'run' | 'projects' | 'suites' | 'settings';
+type SuiteWithContent = Suite & { specContent: string };
+type ValidationResult = { valid: true; type: 'api' | 'web'; name: string; tests: number } | { valid: false; error: string };
+type WizardDraft = {
+  projectName: string;
+  projectDescription: string;
+  environmentName: string;
+  baseUrl: string;
+  variables: string;
+  suiteName: string;
+  suiteType: Suite['type'];
+  specContent: string;
 };
 
-export function V2Console() {
+const apiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localhost:4321';
+const controlClass = 'h-10 border-[#d7d2c4] bg-white text-[#1f241f] shadow-none placeholder:text-[#8a877c] focus-visible:ring-[#426b4d]';
+const darkSelectClass = `min-w-52 ${controlClass}`;
+const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+const defaultSpec = `version: 1
+type: api
+name: health
+tests:
+  - name: status 200
+    request:
+      method: GET
+      path: /status/200
+    expect:
+      status: 200`;
+
+export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [suites, setSuites] = useState<Suite[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [aiConnections, setAiConnections] = useState<AiConnection[]>([]);
+  const [security, setSecurity] = useState<SecurityStatus | null>(null);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [projectId, setProjectId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
   const [suiteId, setSuiteId] = useState('');
@@ -149,18 +109,42 @@ export function V2Console() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  const [openSheet, setOpenSheet] = useState<MenuSheet>(null);
+  const [projectDraft, setProjectDraft] = useState({ id: '', name: '', description: '' });
+  const [openApiDraft, setOpenApiDraft] = useState({ name: 'openapi-import', spec: '' });
+  const [suiteDraft, setSuiteDraft] = useState({ id: '', name: '', type: 'api' as 'api' | 'web', specContent: defaultSpec });
   const [envDraft, setEnvDraft] = useState({ id: '', name: '', baseUrl: '', variables: '' });
-  const [suiteDraft, setSuiteDraft] = useState({ id: '', name: '', type: 'api' as 'api' | 'web', specContent: templates.api.spec });
+  const [aiDraft, setAiDraft] = useState({ id: '', name: 'OpenRouter', provider: 'openrouter' as AiConnection['provider'], apiKey: '', model: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1', enabled: true });
+  const [aiOutput, setAiOutput] = useState('');
+  const [cleanupDays, setCleanupDays] = useState('30');
+  const [cleanupResult, setCleanupResult] = useState('');
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [cleanupDays, setCleanupDays] = useState(14);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0);
+  const [wizardDraft, setWizardDraft] = useState({
+    projectName: '',
+    projectDescription: '',
+    environmentName: 'local',
+    baseUrl: 'http://host.docker.internal:3000',
+    variables: '',
+    suiteName: 'api-health-smoke',
+    suiteType: 'api' as Suite['type'],
+    specContent: defaultSpec,
+  });
+  const queryAppliedRef = useRef(false);
+  const suiteAutoLoadRef = useRef('');
 
   const projectEnvs = useMemo(() => envs.filter((env) => env.projectId === projectId), [envs, projectId]);
   const projectSuites = useMemo(() => suites.filter((suite) => suite.projectId === projectId), [suites, projectId]);
   const projectRuns = useMemo(() => runs.filter((run) => run.projectId === projectId), [runs, projectId]);
-  const selectedRun = projectRuns.find((run) => run.id === selectedRunId) ?? projectRuns[0];
-  const selectedSuite = suites.find((suite) => suite.id === selectedRun?.suiteId || suite.id === suiteId);
-  const selectedEnv = envs.find((env) => env.id === selectedRun?.environmentId || env.id === environmentId);
-  const stats = summarize(projectRuns);
+  const selectedSuite = projectSuites.find((suite) => suite.id === suiteId);
+  const selectedEnv = projectEnvs.find((env) => env.id === environmentId);
+  const scopedRuns = useMemo(
+    () => projectRuns.filter((run) => run.suiteId === suiteId && run.environmentId === environmentId),
+    [projectRuns, suiteId, environmentId],
+  );
+  const selectedRun = scopedRuns.find((run) => run.id === selectedRunId) ?? scopedRuns[0];
+  const stats = summarize(scopedRuns);
   const artifacts = collectArtifacts(report);
   const videos = artifacts.filter((artifact) => artifact.type === 'video');
   const payloads = artifacts.filter((artifact) => artifact.type === 'request' || artifact.type === 'response');
@@ -168,17 +152,30 @@ export function V2Console() {
   async function refresh() {
     setError('');
     try {
-      const [nextProjects, nextEnvs, nextSuites, nextRuns] = await Promise.all([
+      const [nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
         api<Project[]>('/api/projects'),
         api<Environment[]>('/api/environments'),
         api<Suite[]>('/api/suites'),
         api<Run[]>('/api/runs'),
+        api<AiConnection[]>('/api/ai/connections').catch(() => []),
+        api<SecurityStatus>('/api/system/security').catch(() => null),
+        api<AuditEntry[]>('/api/audit?limit=40').catch(() => []),
       ]);
       setProjects(nextProjects);
       setEnvs(nextEnvs);
       setSuites(nextSuites);
       setRuns(nextRuns);
-      setProjectId((current) => current && nextProjects.some((project) => project.id === current) ? current : nextProjects[0]?.id ?? '');
+      setAiConnections(nextConnections);
+      setSecurity(nextSecurity);
+      setAudit(nextAudit);
+      setProjectId((current) => {
+        if (current && nextProjects.some((project) => project.id === current)) return current;
+        if (!queryAppliedRef.current && typeof window !== 'undefined') {
+          const queryProject = new URLSearchParams(window.location.search).get('project');
+          if (queryProject && nextProjects.some((project) => project.id === queryProject)) return queryProject;
+        }
+        return nextProjects[0]?.id ?? '';
+      });
     } catch (nextError) {
       setError(messageOf(nextError));
     }
@@ -191,9 +188,61 @@ export function V2Console() {
   }, []);
 
   useEffect(() => {
+    const current = projects.find((project) => project.id === projectId);
+    setProjectDraft({ id: current?.id ?? '', name: current?.name ?? '', description: current?.description ?? '' });
+  }, [projectId, projects]);
+
+  useEffect(() => {
+    if (security?.retention.days) setCleanupDays(String(security.retention.days));
+  }, [security?.retention.days]);
+
+  useEffect(() => {
+    if (view !== 'suites' || !suiteId || suiteAutoLoadRef.current === suiteId) return;
+    const suite = projectSuites.find((item) => item.id === suiteId);
+    if (!suite) return;
+    suiteAutoLoadRef.current = suiteId;
+    api<SuiteWithContent>(`/api/suites/${suite.id}`)
+      .then((loaded) => {
+        setSuiteDraft({ id: loaded.id, name: loaded.name, type: loaded.type, specContent: loaded.specContent });
+        setValidation(null);
+      })
+      .catch((nextError) => setError(messageOf(nextError)));
+  }, [view, suiteId, projectSuites]);
+
+  useEffect(() => {
     setEnvironmentId((current) => current && projectEnvs.some((env) => env.id === current) ? current : projectEnvs[0]?.id ?? '');
     setSuiteId((current) => current && projectSuites.some((suite) => suite.id === current) ? current : projectSuites[0]?.id ?? '');
   }, [projectId, projectEnvs, projectSuites]);
+
+  useEffect(() => {
+    if (queryAppliedRef.current || !projectId || projects.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const queryEnvironment = params.get('environment');
+    const querySuite = params.get('suite');
+    const queryRun = params.get('run');
+
+    if (queryEnvironment && projectEnvs.some((env) => env.id === queryEnvironment)) setEnvironmentId(queryEnvironment);
+    if (querySuite && projectSuites.some((suite) => suite.id === querySuite)) setSuiteId(querySuite);
+    if (queryRun) setSelectedRunId(queryRun);
+    queryAppliedRef.current = true;
+  }, [projectId, projectEnvs, projectSuites, projects.length]);
+
+  useEffect(() => {
+    if (!projectId || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    params.set('project', projectId);
+    if (environmentId) params.set('environment', environmentId);
+    else params.delete('environment');
+    if (suiteId) params.set('suite', suiteId);
+    else params.delete('suite');
+    if (selectedRunId) params.set('run', selectedRunId);
+    else params.delete('run');
+
+    const query = params.toString();
+    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (nextUrl !== currentUrl) window.history.replaceState(null, '', nextUrl);
+  }, [projectId, environmentId, suiteId, selectedRunId]);
 
   useEffect(() => {
     if (selectedRun?.reportPath) {
@@ -204,11 +253,6 @@ export function V2Console() {
       setReport(null);
     }
   }, [selectedRun?.id, selectedRun?.reportPath]);
-
-  useEffect(() => {
-    const id = setTimeout(() => { void validateSpec(false); }, 350);
-    return () => clearTimeout(id);
-  }, [suiteDraft.specContent]);
 
   async function mutate(operation: () => Promise<unknown>, success?: string) {
     setBusy(true);
@@ -244,39 +288,41 @@ export function V2Console() {
     await mutate(() => api(`/api/runs/${run.id}/cancel`, { method: 'POST', body: '{}' }), 'Run cancelada.');
   }
 
-  async function saveEnvironment() {
-    if (!projectId) return;
-    const payload = {
-      name: envDraft.name,
-      baseUrl: envDraft.baseUrl,
-      variables: parseVars(envDraft.variables),
-    };
-    await mutate(async () => {
-      if (envDraft.id) {
-        await api(`/api/environments/${envDraft.id}`, { method: 'PUT', body: JSON.stringify(payload) });
-      } else {
-        await api('/api/environments', { method: 'POST', body: JSON.stringify({ projectId, ...payload }) });
-      }
-      setEnvDraft({ id: '', name: '', baseUrl: '', variables: '' });
-    }, envDraft.id ? 'Ambiente atualizado.' : 'Ambiente criado.');
-  }
-
-  async function archiveEnvironment(env: Environment) {
-    if (!window.confirm(`Arquivar ambiente "${env.name}"? Runs vinculadas ficam ocultas.`)) return;
-    await mutate(() => api(`/api/environments/${env.id}`, { method: 'DELETE' }), 'Ambiente arquivado.');
-  }
-
   async function loadSuite(suite: Suite) {
     await mutate(async () => {
       const loaded = await api<SuiteWithContent>(`/api/suites/${suite.id}`);
       setSuiteDraft({ id: loaded.id, name: loaded.name, type: loaded.type, specContent: loaded.specContent });
       setSuiteId(loaded.id);
-    }, 'Suite carregada.');
+      setSelectedRunId('');
+      setTab('overview');
+      setValidation(null);
+    }, `Editando ${suite.name}.`);
+  }
+
+  function newSuiteDraft() {
+    setSuiteDraft({ id: '', name: '', type: 'api', specContent: defaultSpec });
+    setValidation(null);
+  }
+
+  async function validateSpec(showNotice = true): Promise<boolean> {
+    if (!suiteDraft.specContent.trim()) {
+      setValidation({ valid: false, error: 'YAML obrigatorio.' });
+      return false;
+    }
+    try {
+      const result = await api<ValidationResult>('/api/spec/validate', { method: 'POST', body: JSON.stringify({ specContent: suiteDraft.specContent }) });
+      setValidation(result);
+      if (showNotice && result.valid) setNotice('Spec valida.');
+      return result.valid;
+    } catch (nextError) {
+      setValidation({ valid: false, error: messageOf(nextError) });
+      return false;
+    }
   }
 
   async function saveSuite() {
     if (!projectId) return;
-    const valid = await validateSpec(true);
+    const valid = await validateSpec(false);
     if (!valid) return;
     const payload = { name: suiteDraft.name, type: suiteDraft.type, specContent: suiteDraft.specContent };
     await mutate(async () => {
@@ -290,47 +336,186 @@ export function V2Console() {
     }, suiteDraft.id ? 'Suite atualizada.' : 'Suite criada.');
   }
 
-  async function validateSpec(showNotice: boolean): Promise<boolean> {
-    if (!suiteDraft.specContent.trim()) {
-      setValidation(null);
-      return false;
-    }
-    try {
-      const result = await api<ValidationResult>('/api/spec/validate', { method: 'POST', body: JSON.stringify({ specContent: suiteDraft.specContent }) });
-      setValidation(result);
-      if (showNotice) setNotice('Spec valida.');
-      return result.valid;
-    } catch (nextError) {
-      setValidation({ valid: false, error: messageOf(nextError) });
-      return false;
+  function editEnvironment(env: Environment) {
+    setEnvDraft({
+      id: env.id,
+      name: env.name,
+      baseUrl: env.baseUrl,
+      variables: Object.entries(env.variables ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'),
+    });
+    setEnvironmentId(env.id);
+    setSelectedRunId('');
+    setTab('overview');
+  }
+
+  function newEnvironmentDraft() {
+    setEnvDraft({ id: '', name: '', baseUrl: '', variables: '' });
+  }
+
+  async function saveEnvironment() {
+    if (!projectId) return;
+    const payload = {
+      name: envDraft.name,
+      baseUrl: envDraft.baseUrl,
+      variables: parseVars(envDraft.variables),
+    };
+    await mutate(async () => {
+      if (envDraft.id) {
+        await api(`/api/environments/${envDraft.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      } else {
+        const env = await api<Environment>('/api/environments', { method: 'POST', body: JSON.stringify({ projectId, ...payload }) });
+        setEnvDraft((current) => ({ ...current, id: env.id }));
+        setEnvironmentId(env.id);
+      }
+    }, envDraft.id ? 'Ambiente atualizado.' : 'Ambiente criado.');
+  }
+
+  async function archiveEnvironment(env: Environment) {
+    if (!window.confirm(`Arquivar ambiente "${env.name}"? Runs vinculadas ficam ocultas.`)) return;
+    await mutate(() => api(`/api/environments/${env.id}`, { method: 'DELETE' }), 'Ambiente arquivado.');
+    if (envDraft.id === env.id) newEnvironmentDraft();
+  }
+
+  async function saveProject() {
+    const payload = { name: projectDraft.name.trim(), description: projectDraft.description.trim() || undefined };
+    if (!payload.name) return;
+    await mutate(async () => {
+      if (projectDraft.id) {
+        await api<Project>(`/api/projects/${projectDraft.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      } else {
+        const project = await api<Project>('/api/projects', { method: 'POST', body: JSON.stringify(payload) });
+        setProjectId(project.id);
+      }
+    }, projectDraft.id ? 'Projeto atualizado.' : 'Projeto criado.');
+  }
+
+  async function archiveProject(project: Project) {
+    if (!window.confirm(`Arquivar projeto "${project.name}"? Ambientes, suites e runs vinculadas ficam ocultas.`)) return;
+    await mutate(() => api(`/api/projects/${project.id}`, { method: 'DELETE' }), 'Projeto arquivado.');
+    if (project.id === projectId) {
+      setProjectId('');
+      setEnvironmentId('');
+      setSuiteId('');
+      setSelectedRunId('');
     }
   }
 
-  async function cleanup() {
-    await mutate(() => api('/api/cleanup', { method: 'POST', body: JSON.stringify({ days: cleanupDays }) }), 'Cleanup executado.');
+  async function importOpenApi() {
+    if (!projectId || !openApiDraft.spec.trim()) return;
+    await mutate(async () => {
+      const parsed = JSON.parse(openApiDraft.spec);
+      const suite = await api<Suite>('/api/import/openapi', { method: 'POST', body: JSON.stringify({ projectId, name: openApiDraft.name || 'openapi-import', spec: parsed }) });
+      setSuiteId(suite.id);
+      setSelectedRunId('');
+    }, 'OpenAPI importado.');
   }
 
-  function applyTemplate(key: keyof typeof templates) {
-    const template = templates[key];
-    setSuiteDraft({ id: '', name: template.label.toLowerCase().replace(/\s+/g, '-'), type: template.type, specContent: template.spec });
+  function editAiConnection(connection: AiConnection) {
+    setAiDraft({
+      id: connection.id,
+      name: connection.name,
+      provider: connection.provider,
+      apiKey: '',
+      model: connection.model,
+      baseUrl: connection.baseUrl ?? '',
+      enabled: connection.enabled,
+    });
   }
+
+  async function saveAiConnection() {
+    await mutate(() => api('/api/ai/connections', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: aiDraft.id || undefined,
+        name: aiDraft.name,
+        provider: aiDraft.provider,
+        apiKey: aiDraft.apiKey || undefined,
+        model: aiDraft.model,
+        baseUrl: aiDraft.baseUrl || undefined,
+        enabled: aiDraft.enabled,
+      }),
+    }), aiDraft.id ? 'AI connection atualizada.' : 'AI connection criada.');
+  }
+
+  async function explainFailure(run?: Run) {
+    if (!run) return;
+    setAiOutput('');
+    await mutate(async () => {
+      const result = await api<{ output?: string }>('/api/ai/explain-failure', {
+        method: 'POST',
+        body: JSON.stringify({ context: { run, report, suite: selectedSuite, environment: selectedEnv } }),
+      });
+      setAiOutput(result.output ?? JSON.stringify(result, null, 2));
+    }, 'Analise IA gerada.');
+  }
+
+  async function cleanupRuns() {
+    await mutate(async () => {
+      const result = await api<{ cutoffIso: string; archivedRuns: number; retainedArtifacts: boolean }>('/api/cleanup', {
+        method: 'POST',
+        body: JSON.stringify({ days: Number(cleanupDays) }),
+      });
+      setCleanupResult(`${result.archivedRuns} runs arquivadas antes de ${formatDate(result.cutoffIso)}.`);
+    }, 'Cleanup executado.');
+  }
+
+  async function finishWizard() {
+    await mutate(async () => {
+      const project = await api<Project>('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify({ name: wizardDraft.projectName, description: wizardDraft.projectDescription || undefined }),
+      });
+      const environment = await api<Environment>('/api/environments', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: project.id,
+          name: wizardDraft.environmentName,
+          baseUrl: wizardDraft.baseUrl,
+          variables: parseVars(wizardDraft.variables),
+        }),
+      });
+      const suite = await api<Suite>('/api/suites', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: project.id,
+          name: wizardDraft.suiteName,
+          type: wizardDraft.suiteType,
+          specContent: wizardDraft.specContent,
+        }),
+      });
+      setProjectId(project.id);
+      setEnvironmentId(environment.id);
+      setSuiteId(suite.id);
+      setSelectedRunId('');
+      setWizardOpen(false);
+      setWizardStep(0);
+    }, 'Workspace criado.');
+  }
+
+  const pageTitle = view === 'projects'
+    ? 'Projetos'
+    : view === 'suites'
+      ? 'Suites'
+      : view === 'settings'
+        ? 'Sistema'
+        : 'Run workspace';
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(199,217,87,0.08),transparent_34%),linear-gradient(135deg,#0b100c_0%,#111812_48%,#0a0e0b_100%)] text-[#f7f6f0]">
-      <div className="grid min-h-screen xl:grid-cols-[84px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-white/8 bg-[#111812]/80 backdrop-blur xl:block">
+    <main className="min-h-screen bg-[#f4f2eb] text-[#1f241f]">
+      <div className="grid min-h-screen xl:grid-cols-[72px_minmax(0,1fr)]">
+        <aside className="hidden border-r border-[#d8d3c5] bg-[#111611] xl:block">
           <div className="flex h-screen flex-col items-center justify-between py-5">
             <div className="grid gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-xl border border-[#c7d957]/35 bg-[#c7d957] text-[#090d0a] shadow-[0_12px_28px_rgba(199,217,87,0.18)]">
+              <div className="grid h-11 w-11 place-items-center rounded-lg bg-[#d7e35f] text-[#111611]">
                 <TerminalSquare className="h-6 w-6" />
               </div>
-              <RailIcon icon={Play} active />
-              <RailIcon icon={FileCode2} />
-              <RailIcon icon={Database} />
-              <RailIcon icon={Video} />
+              <RailLink icon={Play} active={view === 'run'} label="Run" href="/v2" />
+              <RailLink icon={FolderKanban} active={view === 'projects'} label="Projetos" href={projectId ? `/projects?project=${projectId}` : '/projects'} />
+              <RailLink icon={FileCode2} active={view === 'suites'} label="Suites" href={projectId ? `/suites?project=${projectId}` : '/suites'} />
+              <RailLink icon={Settings2} active={view === 'settings'} label="Sistema" href="/settings" />
             </div>
-            <Button asChild variant="outline" size="icon" className="rounded-xl border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1b241b]">
-              <Link href="/overview" aria-label="Voltar para v1">
+            <Button asChild variant="outline" size="icon" className="rounded-lg border-white/15 bg-transparent text-[#f7f6f0] hover:bg-white/10">
+              <Link href="/v2" aria-label="Ir para Run workspace">
                 <ChevronRight className="h-4 w-4 rotate-180" />
               </Link>
             </Button>
@@ -338,34 +523,55 @@ export function V2Console() {
         </aside>
 
         <section className="grid min-h-screen grid-rows-[auto_minmax(0,1fr)]">
-          <header className="border-b border-black/10 bg-[#f7f6f0]/95 px-5 py-4 text-[#151915] shadow-[0_18px_40px_rgba(0,0,0,0.12)] backdrop-blur md:px-8">
-            <div className="flex flex-wrap items-center justify-between gap-4">
+          <header className="border-b border-[#d8d3c5] bg-[#fbfaf6]/95 px-5 py-3 backdrop-blur md:px-8">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="font-mono text-xs uppercase tracking-[0.32em] text-[#657059]">TestHub v2</p>
-                <h1 className="text-2xl font-black tracking-normal md:text-4xl">Run Command Deck</h1>
+                <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-[#66705f]">TestHub v2</p>
+                {view === 'run' ? (
+                  <Button className="mt-1 h-9 rounded-md px-3 text-base font-extrabold" onClick={() => setWizardOpen(true)}>
+                    <WandSparkles className="h-4 w-4" />
+                    Wizard
+                  </Button>
+                ) : (
+                  <h1 className="text-2xl font-extrabold tracking-normal">{pageTitle}</h1>
+                )}
               </div>
-              <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-wrap items-end gap-2">
                 <Field label="Projeto">
-                  <Select value={projectId} onValueChange={setProjectId}>
+                  <Select value={projectId} onValueChange={(value) => {
+                    setProjectId(value);
+                    setEnvironmentId('');
+                    setSuiteId('');
+                    setSelectedRunId('');
+                    setTab('overview');
+                  }}>
                     <SelectTrigger className={darkSelectClass}><SelectValue placeholder="Projeto" /></SelectTrigger>
                     <SelectContent>{projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
                 <Field label="Ambiente">
-                  <Select value={environmentId} onValueChange={setEnvironmentId}>
+                  <Select value={environmentId} onValueChange={(value) => {
+                    setEnvironmentId(value);
+                    setSelectedRunId('');
+                    setTab('overview');
+                  }}>
                     <SelectTrigger className={darkSelectClass}><SelectValue placeholder="Ambiente" /></SelectTrigger>
                     <SelectContent>{projectEnvs.map((env) => <SelectItem key={env.id} value={env.id}>{env.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
                 <Field label="Suite">
-                  <Select value={suiteId} onValueChange={setSuiteId}>
+                  <Select value={suiteId} onValueChange={(value) => {
+                    setSuiteId(value);
+                    setSelectedRunId('');
+                    setTab('overview');
+                  }}>
                     <SelectTrigger className={darkSelectClass}><SelectValue placeholder="Suite" /></SelectTrigger>
-                    <SelectContent>{projectSuites.map((suite) => <SelectItem key={suite.id} value={suite.id}>{suite.name} ({suite.type})</SelectItem>)}</SelectContent>
+                    <SelectContent>{projectSuites.map((suite) => <SelectItem key={suite.id} value={suite.id}>{suite.name} ({suiteTypeLabel(suite.type)})</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
-                <Button onClick={runSuite} disabled={busy || !projectId || !environmentId || !suiteId} className="h-11 px-6">
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  Run
+                <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={() => setOpenSheet('evidence')}>
+                  <ClipboardCheck className="h-4 w-4" />
+                  Evidence
                 </Button>
               </div>
             </div>
@@ -375,226 +581,1042 @@ export function V2Console() {
                 {notice ? <Signal tone="good" text={notice} /> : null}
               </div>
             ) : null}
+            {security?.secrets.defaultKey ? (
+              <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <ShieldAlert className="h-4 w-4 shrink-0" />
+                <span>TESTHUB_SECRET_KEY default. Troque antes de producao; gravacao de secrets fica bloqueada em producao.</span>
+              </div>
+            ) : null}
           </header>
 
-          <div className="grid min-h-0 gap-4 p-4 md:p-6 2xl:grid-cols-[370px_minmax(0,1fr)_520px]">
-            <ControlColumn
-              envs={projectEnvs}
-              envDraft={envDraft}
-              setEnvDraft={setEnvDraft}
-              onSaveEnv={saveEnvironment}
-              onArchiveEnv={archiveEnvironment}
-              cleanupDays={cleanupDays}
-              setCleanupDays={setCleanupDays}
-              onCleanup={cleanup}
-              busy={busy}
-            />
-
-            <SuiteColumn
-              suites={projectSuites}
-              suiteDraft={suiteDraft}
-              setSuiteDraft={setSuiteDraft}
-              selectedSuiteId={suiteId}
-              validation={validation}
-              onLoadSuite={loadSuite}
-              onSaveSuite={saveSuite}
-              onValidate={() => validateSpec(true)}
-              onTemplate={applyTemplate}
-              busy={busy}
-            />
-
-            <EvidenceColumn
-              runs={projectRuns}
-              selectedRun={selectedRun}
-              selectedSuite={selectedSuite}
-              selectedEnv={selectedEnv}
-              report={report}
-              stats={stats}
-              tab={tab}
-              setTab={setTab}
-              videos={selectedSuite?.type === 'web' ? videos : []}
-              payloads={payloads}
-              artifacts={artifacts}
-              onSelectRun={(run) => {
-                setSelectedRunId(run.id);
-                setTab('overview');
-              }}
-              onCancel={cancelRun}
-            />
+          <div className="grid min-h-0 content-start gap-4 p-4 md:p-5">
+            {view === 'run' ? (
+              <CockpitColumn
+                selectedSuite={selectedSuite}
+                selectedEnv={selectedEnv}
+                selectedRun={selectedRun}
+                stats={stats}
+                runs={scopedRuns}
+                latestRuns={projectRuns}
+                selectedRunId={selectedRun?.id}
+                busy={busy}
+                canRun={Boolean(projectId && environmentId && suiteId)}
+                onRun={runSuite}
+                onSelectRun={(run) => {
+                  setSuiteId(run.suiteId);
+                  setEnvironmentId(run.environmentId);
+                  setSelectedRunId(run.id);
+                  setTab('overview');
+                }}
+                onOpenSuites={() => window.location.assign(projectId ? `/suites?project=${projectId}` : '/suites')}
+                onOpenEnvironments={() => window.location.assign(projectId ? `/projects?project=${projectId}` : '/projects')}
+                onOpenEvidence={() => setOpenSheet('evidence')}
+              />
+            ) : view === 'projects' ? (
+              <ProjectsWorkspace
+                projects={projects}
+                envs={projectEnvs}
+                suites={projectSuites}
+                runs={projectRuns}
+                selectedProjectId={projectId}
+                projectDraft={projectDraft}
+                envDraft={envDraft}
+                busy={busy}
+                onSelectProject={(id) => {
+                  setProjectId(id);
+                  setEnvironmentId('');
+                  setSuiteId('');
+                  setSelectedRunId('');
+                }}
+                onProjectDraftChange={setProjectDraft}
+                onSaveProject={saveProject}
+                onNewProject={() => setProjectDraft({ id: '', name: '', description: '' })}
+                onArchiveProject={archiveProject}
+                onEnvDraftChange={setEnvDraft}
+                onEditEnv={editEnvironment}
+                onNewEnv={newEnvironmentDraft}
+                onSaveEnv={saveEnvironment}
+                onArchiveEnv={archiveEnvironment}
+              />
+            ) : view === 'suites' ? (
+              <SuitesWorkspace
+                suites={projectSuites}
+                draft={suiteDraft}
+                validation={validation}
+                busy={busy}
+                projectId={projectId}
+                openApiDraft={openApiDraft}
+                onDraftChange={setSuiteDraft}
+                onLoadSuite={loadSuite}
+                onNewSuite={newSuiteDraft}
+                onValidate={() => validateSpec(true)}
+                onSave={saveSuite}
+                onOpenApiDraftChange={setOpenApiDraft}
+                onImportOpenApi={importOpenApi}
+              />
+            ) : (
+              <SettingsWorkspace
+                aiConnections={aiConnections}
+                aiDraft={aiDraft}
+                security={security}
+                audit={audit}
+                cleanupDays={cleanupDays}
+                cleanupResult={cleanupResult}
+                busy={busy}
+                onAiDraftChange={setAiDraft}
+                onEditAiConnection={editAiConnection}
+                onSaveAiConnection={saveAiConnection}
+                onCleanupDaysChange={setCleanupDays}
+                onCleanup={cleanupRuns}
+              />
+            )}
           </div>
+          <Sheet open={openSheet === 'evidence'} onOpenChange={(open) => setOpenSheet(open ? 'evidence' : null)}>
+            <SheetContent className="w-full overflow-hidden p-0 sm:max-w-xl md:max-w-2xl">
+              <SheetHeader className="border-b px-5 py-4 pr-12">
+                <SheetTitle className="text-lg">Evidence</SheetTitle>
+                <SheetDescription>{selectedRun ? `${shortId(selectedRun.id)} · ${runSummary(selectedRun)}` : 'Selecione uma run para ver evidências.'}</SheetDescription>
+              </SheetHeader>
+              <EvidenceColumn
+                runs={scopedRuns}
+                selectedRun={selectedRun}
+                selectedSuite={selectedSuite}
+                selectedEnv={selectedEnv}
+                report={report}
+                stats={stats}
+                tab={tab}
+                setTab={setTab}
+                videos={selectedSuite?.type === 'web' ? videos : []}
+                payloads={payloads}
+                artifacts={artifacts}
+                onSelectRun={(run) => {
+                  setSuiteId(run.suiteId);
+                  setEnvironmentId(run.environmentId);
+                  setSelectedRunId(run.id);
+                  setTab('overview');
+                }}
+                onCancel={cancelRun}
+                onExplain={explainFailure}
+                aiOutput={aiOutput}
+              />
+            </SheetContent>
+          </Sheet>
+          <WizardDialog
+            open={wizardOpen}
+            step={wizardStep}
+            draft={wizardDraft}
+            busy={busy}
+            onOpenChange={setWizardOpen}
+            onStepChange={setWizardStep}
+            onDraftChange={setWizardDraft}
+            onFinish={finishWizard}
+          />
         </section>
       </div>
     </main>
   );
 }
 
-function ControlColumn(props: {
-  envs: Environment[];
-  envDraft: { id: string; name: string; baseUrl: string; variables: string };
-  setEnvDraft: (draft: { id: string; name: string; baseUrl: string; variables: string }) => void;
-  onSaveEnv: () => Promise<void>;
-  onArchiveEnv: (env: Environment) => Promise<void>;
-  cleanupDays: number;
-  setCleanupDays: (value: number) => void;
-  onCleanup: () => Promise<void>;
+function CockpitColumn(props: {
+  selectedSuite?: Suite;
+  selectedEnv?: Environment;
+  selectedRun?: Run;
+  stats: ReturnType<typeof summarize>;
+  runs: Run[];
+  latestRuns: Run[];
+  selectedRunId?: string;
   busy: boolean;
+  canRun: boolean;
+  onRun: () => Promise<void>;
+  onSelectRun: (run: Run) => void;
+  onOpenSuites: () => void;
+  onOpenEnvironments: () => void;
+  onOpenEvidence: () => void;
 }) {
   return (
-    <div className="grid min-h-0 gap-4">
-      <Panel title="Targets" icon={Globe2}>
-        <div className="grid gap-3">
-          {props.envs.map((env) => (
-            <button
-              key={env.id}
-              type="button"
-              onClick={() => props.setEnvDraft({ id: env.id, name: env.name, baseUrl: env.baseUrl, variables: '' })}
-              className="grid cursor-pointer gap-2 rounded-xl bg-[#151d16]/70 p-3 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_12px_28px_rgba(0,0,0,0.18)] transition hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_18px_36px_rgba(0,0,0,0.22)]"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-semibold">{env.name}</span>
-                <Badge variant="outline">{Object.keys(env.variables ?? {}).length} vars</Badge>
+    <div className="grid min-h-0 content-start gap-4">
+      <section className="self-start overflow-hidden rounded-xl border border-[#d8d3c5] bg-[#fbfaf6] shadow-sm">
+        <div className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-stretch">
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-[#66705f]">Suite atual</p>
+                <h2 className="mt-1 text-xl font-extrabold tracking-normal md:text-2xl">{props.selectedSuite?.name ?? 'Selecione uma suite'}</h2>
+                <p className="mt-1 break-all font-mono text-xs text-[#66705f]">{props.selectedEnv?.baseUrl ?? 'Nenhum target selecionado'}</p>
               </div>
-              <span className="break-all font-mono text-xs text-[#a9b19d]">{env.baseUrl}</span>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" className="rounded-lg border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80">
-                  <Pencil className="h-3.5 w-3.5" />
-                  Editar
-                </Button>
-                <Button size="sm" variant="destructive" onClick={(event) => { event.stopPropagation(); props.onArchiveEnv(env); }}>
-                  <Archive className="h-3.5 w-3.5" />
-                  Arquivar
-                </Button>
-              </div>
-            </button>
-          ))}
-          {props.envs.length === 0 ? <DarkEmpty text="Nenhum ambiente." /> : null}
-        </div>
-      </Panel>
+              {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 font-mono uppercase">Sem run</Badge>}
+            </div>
 
-      <Panel title={props.envDraft.id ? 'Edit target' : 'New target'} icon={Database}>
-        <div className="grid gap-3">
-          <Field label="Nome">
-            <Input className={darkInputClass} value={props.envDraft.name} onChange={(event) => props.setEnvDraft({ ...props.envDraft, name: event.target.value })} placeholder="hml" />
-          </Field>
-          <Field label="Base URL">
-            <Input className={darkInputClass} value={props.envDraft.baseUrl} onChange={(event) => props.setEnvDraft({ ...props.envDraft, baseUrl: event.target.value })} placeholder="http://host.docker.internal:3000" />
-          </Field>
-          <Field label="Variables">
-            <Textarea value={props.envDraft.variables} onChange={(event) => props.setEnvDraft({ ...props.envDraft, variables: event.target.value })} className={cn('min-h-28 font-mono text-xs', darkInputClass)} placeholder="TOKEN=abc" />
-          </Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Button onClick={props.onSaveEnv} disabled={props.busy || !props.envDraft.name || !props.envDraft.baseUrl}>
-              <Save className="h-4 w-4" />
-              Salvar
+            <div className="grid gap-2 md:grid-cols-3">
+              <RunFact label="Suite selecionada" value={props.selectedSuite ? `${suiteTypeLabel(props.selectedSuite.type)} · ${shortId(props.selectedSuite.id)}` : '-'} />
+              <RunFact label="Target" value={props.selectedEnv?.name ?? '-'} />
+              <RunFact label="Última run nesta seleção" value={props.selectedRun ? `${shortId(props.selectedRun.id)} · ${runSummary(props.selectedRun)}` : 'Sem histórico para esta suite/target'} />
+            </div>
+          </div>
+
+          <div className="grid gap-2 rounded-lg border border-[#d8d3c5] bg-white p-3">
+            <div className="grid grid-cols-4 overflow-hidden rounded-md border border-[#e1ddd1] bg-[#fbfaf6]">
+              <Score label="Pass" value={props.stats.passed} tone="good" />
+              <Score label="Fail" value={props.stats.failed} tone="bad" />
+              <Score label="Error" value={props.stats.error} tone="bad" />
+              <Score label="Live" value={props.stats.active} tone="warn" />
+            </div>
+            <Button onClick={props.onRun} disabled={props.busy || !props.canRun} className="h-10 rounded-md text-sm font-bold">
+              {props.busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
+              Run suite
             </Button>
-            <Button variant="outline" className="rounded-lg border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80" onClick={() => props.setEnvDraft({ id: '', name: '', baseUrl: '', variables: '' })}>
-              Limpar
-            </Button>
+            <div className="grid grid-cols-3 gap-2">
+              <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenSuites}>
+                <FileCode2 className="h-4 w-4" />
+                Suites
+              </Button>
+              <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenEnvironments}>
+                <Database className="h-4 w-4" />
+                Ambientes
+              </Button>
+              <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenEvidence}>
+                <ClipboardCheck className="h-4 w-4" />
+                Evidence
+              </Button>
+            </div>
           </div>
         </div>
-      </Panel>
+      </section>
 
-      <Panel title="Retention" icon={Scissors}>
-        <div className="grid gap-3">
-          <Field label="Dias">
-            <Input className={darkInputClass} type="number" min={1} value={props.cleanupDays} onChange={(event) => props.setCleanupDays(Number(event.target.value))} />
-          </Field>
-          <Button variant="secondary" onClick={props.onCleanup} disabled={props.busy}>
-            <Trash2 className="h-4 w-4" />
-            Cleanup
-          </Button>
-        </div>
-      </Panel>
+      <RecentRunsOverview runs={props.runs} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenSuites={props.onOpenSuites} onOpenEnvironments={props.onOpenEnvironments} onOpenEvidence={props.onOpenEvidence} />
+      <LatestRunsOverview runs={props.latestRuns} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenEvidence={props.onOpenEvidence} />
     </div>
   );
 }
 
-function SuiteColumn(props: {
+function RecentRunsOverview({ runs, selectedRunId, onSelectRun, onOpenSuites, onOpenEnvironments, onOpenEvidence }: { runs: Run[]; selectedRunId?: string; onSelectRun: (run: Run) => void; onOpenSuites: () => void; onOpenEnvironments: () => void; onOpenEvidence: () => void }) {
+  const recentRuns = runs.slice(0, 6);
+  return (
+    <RunsSection title="Runs desta seleção" description="Histórico filtrado pela suite e ambiente escolhidos no topo." count={recentRuns.length}>
+      <div className="grid gap-3">
+        {recentRuns.length > 0 ? (
+          <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-3">
+            {recentRuns.map((run) => (
+              <button
+                key={run.id}
+                type="button"
+                onClick={() => {
+                  onSelectRun(run);
+                  onOpenEvidence();
+                }}
+                className={cn('grid cursor-pointer gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', selectedRunId === run.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <Status status={run.status} />
+                  <span className="font-mono text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
+                </div>
+                <p className="font-mono text-xs text-[#66705f]">{shortId(run.id)} · {runSummary(run)}</p>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <DarkEmpty text="Nenhuma run para esta suite neste ambiente." />
+        )}
+        <Separator />
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={onOpenSuites}>
+            <FileCode2 className="h-4 w-4" />
+            Gerenciar suites
+          </Button>
+          <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={onOpenEnvironments}>
+            <Database className="h-4 w-4" />
+            Gerenciar ambientes
+          </Button>
+        </div>
+      </div>
+    </RunsSection>
+  );
+}
+
+function LatestRunsOverview({ runs, selectedRunId, onSelectRun, onOpenEvidence }: { runs: Run[]; selectedRunId?: string; onSelectRun: (run: Run) => void; onOpenEvidence: () => void }) {
+  const latestRuns = runs.slice(0, 8);
+  return (
+    <RunsSection title="Últimas runs do projeto" description="Histórico geral recente, independente da suite selecionada." count={latestRuns.length} defaultOpen={false}>
+        {latestRuns.length > 0 ? (
+          <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-4">
+            {latestRuns.map((run) => (
+              <button
+                key={run.id}
+                type="button"
+                onClick={() => {
+                  onSelectRun(run);
+                  onOpenEvidence();
+                }}
+                className={cn('grid cursor-pointer gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', selectedRunId === run.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <Status status={run.status} />
+                  <span className="font-mono text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
+                </div>
+                <p className="font-mono text-xs text-[#66705f]">{shortId(run.id)} · {runSummary(run)}</p>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <DarkEmpty text="Nenhuma run no projeto." />
+        )}
+    </RunsSection>
+  );
+}
+
+function RunsSection({ title, description, count, defaultOpen = true, children }: { title: string; description: string; count: number; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} asChild>
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck className="h-4 w-4 text-[#426b4d]" />
+                <CardTitle className="font-mono text-[11px] uppercase tracking-[0.2em] text-[#66705f]">{title}</CardTitle>
+                <Badge variant="outline">{count}</Badge>
+              </div>
+              <CardDescription>{description}</CardDescription>
+            </div>
+            <CollapsibleTrigger asChild>
+              <Button variant="outline" size="sm" className="shrink-0">
+                <ChevronDown data-icon="inline-start" className={cn('transition-transform', !open && '-rotate-90')} />
+                {open ? 'Recolher' : 'Expandir'}
+              </Button>
+            </CollapsibleTrigger>
+          </div>
+        </CardHeader>
+        <CollapsibleContent>
+          <CardContent>{children}</CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
+
+function RunFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-[#e1ddd1] bg-white p-2.5">
+      <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function ProjectsWorkspace(props: {
+  projects: Project[];
+  envs: Environment[];
   suites: Suite[];
-  suiteDraft: { id: string; name: string; type: 'api' | 'web'; specContent: string };
-  setSuiteDraft: (draft: { id: string; name: string; type: 'api' | 'web'; specContent: string }) => void;
-  selectedSuiteId: string;
-  validation: ValidationResult | null;
-  onLoadSuite: (suite: Suite) => Promise<void>;
-  onSaveSuite: () => Promise<void>;
-  onValidate: () => Promise<unknown>;
-  onTemplate: (key: keyof typeof templates) => void;
+  runs: Run[];
+  selectedProjectId: string;
+  projectDraft: { id: string; name: string; description: string };
+  envDraft: { id: string; name: string; baseUrl: string; variables: string };
   busy: boolean;
+  onSelectProject: (id: string) => void;
+  onProjectDraftChange: (draft: { id: string; name: string; description: string }) => void;
+  onSaveProject: () => void;
+  onNewProject: () => void;
+  onArchiveProject: (project: Project) => void;
+  onEnvDraftChange: (draft: { id: string; name: string; baseUrl: string; variables: string }) => void;
+  onEditEnv: (env: Environment) => void;
+  onNewEnv: () => void;
+  onSaveEnv: () => void;
+  onArchiveEnv: (env: Environment) => void;
+}) {
+  const selectedProject = props.projects.find((project) => project.id === props.selectedProjectId);
+  return (
+    <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <Card className="self-start">
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle>Projetos</CardTitle>
+              <CardDescription>{props.projects.length} ativos</CardDescription>
+            </div>
+            <Button size="sm" onClick={props.onNewProject}>Novo</Button>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-2">
+          {props.projects.map((project) => (
+            <button
+              key={project.id}
+              type="button"
+              onClick={() => props.onSelectProject(project.id)}
+              className={cn('grid gap-1 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a]', project.id === props.selectedProjectId ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
+            >
+              <span className="break-words font-semibold">{project.name}</span>
+              <span className="font-mono text-xs text-[#66705f]">{shortId(project.id)}</span>
+            </button>
+          ))}
+          {props.projects.length === 0 ? <DarkEmpty text="Nenhum projeto." /> : null}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>{props.projectDraft.id ? 'Editar projeto' : 'Criar projeto'}</CardTitle>
+                <CardDescription>{selectedProject ? `${props.envs.length} ambientes · ${props.suites.length} suites · ${props.runs.length} runs` : 'Selecione ou crie um projeto.'}</CardDescription>
+              </div>
+              {selectedProject ? <Button variant="destructive" size="sm" onClick={() => props.onArchiveProject(selectedProject)}><Trash2 data-icon="inline-start" />Arquivar</Button> : null}
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+            <Field label="Nome"><Input value={props.projectDraft.name} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, name: event.target.value })} /></Field>
+            <Field label="Descricao"><Input value={props.projectDraft.description} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, description: event.target.value })} /></Field>
+            <Button onClick={props.onSaveProject} disabled={props.busy || !props.projectDraft.name.trim()}>Salvar projeto</Button>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Ambientes do projeto</CardTitle>
+              <CardDescription>Targets ficam aqui, dentro do projeto.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-2">
+              {props.envs.map((env) => (
+                <div key={env.id} className={cn('grid gap-3 rounded-lg border bg-white p-3', props.envDraft.id === env.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold">{env.name}</p>
+                      <p className="break-all font-mono text-xs text-[#66705f]">{env.baseUrl}</p>
+                    </div>
+                    <Badge variant="outline">{Object.keys(env.variables ?? {}).length} vars</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => props.onEditEnv(env)}>Editar</Button>
+                    <Button variant="destructive" size="sm" onClick={() => props.onArchiveEnv(env)}>Arquivar</Button>
+                  </div>
+                </div>
+              ))}
+              {props.envs.length === 0 ? <DarkEmpty text="Nenhum ambiente neste projeto." /> : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{props.envDraft.id ? 'Editar ambiente' : 'Novo ambiente'}</CardTitle>
+                  <CardDescription>{props.envDraft.id ? shortId(props.envDraft.id) : 'Target do projeto.'}</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={props.onNewEnv}>Novo</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <Field label="Nome"><Input value={props.envDraft.name} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, name: event.target.value })} placeholder="hml" /></Field>
+              <Field label="Base URL"><Input value={props.envDraft.baseUrl} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, baseUrl: event.target.value })} placeholder="https://app.local" /></Field>
+              <Field label="Variaveis"><Textarea className="min-h-36 font-mono text-xs" value={props.envDraft.variables} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, variables: event.target.value })} placeholder="TOKEN=abc" /></Field>
+              <Button onClick={props.onSaveEnv} disabled={props.busy || !props.selectedProjectId || !props.envDraft.name.trim() || !props.envDraft.baseUrl.trim()}>Salvar ambiente</Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>Suites vinculadas</CardTitle>
+            <CardDescription>Listagem simples. Edicao fica na tela de suites.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {props.suites.map((suite) => (
+              <div key={suite.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words font-semibold">{suite.name}</p>
+                    <p className="font-mono text-xs text-[#66705f]">{shortId(suite.id)}</p>
+                  </div>
+                  <Badge variant={suite.type === 'api' ? 'secondary' : 'outline'}>{suiteTypeLabel(suite.type)}</Badge>
+                </div>
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/suites?project=${suite.projectId}&suite=${suite.id}`}>Alterar</Link>
+                </Button>
+              </div>
+            ))}
+            {props.suites.length === 0 ? <DarkEmpty text="Nenhuma suite neste projeto." /> : null}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function SuitesWorkspace(props: {
+  suites: Suite[];
+  draft: { id: string; name: string; type: 'api' | 'web'; specContent: string };
+  validation: ValidationResult | null;
+  busy: boolean;
+  projectId: string;
+  openApiDraft: { name: string; spec: string };
+  onDraftChange: (draft: { id: string; name: string; type: 'api' | 'web'; specContent: string }) => void;
+  onLoadSuite: (suite: Suite) => void;
+  onNewSuite: () => void;
+  onValidate: () => void;
+  onSave: () => void;
+  onOpenApiDraftChange: (draft: { name: string; spec: string }) => void;
+  onImportOpenApi: () => void;
 }) {
   return (
-    <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
-      <div className="grid gap-3 xl:grid-cols-3">
-        {Object.entries(templates).map(([key, template]) => (
-          <button key={key} type="button" onClick={() => props.onTemplate(key as keyof typeof templates)} className="cursor-pointer rounded-xl bg-[#151d16]/70 p-4 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_12px_28px_rgba(0,0,0,0.18)] transition hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_18px_36px_rgba(0,0,0,0.22)]">
-            <div className="mb-3 flex items-center justify-between">
-              <Code2 className="h-4 w-4 text-[#c7d957]" />
-              <Badge variant={template.type === 'api' ? 'secondary' : 'outline'}>{template.type}</Badge>
-            </div>
-            <p className="font-bold">{template.label}</p>
-          </button>
-        ))}
+    <div className="grid gap-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <SuiteMenu {...props} />
+        <Card className="self-start">
+          <CardHeader className="pb-3">
+            <CardTitle>Import OpenAPI</CardTitle>
+            <CardDescription>Cria suite API no projeto selecionado.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <Field label="Nome"><Input value={props.openApiDraft.name} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, name: event.target.value })} /></Field>
+            <Field label="OpenAPI JSON"><Textarea className="min-h-52 font-mono text-xs" value={props.openApiDraft.spec} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, spec: event.target.value })} placeholder='{"openapi":"3.0.0","paths":{}}' /></Field>
+            <Button onClick={props.onImportOpenApi} disabled={props.busy || !props.projectId || !props.openApiDraft.spec.trim()}><Upload data-icon="inline-start" />Importar</Button>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function SettingsWorkspace(props: {
+  aiConnections: AiConnection[];
+  aiDraft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean };
+  security: SecurityStatus | null;
+  audit: AuditEntry[];
+  cleanupDays: string;
+  cleanupResult: string;
+  busy: boolean;
+  onAiDraftChange: (draft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean }) => void;
+  onEditAiConnection: (connection: AiConnection) => void;
+  onSaveAiConnection: () => void;
+  onCleanupDaysChange: (value: string) => void;
+  onCleanup: () => void;
+}) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid gap-4">
+        <Card>
+          <CardHeader className="pb-3"><CardTitle>Seguranca empresa</CardTitle><CardDescription>OIDC, RBAC, allowlist, secrets e retention.</CardDescription></CardHeader>
+          <CardContent className="grid gap-2 md:grid-cols-2">
+            <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
+            <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
+            <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'admin'} />
+            <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
+            <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
+            <SecurityLine label="Retention" ok value={`${props.security?.retention.days ?? props.cleanupDays} dias`} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3"><CardTitle>Audit log</CardTitle><CardDescription>Mutacoes recentes na API.</CardDescription></CardHeader>
+          <CardContent className="grid gap-2">
+            {props.audit.map((entry) => (
+              <div key={entry.id} className="grid gap-1 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-mono text-xs font-bold">{entry.action}</span>
+                  <Badge variant={entry.status === 'ok' ? 'success' : entry.status === 'blocked' ? 'warning' : 'destructive'}>{entry.status}</Badge>
+                </div>
+                <p className="font-mono text-xs text-[#66705f]">{formatDate(entry.createdAt)} · {entry.actor}{entry.target ? ` · ${entry.target}` : ''}</p>
+              </div>
+            ))}
+            {props.audit.length === 0 ? <DarkEmpty text="Audit vazio." /> : null}
+          </CardContent>
+        </Card>
       </div>
 
-      <Panel title="Spec Forge" icon={FileCode2} className="min-h-0">
-        <div className="grid min-h-0 gap-4 min-[1900px]:grid-cols-[260px_minmax(0,1fr)]">
-          <ScrollArea className="max-h-[220px] pr-3 min-[1900px]:max-h-[720px]">
-            <div className="grid gap-2 md:grid-cols-2 min-[1900px]:grid-cols-1">
+      <div className="grid content-start gap-4">
+        <Card>
+          <CardHeader className="pb-3"><CardTitle>AI connections</CardTitle><CardDescription>{props.aiConnections.length} configuradas.</CardDescription></CardHeader>
+          <CardContent className="grid gap-2">
+            {props.aiConnections.map((connection) => (
+              <button key={connection.id} type="button" onClick={() => props.onEditAiConnection(connection)} className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 text-left hover:border-[#9fb25a]">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold">{connection.name}</span>
+                  <Badge variant={connection.enabled ? 'success' : 'muted'}>{connection.enabled ? 'ativa' : 'off'}</Badge>
+                </div>
+                <p className="font-mono text-xs text-[#66705f]">{connection.provider} · {connection.model}</p>
+              </button>
+            ))}
+            {props.aiConnections.length === 0 ? <DarkEmpty text="Nenhuma AI connection." /> : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3"><CardTitle>{props.aiDraft.id ? 'Editar AI' : 'Nova AI'}</CardTitle><CardDescription>Usada no explain failure.</CardDescription></CardHeader>
+          <CardContent className="grid gap-3">
+            <Field label="Nome"><Input value={props.aiDraft.name} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, name: event.target.value })} /></Field>
+            <Field label="Provider">
+              <Select value={props.aiDraft.provider} onValueChange={(value) => props.onAiDraftChange({ ...props.aiDraft, provider: value as AiConnection['provider'] })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openrouter">OpenRouter</SelectItem>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="anthropic">Anthropic</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Modelo"><Input value={props.aiDraft.model} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, model: event.target.value })} /></Field>
+            <Field label="Base URL"><Input value={props.aiDraft.baseUrl} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, baseUrl: event.target.value })} /></Field>
+            <Field label="API key"><Input type="password" value={props.aiDraft.apiKey} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, apiKey: event.target.value })} placeholder={props.aiDraft.id ? '[REDACTED]' : 'sk-...'} /></Field>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.aiDraft.enabled} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, enabled: event.target.checked })} /> Ativa</label>
+            <Button onClick={props.onSaveAiConnection} disabled={props.busy || !props.aiDraft.name || !props.aiDraft.model}>Salvar AI</Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3"><CardTitle>Cleanup</CardTitle><CardDescription>Aplica politica de retention.</CardDescription></CardHeader>
+          <CardContent className="grid gap-3">
+            <Field label="Dias"><Input type="number" min={1} value={props.cleanupDays} onChange={(event) => props.onCleanupDaysChange(event.target.value)} /></Field>
+            <Button variant="destructive" onClick={props.onCleanup} disabled={props.busy || Number(props.cleanupDays) < 1}>Executar cleanup</Button>
+            {props.cleanupResult ? <Signal tone="good" text={props.cleanupResult} /> : null}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function SystemMenu(props: {
+  projects: Project[];
+  selectedProjectId: string;
+  projectDraft: { id: string; name: string; description: string };
+  openApiDraft: { name: string; spec: string };
+  aiConnections: AiConnection[];
+  aiDraft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean };
+  security: SecurityStatus | null;
+  audit: AuditEntry[];
+  cleanupDays: string;
+  cleanupResult: string;
+  busy: boolean;
+  onSelectProject: (id: string) => void;
+  onProjectDraftChange: (draft: { id: string; name: string; description: string }) => void;
+  onSaveProject: () => void;
+  onNewProject: () => void;
+  onArchiveProject: (project: Project) => void;
+  onOpenApiDraftChange: (draft: { name: string; spec: string }) => void;
+  onImportOpenApi: () => void;
+  onAiDraftChange: (draft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean }) => void;
+  onEditAiConnection: (connection: AiConnection) => void;
+  onSaveAiConnection: () => void;
+  onCleanupDaysChange: (value: string) => void;
+  onCleanup: () => void;
+}) {
+  return (
+    <Tabs defaultValue="projects" className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] px-5 pb-5">
+      <TabsList className="mt-4 grid h-auto grid-cols-2 md:grid-cols-5">
+        <TabsTrigger value="projects">Projetos</TabsTrigger>
+        <TabsTrigger value="openapi">OpenAPI</TabsTrigger>
+        <TabsTrigger value="ai">AI</TabsTrigger>
+        <TabsTrigger value="security">Seguranca</TabsTrigger>
+        <TabsTrigger value="audit">Audit</TabsTrigger>
+      </TabsList>
+
+      <ScrollArea className="min-h-0 pr-3">
+        <TabsContent value="projects">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Projetos</CardTitle>
+                <CardDescription>{props.projects.length} projetos ativos.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-2">
+                {props.projects.map((project) => (
+                  <div key={project.id} className={cn('grid gap-3 rounded-lg border bg-white p-3', project.id === props.selectedProjectId ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}>
+                    <button type="button" className="min-w-0 text-left" onClick={() => props.onSelectProject(project.id)}>
+                      <p className="break-words font-semibold">{project.name}</p>
+                      <p className="font-mono text-xs text-[#66705f]">{shortId(project.id)}</p>
+                      {project.description ? <p className="mt-1 text-sm text-[#66705f]">{project.description}</p> : null}
+                    </button>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => props.onProjectDraftChange({ id: project.id, name: project.name, description: project.description ?? '' })}>Editar</Button>
+                      <Button variant="destructive" size="sm" onClick={() => props.onArchiveProject(project)}><Trash2 data-icon="inline-start" />Arquivar</Button>
+                    </div>
+                  </div>
+                ))}
+                {props.projects.length === 0 ? <DarkEmpty text="Nenhum projeto." /> : null}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>{props.projectDraft.id ? 'Editar projeto' : 'Novo projeto'}</CardTitle>
+                    <CardDescription>{props.projectDraft.id ? shortId(props.projectDraft.id) : 'Container principal do workspace.'}</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={props.onNewProject}>Novo</Button>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                <Field label="Nome"><Input value={props.projectDraft.name} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, name: event.target.value })} placeholder="Coziva Local" /></Field>
+                <Field label="Descricao"><Textarea value={props.projectDraft.description} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, description: event.target.value })} placeholder="Escopo, app ou squad." /></Field>
+                <Button onClick={props.onSaveProject} disabled={props.busy || !props.projectDraft.name.trim()}>Salvar projeto</Button>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="openapi">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Import OpenAPI</CardTitle>
+              <CardDescription>Converte paths HTTP em suite API do projeto selecionado.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <Field label="Nome da suite"><Input value={props.openApiDraft.name} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, name: event.target.value })} /></Field>
+              <Field label="OpenAPI JSON">
+                <Textarea className="min-h-80 font-mono text-xs" value={props.openApiDraft.spec} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, spec: event.target.value })} placeholder='{"openapi":"3.0.0","paths":{"/health":{"get":{"responses":{"200":{"description":"ok"}}}}}}' />
+              </Field>
+              <Button onClick={props.onImportOpenApi} disabled={props.busy || !props.selectedProjectId || !props.openApiDraft.spec.trim()}><Upload data-icon="inline-start" />Importar OpenAPI</Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ai">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Connections</CardTitle>
+                <CardDescription>{props.aiConnections.length} conexoes configuradas.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-2">
+                {props.aiConnections.map((connection) => (
+                  <button key={connection.id} type="button" onClick={() => props.onEditAiConnection(connection)} className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 text-left hover:border-[#9fb25a]">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold">{connection.name}</span>
+                      <Badge variant={connection.enabled ? 'success' : 'muted'}>{connection.enabled ? 'ativa' : 'off'}</Badge>
+                    </div>
+                    <p className="font-mono text-xs text-[#66705f]">{connection.provider} · {connection.model}</p>
+                  </button>
+                ))}
+                {props.aiConnections.length === 0 ? <DarkEmpty text="Nenhuma AI connection." /> : null}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>{props.aiDraft.id ? 'Editar AI' : 'Nova AI'}</CardTitle>
+                <CardDescription>Usada por explain failure.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                <Field label="Nome"><Input value={props.aiDraft.name} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, name: event.target.value })} /></Field>
+                <Field label="Provider">
+                  <Select value={props.aiDraft.provider} onValueChange={(value) => props.onAiDraftChange({ ...props.aiDraft, provider: value as AiConnection['provider'] })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openrouter">OpenRouter</SelectItem>
+                      <SelectItem value="openai">OpenAI</SelectItem>
+                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Modelo"><Input value={props.aiDraft.model} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, model: event.target.value })} /></Field>
+                <Field label="Base URL"><Input value={props.aiDraft.baseUrl} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, baseUrl: event.target.value })} /></Field>
+                <Field label="API key"><Input type="password" value={props.aiDraft.apiKey} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, apiKey: event.target.value })} placeholder={props.aiDraft.id ? '[REDACTED]' : 'sk-...'} /></Field>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.aiDraft.enabled} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, enabled: event.target.checked })} /> Ativa</label>
+                <Button onClick={props.onSaveAiConnection} disabled={props.busy || !props.aiDraft.name || !props.aiDraft.model}><WandSparkles data-icon="inline-start" />Salvar AI</Button>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="security">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-3"><CardTitle>Seguranca empresa</CardTitle><CardDescription>Estado atual vindo da API.</CardDescription></CardHeader>
+              <CardContent className="grid gap-2">
+                <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
+                <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
+                <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'admin'} />
+                <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
+                <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-3"><CardTitle>Retention</CardTitle><CardDescription>Politica visivel + cleanup manual.</CardDescription></CardHeader>
+              <CardContent className="grid gap-3">
+                <Field label="Dias"><Input type="number" min={1} value={props.cleanupDays} onChange={(event) => props.onCleanupDaysChange(event.target.value)} /></Field>
+                <Button variant="destructive" onClick={props.onCleanup} disabled={props.busy || Number(props.cleanupDays) < 1}>Executar cleanup</Button>
+                {props.cleanupResult ? <Signal tone="good" text={props.cleanupResult} /> : null}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="audit">
+          <Card>
+            <CardHeader className="pb-3"><CardTitle>Audit log</CardTitle><CardDescription>Mutacoes recentes na API.</CardDescription></CardHeader>
+            <CardContent className="grid gap-2">
+              {props.audit.map((entry) => (
+                <div key={entry.id} className="grid gap-1 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-bold">{entry.action}</span>
+                    <Badge variant={entry.status === 'ok' ? 'success' : entry.status === 'blocked' ? 'warning' : 'destructive'}>{entry.status}</Badge>
+                  </div>
+                  <p className="font-mono text-xs text-[#66705f]">{formatDate(entry.createdAt)} · {entry.actor}{entry.target ? ` · ${entry.target}` : ''}</p>
+                </div>
+              ))}
+              {props.audit.length === 0 ? <DarkEmpty text="Audit vazio." /> : null}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </ScrollArea>
+    </Tabs>
+  );
+}
+
+function SecurityLine({ label, ok, value }: { label: string; ok: boolean; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+      <div className="min-w-0">
+        <p className="font-semibold">{label}</p>
+        <p className="break-words font-mono text-xs text-[#66705f]">{value}</p>
+      </div>
+      <Badge variant={ok ? 'success' : 'warning'}>{ok ? 'ok' : 'acao'}</Badge>
+    </div>
+  );
+}
+
+function SuiteMenu(props: {
+  suites: Suite[];
+  draft: { id: string; name: string; type: 'api' | 'web'; specContent: string };
+  validation: ValidationResult | null;
+  busy: boolean;
+  onDraftChange: (draft: { id: string; name: string; type: 'api' | 'web'; specContent: string }) => void;
+  onLoadSuite: (suite: Suite) => void;
+  onNewSuite: () => void;
+  onValidate: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="grid min-h-0 flex-1 gap-4 px-5 pb-5 md:grid-cols-[340px_minmax(0,1fr)]">
+      <Card className="min-h-0">
+        <CardHeader className="pb-3">
+          <CardTitle>Biblioteca</CardTitle>
+          <CardDescription>{props.suites.length} suites no projeto.</CardDescription>
+        </CardHeader>
+        <CardContent className="min-h-0">
+          <ScrollArea className="h-[calc(100vh-220px)] pr-3">
+            <div className="grid gap-2">
+              <Button variant="outline" onClick={props.onNewSuite}>Nova suite</Button>
               {props.suites.map((suite) => (
                 <button
                   key={suite.id}
                   type="button"
                   onClick={() => props.onLoadSuite(suite)}
-                  className={cn('cursor-pointer rounded-xl p-3 text-left transition', props.selectedSuiteId === suite.id ? 'bg-[#1a241b]/80 shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_14px_30px_rgba(0,0,0,0.18)]' : 'bg-[#111812]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.22)]')}
+                  className={cn('grid cursor-pointer gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', props.draft.id === suite.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold">{suite.name}</span>
-                    <Badge variant={suite.type === 'api' ? 'secondary' : 'outline'}>{suite.type}</Badge>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 break-words font-semibold leading-snug">{suite.name}</span>
+                    <Badge variant={suite.type === 'api' ? 'secondary' : 'outline'}>{suiteTypeLabel(suite.type)}</Badge>
                   </div>
-                  <p className="mt-2 font-mono text-xs text-[#a9b19d]">{shortId(suite.id)}</p>
+                  <span className="font-mono text-xs text-[#66705f]">{shortId(suite.id)}</span>
                 </button>
               ))}
               {props.suites.length === 0 ? <DarkEmpty text="Nenhuma suite." /> : null}
             </div>
           </ScrollArea>
+        </CardContent>
+      </Card>
 
-          <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_auto_auto] md:items-end">
-              <Field label="Nome">
-                <Input className={darkInputClass} value={props.suiteDraft.name} onChange={(event) => props.setSuiteDraft({ ...props.suiteDraft, name: event.target.value })} placeholder="login-smoke" />
-              </Field>
-              <Field label="Tipo">
-                <Select value={props.suiteDraft.type} onValueChange={(value) => props.setSuiteDraft({ ...props.suiteDraft, type: value as 'api' | 'web' })}>
-                  <SelectTrigger className={darkInputClass}><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="api">api</SelectItem>
-                    <SelectItem value="web">web</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Button variant="outline" className="rounded-lg border-white/12 bg-transparent text-[#f7f6f0] hover:bg-[#1a241b]/80" onClick={props.onValidate}>
-                <ShieldCheck className="h-4 w-4" />
-                Validar
-              </Button>
-              <Button onClick={props.onSaveSuite} disabled={props.busy || !props.suiteDraft.name || !props.suiteDraft.specContent}>
-                <Save className="h-4 w-4" />
-                Salvar
-              </Button>
+      <Card className="min-h-0">
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>{props.draft.id ? 'Editar suite' : 'Nova suite'}</CardTitle>
+              <CardDescription>{props.draft.id ? shortId(props.draft.id) : 'YAML versionavel da suite.'}</CardDescription>
             </div>
-
-            <YamlEditor
-              value={props.suiteDraft.specContent}
-              onChange={(specContent) => props.setSuiteDraft({ ...props.suiteDraft, specContent })}
-            />
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-3">
-              <ValidationBadge validation={props.validation} />
-              <span className="font-mono text-xs text-[#a9b19d]">{props.suiteDraft.specContent.split(/\r?\n/).length} lines</span>
+            {props.validation ? <Badge variant={props.validation.valid ? 'success' : 'destructive'}>{props.validation.valid ? `${props.validation.tests} tests` : 'invalida'}</Badge> : null}
+          </div>
+        </CardHeader>
+        <CardContent className="grid min-h-0 gap-3">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px]">
+            <div className="grid gap-1.5">
+              <Label>Nome</Label>
+              <Input value={props.draft.name} onChange={(event) => props.onDraftChange({ ...props.draft, name: event.target.value })} placeholder="login-smoke" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Tipo</Label>
+              <Select value={props.draft.type} onValueChange={(value) => props.onDraftChange({ ...props.draft, type: value as 'api' | 'web' })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="api">API</SelectItem>
+                  <SelectItem value="web">Frontend</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        </div>
-      </Panel>
+          <div className="grid gap-1.5">
+            <Label>YAML</Label>
+            <YamlEditor value={props.draft.specContent} onChange={(value) => props.onDraftChange({ ...props.draft, specContent: value })} />
+          </div>
+          {props.validation && !props.validation.valid ? <Signal tone="bad" text={props.validation.error} /> : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" onClick={props.onValidate} disabled={props.busy}>Validar</Button>
+            <Button onClick={props.onSave} disabled={props.busy || !props.draft.name.trim() || !props.draft.specContent.trim()}>
+              {props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+              Salvar
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
+}
+
+function EnvironmentMenu(props: {
+  envs: Environment[];
+  draft: { id: string; name: string; baseUrl: string; variables: string };
+  busy: boolean;
+  onDraftChange: (draft: { id: string; name: string; baseUrl: string; variables: string }) => void;
+  onEdit: (env: Environment) => void;
+  onNew: () => void;
+  onSave: () => void;
+  onArchive: (env: Environment) => void;
+}) {
+  return (
+    <div className="grid min-h-0 flex-1 gap-4 px-5 pb-5 md:grid-cols-[minmax(0,1fr)_340px]">
+      <Card className="min-h-0">
+        <CardHeader className="pb-3">
+          <CardTitle>Targets</CardTitle>
+          <CardDescription>{props.envs.length} ambientes ativos.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[calc(100vh-220px)] pr-3">
+            <div className="grid gap-2">
+              {props.envs.map((env) => (
+                <div key={env.id} className={cn('grid gap-3 rounded-lg border bg-white p-3', props.draft.id === env.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{env.name}</p>
+                      <p className="break-all font-mono text-xs text-[#66705f]">{env.baseUrl}</p>
+                    </div>
+                    <Badge variant="outline">{Object.keys(env.variables ?? {}).length} vars</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => props.onEdit(env)}>Editar</Button>
+                    <Button variant="destructive" size="sm" onClick={() => props.onArchive(env)}>Arquivar</Button>
+                  </div>
+                </div>
+              ))}
+              {props.envs.length === 0 ? <DarkEmpty text="Nenhum ambiente." /> : null}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle>{props.draft.id ? 'Editar ambiente' : 'Novo ambiente'}</CardTitle>
+              <CardDescription>{props.draft.id ? shortId(props.draft.id) : 'Destino onde a suite roda.'}</CardDescription>
+            </div>
+            <Button variant="outline" size="sm" onClick={props.onNew}>Novo</Button>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <div className="grid gap-1.5">
+            <Label>Nome</Label>
+            <Input value={props.draft.name} onChange={(event) => props.onDraftChange({ ...props.draft, name: event.target.value })} placeholder="hml" />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Base URL</Label>
+            <Input value={props.draft.baseUrl} onChange={(event) => props.onDraftChange({ ...props.draft, baseUrl: event.target.value })} placeholder="https://app.local" />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Variaveis</Label>
+            <Textarea className="min-h-44 font-mono text-xs" value={props.draft.variables} onChange={(event) => props.onDraftChange({ ...props.draft, variables: event.target.value })} placeholder="TOKEN=abc" />
+          </div>
+          <Button onClick={props.onSave} disabled={props.busy || !props.draft.name.trim() || !props.draft.baseUrl.trim()}>
+            {props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+            Salvar ambiente
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function YamlEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const monacoRef = useRef<any>(null);
+  const editorRef = useRef<any>(null);
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    const model = editor?.getModel?.();
+    if (!monaco || !model) return;
+    monaco.editor.setModelMarkers(model, 'testhub-yaml', yamlDiagnostics(value, monaco));
+  }, [value]);
+
+  return (
+    <div className="min-h-[calc(100vh-410px)] overflow-hidden rounded-md border border-input bg-[#0b100c]">
+      <MonacoEditor
+        height="calc(100vh - 410px)"
+        defaultLanguage="yaml"
+        value={value}
+        onChange={(nextValue) => onChange(nextValue ?? '')}
+        beforeMount={(monaco) => {
+          monacoRef.current = monaco;
+          monaco.languages.registerCompletionItemProvider('yaml', {
+            provideCompletionItems: () => ({
+              suggestions: [
+                { label: 'version', kind: monaco.languages.CompletionItemKind.Property, insertText: 'version: 1', range: undefined as never },
+                { label: 'type api', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'type: api', range: undefined as never },
+                { label: 'type frontend', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'type: web', range: undefined as never },
+                { label: 'api test', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'tests:\\n  - name: ${1:health}\\n    request:\\n      method: GET\\n      path: /health\\n    expect:\\n      status: 200', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
+                { label: 'frontend test', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'tests:\\n  - name: ${1:login}\\n    steps:\\n      - goto: /\\n      - expectVisible: ${2:text}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
+              ],
+            }),
+          });
+        }}
+        onMount={(editor, monaco) => {
+          editorRef.current = editor;
+          monacoRef.current = monaco;
+          const model = editor.getModel();
+          if (model) monaco.editor.setModelMarkers(model, 'testhub-yaml', yamlDiagnostics(value, monaco));
+        }}
+        options={{
+          minimap: { enabled: false },
+          fontFamily: 'IBM Plex Mono, monospace',
+          fontSize: 12,
+          lineNumbersMinChars: 3,
+          scrollBeyondLastLine: false,
+          tabSize: 2,
+          wordWrap: 'on',
+          automaticLayout: true,
+          glyphMargin: true,
+          quickSuggestions: true,
+        }}
+        theme="vs-dark"
+      />
+    </div>
+  );
+}
+
+function yamlDiagnostics(source: string, monaco: any) {
+  const markers = [];
+  const lines = source.split('\n');
+  if (!/^version:\s*1\b/m.test(source)) markers.push(marker(monaco, 1, 'version: 1 obrigatorio.'));
+  if (!/^type:\s*(api|web)\b/m.test(source)) markers.push(marker(monaco, Math.max(1, findLine(lines, 'type')), 'type deve ser api ou web.'));
+  if (!/^name:\s*\S+/m.test(source)) markers.push(marker(monaco, Math.max(1, findLine(lines, 'name')), 'name obrigatorio.'));
+  if (!/^tests:\s*$/m.test(source)) markers.push(marker(monaco, Math.max(1, findLine(lines, 'tests')), 'tests obrigatorio.'));
+  return markers;
+}
+
+function marker(monaco: any, line: number, message: string) {
+  return {
+    severity: monaco.MarkerSeverity.Warning,
+    message,
+    startLineNumber: line,
+    startColumn: 1,
+    endLineNumber: line,
+    endColumn: 120,
+  };
+}
+
+function findLine(lines: string[], token: string): number {
+  const index = lines.findIndex((line) => line.includes(token));
+  return index >= 0 ? index + 1 : 1;
 }
 
 function EvidenceColumn(props: {
@@ -611,75 +1633,118 @@ function EvidenceColumn(props: {
   artifacts: Artifact[];
   onSelectRun: (run: Run) => void;
   onCancel: (run: Run) => Promise<void>;
+  onExplain: (run?: Run) => Promise<void>;
+  aiOutput: string;
 }) {
   return (
-    <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
-      <div className="grid grid-cols-4 overflow-hidden rounded-xl bg-[#151d16]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_16px_36px_rgba(0,0,0,0.2)]">
+    <div className="grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 px-5 pb-5">
+      <div className="grid grid-cols-4 overflow-hidden rounded-lg border bg-card shadow-sm">
         <Score label="Pass" value={props.stats.passed} tone="good" />
         <Score label="Fail" value={props.stats.failed} tone="bad" />
         <Score label="Error" value={props.stats.error} tone="bad" />
         <Score label="Live" value={props.stats.active} tone="warn" />
       </div>
 
-      <Panel title="Evidence" icon={ClipboardCheck} className="min-h-0">
-        <div className="grid min-h-0 grid-rows-[230px_auto_minmax(0,1fr)] gap-4">
-          <ScrollArea className="rounded-xl bg-[#0f1510]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),inset_0_18px_42px_rgba(0,0,0,0.18)]">
-            <div className="grid gap-2 p-3">
-              {props.runs.map((run) => (
-                <button
-                  key={run.id}
-                  type="button"
-                  onClick={() => props.onSelectRun(run)}
-                  className={cn('grid cursor-pointer gap-2 rounded-xl p-3 text-left transition', props.selectedRun?.id === run.id ? 'bg-[#1a241b]/80 shadow-[inset_0_0_0_1px_rgba(199,217,87,0.28),0_14px_30px_rgba(0,0,0,0.18)]' : 'bg-[#111812]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.22)]')}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <Status status={run.status} />
-                    <span className="font-mono text-xs text-[#a9b19d]">{formatDate(run.createdAt)}</span>
-                  </div>
-                  <p className="font-mono text-xs text-[#a9b19d]">{shortId(run.id)} · {runSummary(run)}</p>
-                </button>
-              ))}
-              {props.runs.length === 0 ? <DarkEmpty text="Nenhuma run." /> : null}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 font-mono uppercase">Sem run</Badge>}
+              <CardTitle className="mt-3 truncate text-2xl font-extrabold">{props.selectedSuite?.name ?? 'Sem run'}</CardTitle>
+              <CardDescription className="break-all font-mono">{props.selectedEnv?.baseUrl ?? 'target ausente'}</CardDescription>
             </div>
-          </ScrollArea>
-
-          <div className="grid gap-3 rounded-xl bg-[#151d16]/82 p-4 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),0_16px_38px_rgba(0,0,0,0.22)]">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <Status status={props.selectedRun?.status ?? 'queued'} />
-                <h2 className="mt-3 text-2xl font-black">{props.selectedSuite?.name ?? 'Sem run'}</h2>
-                <p className="break-all font-mono text-xs text-[#a9b19d]">{props.selectedEnv?.baseUrl ?? 'target ausente'}</p>
-              </div>
-              {props.selectedRun && ['queued', 'running'].includes(props.selectedRun.status) ? (
-                <Button variant="destructive" size="sm" onClick={() => props.onCancel(props.selectedRun!)}>
-                  <Square className="h-4 w-4" />
-                  Cancelar
-                </Button>
-              ) : null}
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {(['overview', 'timeline', 'artifacts', 'payload'] as EvidenceTab[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => props.setTab(item)}
-                  className={cn('h-9 cursor-pointer rounded-lg text-xs font-bold uppercase tracking-wider transition', props.tab === item ? 'bg-[#c7d957] text-[#151915] shadow-[0_8px_18px_rgba(199,217,87,0.14)]' : 'bg-[#0f1510]/70 text-[#f7f6f0] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-[#192219]/80')}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
+            {props.selectedRun && ['queued', 'running'].includes(props.selectedRun.status) ? (
+              <Button variant="destructive" size="sm" onClick={() => props.onCancel(props.selectedRun!)}>
+                <Square data-icon="inline-start" />
+                Cancelar
+              </Button>
+            ) : null}
+            {props.selectedRun && ['failed', 'error'].includes(props.selectedRun.status) ? (
+              <Button variant="outline" size="sm" onClick={() => props.onExplain(props.selectedRun)}>
+                <Bot data-icon="inline-start" />
+                Explicar falha
+              </Button>
+            ) : null}
           </div>
+        </CardHeader>
+      </Card>
 
-          <ScrollArea className="min-h-0 pr-3">
-            {props.tab === 'overview' ? <OverviewEvidence run={props.selectedRun} report={props.report} videos={props.videos} /> : null}
-            {props.tab === 'timeline' ? <TimelineEvidence report={props.report} /> : null}
-            {props.tab === 'artifacts' ? <ArtifactEvidence run={props.selectedRun} artifacts={props.artifacts} /> : null}
-            {props.tab === 'payload' ? <PayloadEvidence artifacts={props.payloads} /> : null}
-          </ScrollArea>
-        </div>
-      </Panel>
+      <Tabs value={props.tab} onValueChange={(value) => props.setTab(value as EvidenceTab)} className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
+        <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-4">
+          <TabsTrigger value="overview" className="min-w-0">Overview</TabsTrigger>
+          <TabsTrigger value="timeline" className="min-w-0">Timeline</TabsTrigger>
+          <TabsTrigger value="artifacts" className="min-w-0">Artifacts</TabsTrigger>
+          <TabsTrigger value="payload" className="min-w-0">Payload</TabsTrigger>
+        </TabsList>
+
+        <ScrollArea className="min-h-0 pr-3">
+          <TabsContent value="overview" className="m-0">
+            <EvidenceTabContent>
+              <OverviewEvidence run={props.selectedRun} report={props.report} videos={props.videos} />
+              {props.aiOutput ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="font-mono text-[11px] uppercase tracking-[0.2em] text-[#66705f]">AI review</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-[#0b100c] p-3 font-mono text-xs leading-5 text-[#f7f6f0]">{props.aiOutput}</pre>
+                  </CardContent>
+                </Card>
+              ) : null}
+              <OtherRuns runs={props.runs} selectedRun={props.selectedRun} onSelectRun={props.onSelectRun} />
+            </EvidenceTabContent>
+          </TabsContent>
+          <TabsContent value="timeline" className="m-0">
+            <EvidenceTabContent>
+              <TimelineEvidence report={props.report} />
+            </EvidenceTabContent>
+          </TabsContent>
+          <TabsContent value="artifacts" className="m-0">
+            <EvidenceTabContent>
+              <ArtifactEvidence run={props.selectedRun} artifacts={props.artifacts} />
+            </EvidenceTabContent>
+          </TabsContent>
+          <TabsContent value="payload" className="m-0">
+            <EvidenceTabContent>
+              <PayloadEvidence artifacts={props.payloads} />
+            </EvidenceTabContent>
+          </TabsContent>
+        </ScrollArea>
+      </Tabs>
     </div>
+  );
+}
+
+function EvidenceTabContent({ children }: { children: React.ReactNode }) {
+  return <div className="grid gap-4">{children}</div>;
+}
+
+function OtherRuns({ runs, selectedRun, onSelectRun }: { runs: Run[]; selectedRun?: Run; onSelectRun: (run: Run) => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="font-mono text-[11px] uppercase tracking-[0.2em] text-[#66705f]">Outras runs desta seleção</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-2">
+          {runs.slice(0, 5).map((run) => (
+            <button
+              key={run.id}
+              type="button"
+              onClick={() => onSelectRun(run)}
+              className={cn('grid cursor-pointer gap-2 rounded-lg border p-3 text-left transition', selectedRun?.id === run.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1] bg-white hover:border-[#9fb25a] hover:bg-[#f5f4ee]')}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <Status status={run.status} />
+                <span className="font-mono text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
+              </div>
+              <p className="font-mono text-xs text-[#66705f]">{shortId(run.id)} · {runSummary(run)}</p>
+            </button>
+          ))}
+          {runs.length === 0 ? <DarkEmpty text="Nenhuma run para esta suite neste ambiente." /> : null}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -687,10 +1752,10 @@ function OverviewEvidence({ run, report, videos }: { run?: Run; report: RunRepor
   if (!run) return <DarkEmpty text="Selecione uma run." />;
   return (
     <div className="grid gap-4">
-      <div className="rounded-xl bg-[#151d16]/70 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_14px_32px_rgba(0,0,0,0.18)]">
-        <p className="font-mono text-xs uppercase tracking-[0.24em] text-[#a9b19d]">Run</p>
-        <p className="mt-3 text-lg font-black">{run.status.toUpperCase()}</p>
-        <p className="mt-2 text-sm text-[#c6cdbd]">{runSummary(run)}</p>
+      <div className="rounded-lg border border-[#e1ddd1] bg-white p-4">
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#66705f]">Run</p>
+        <p className="mt-3 text-lg font-extrabold">{run.status.toUpperCase()}</p>
+        <p className="mt-2 text-sm text-[#66705f]">{runSummary(run)}</p>
         {run.error ? <pre className="mt-3 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{run.error}</pre> : null}
       </div>
       {videos[0] ? (
@@ -700,7 +1765,7 @@ function OverviewEvidence({ run, report, videos }: { run?: Run; report: RunRepor
       ) : null}
       <div className="grid gap-2">
         {(report?.results ?? []).slice(0, 4).map((result) => (
-          <div key={result.name} className="flex items-center justify-between gap-3 rounded-xl bg-[#151d16]/70 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
+          <div key={result.name} className="flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
             <span className="font-semibold">{result.name}</span>
             <Status status={result.status} />
           </div>
@@ -716,7 +1781,7 @@ function TimelineEvidence({ report }: { report: RunReport | null }) {
   return (
     <div className="grid gap-3">
       {results.map((result) => (
-        <div key={result.name} className="rounded-xl bg-[#151d16]/70 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_14px_32px_rgba(0,0,0,0.18)]">
+        <div key={result.name} className="rounded-lg border border-[#e1ddd1] bg-white p-4">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-bold">{result.name}</h3>
             <Status status={result.status} />
@@ -724,10 +1789,10 @@ function TimelineEvidence({ report }: { report: RunReport | null }) {
           {result.error ? <pre className="mt-3 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{result.error}</pre> : null}
           <div className="mt-3 grid gap-2">
             {(result.steps ?? []).map((step) => (
-              <div key={`${result.name}:${step.index}`} className="grid gap-2 rounded-lg bg-[#0f1510]/70 p-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] md:grid-cols-[84px_minmax(0,1fr)_70px]">
+              <div key={`${result.name}:${step.index}`} className="grid gap-2 rounded-md border border-[#e1ddd1] bg-[#fbfaf6] p-2 md:grid-cols-[84px_minmax(0,1fr)_70px]">
                 <Status status={step.status} />
-                <span className="break-words font-mono text-xs text-[#c6cdbd]">{step.name}</span>
-                <span className="font-mono text-xs text-[#a9b19d] md:text-right">{step.durationMs ?? 0}ms</span>
+                <span className="break-words font-mono text-xs text-[#1f241f]">{step.name}</span>
+                <span className="font-mono text-xs text-[#66705f] md:text-right">{step.durationMs ?? 0}ms</span>
                 {step.error ? <p className="text-xs text-[#ffb4a8] md:col-span-3">{step.error}</p> : null}
               </div>
             ))}
@@ -739,17 +1804,37 @@ function TimelineEvidence({ report }: { report: RunReport | null }) {
 }
 
 function ArtifactEvidence({ run, artifacts }: { run?: Run; artifacts: Artifact[] }) {
-  if (!run?.reportHtmlPath && artifacts.length === 0) return <DarkEmpty text="Artifacts indisponiveis." />;
+  const uniqueArtifacts = dedupeArtifacts(artifacts).filter((artifact) => artifact.path !== run?.reportHtmlPath);
+  const payloadGroups = groupHttpArtifacts(uniqueArtifacts);
+  const otherArtifacts = uniqueArtifacts.filter((artifact) => artifact.type !== 'request' && artifact.type !== 'response');
+  if (!run?.reportHtmlPath && uniqueArtifacts.length === 0) return <DarkEmpty text="Artifacts indisponiveis." />;
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-3">
       {run?.reportHtmlPath ? <ArtifactLink label="HTML report" path={run.reportHtmlPath} type="html" /> : null}
-      {artifacts.map((artifact) => <ArtifactLink key={`${artifact.type}:${artifact.path}`} label={artifact.label ?? shortPath(artifact.path)} path={artifact.path} type={artifact.type} />)}
+      {otherArtifacts.map((artifact) => <ArtifactLink key={`${artifact.type}:${artifact.path}`} label={artifact.label ?? shortPath(artifact.path)} path={artifact.path} type={artifact.type} />)}
+      {payloadGroups.map((group, index) => <HttpArtifactGroup key={`${group.request?.path ?? ''}:${group.response?.path ?? ''}:${index}`} group={group} index={index} />)}
+    </div>
+  );
+}
+
+function HttpArtifactGroup({ group, index }: { group: { request?: Artifact; response?: Artifact }; index: number }) {
+  const title = `HTTP payload ${index + 1}`;
+  return (
+    <div className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-semibold">{title}</span>
+        <Badge variant="outline">request / response</Badge>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {group.request ? <ArtifactLink label="Request" path={group.request.path} type="request" compact /> : null}
+        {group.response ? <ArtifactLink label="Response" path={group.response.path} type="response" compact /> : null}
+      </div>
     </div>
   );
 }
 
 function PayloadEvidence({ artifacts }: { artifacts: Artifact[] }) {
-  if (artifacts.length === 0) return <DarkEmpty text="Payload indisponivel para runs web." />;
+  if (artifacts.length === 0) return <DarkEmpty text="Payload indisponivel para runs frontend." />;
   return (
     <div className="grid gap-3">
       {artifacts.map((artifact) => <PayloadCard key={`${artifact.type}:${artifact.path}`} artifact={artifact} />)}
@@ -772,7 +1857,7 @@ function PayloadCard({ artifact }: { artifact: Artifact }) {
     return () => { active = false; };
   }, [artifact.path]);
   return (
-    <div className="rounded-xl bg-[#151d16]/70 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),0_14px_32px_rgba(0,0,0,0.18)]">
+    <div className="rounded-lg border border-[#e1ddd1] bg-white p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="font-bold">{artifact.label ?? artifact.type}</span>
         <Badge variant={artifact.type === 'response' ? 'secondary' : 'outline'}>{artifact.type}</Badge>
@@ -783,106 +1868,113 @@ function PayloadCard({ artifact }: { artifact: Artifact }) {
   );
 }
 
-function YamlEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const [scroll, setScroll] = useState({ top: 0, left: 0 });
-
+function WizardDialog(props: {
+  open: boolean;
+  step: number;
+  draft: WizardDraft;
+  busy: boolean;
+  onOpenChange: (open: boolean) => void;
+  onStepChange: (step: number) => void;
+  onDraftChange: (draft: WizardDraft) => void;
+  onFinish: () => Promise<void>;
+}) {
+  const labels = ['Projeto', 'Ambiente', 'Suite', 'Revisao'];
+  const canNext = props.step === 0
+    ? props.draft.projectName.trim()
+    : props.step === 1
+      ? props.draft.environmentName.trim() && props.draft.baseUrl.trim()
+      : props.step === 2
+        ? props.draft.suiteName.trim() && props.draft.specContent.trim()
+        : true;
   return (
-    <div className="relative min-h-[460px] overflow-hidden rounded-xl bg-[#0b100c]/95 font-mono text-xs leading-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_16px_42px_rgba(0,0,0,0.28)] focus-within:ring-2 focus-within:ring-[#c7d957] min-[1900px]:min-h-[540px]">
-      <pre
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words p-3 text-[#d8e0d2]"
-        style={{ transform: `translate(${-scroll.left}px, ${-scroll.top}px)` }}
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent
+        className="max-w-5xl"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
       >
-        {highlightYaml(value || ' ')}
-      </pre>
-      <textarea
-        aria-label="YAML da suite"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onScroll={(event) => setScroll({ top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft })}
-        spellCheck={false}
-        className="absolute inset-0 h-full w-full resize-none overflow-auto rounded-xl border-0 bg-transparent p-3 font-mono text-xs leading-5 text-transparent caret-[#c7d957] outline-none selection:bg-[#c7d957]/25"
-      />
-    </div>
-  );
-}
+        <DialogHeader>
+          <DialogTitle>Wizard de configuracao</DialogTitle>
+          <DialogDescription>Crie projeto, ambiente e primeira suite em fluxo unico.</DialogDescription>
+        </DialogHeader>
 
-function highlightYaml(value: string): React.ReactNode[] {
-  return value.split('\n').map((line, lineIndex) => (
-    <Fragment key={`${lineIndex}:${line}`}>
-      {highlightYamlLine(line, lineIndex)}
-      {'\n'}
-    </Fragment>
-  ));
-}
+        <div className="grid gap-4">
+          <div className="grid grid-cols-4 gap-2">
+            {labels.map((label, index) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => props.onStepChange(index)}
+                className={cn('rounded-lg border px-3 py-2 text-left text-sm font-semibold', props.step === index ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1] bg-white')}
+              >
+                <span className="font-mono text-[10px] text-[#66705f]">Passo {index + 1}</span>
+                <span className="block">{label}</span>
+              </button>
+            ))}
+          </div>
 
-function highlightYamlLine(line: string, lineIndex: number): React.ReactNode[] {
-  const commentIndex = line.indexOf('#');
-  const code = commentIndex >= 0 ? line.slice(0, commentIndex) : line;
-  const comment = commentIndex >= 0 ? line.slice(commentIndex) : '';
-  const match = code.match(/^(\s*)(-\s*)?([^:\n]+:)(.*)$/);
+          {props.step === 0 ? (
+            <div className="grid gap-3">
+              <Field label="Nome do projeto"><Input autoFocus value={props.draft.projectName} onChange={(event) => props.onDraftChange({ ...props.draft, projectName: event.target.value })} placeholder="Checkout SaaS" /></Field>
+              <Field label="Descricao"><Textarea value={props.draft.projectDescription} onChange={(event) => props.onDraftChange({ ...props.draft, projectDescription: event.target.value })} placeholder="Escopo, squad, produto ou modulo." /></Field>
+            </div>
+          ) : null}
 
-  if (!match) {
-    return [
-      <span key={`${lineIndex}:text`} className="text-[#d8e0d2]">{code}</span>,
-      comment ? <span key={`${lineIndex}:comment`} className="text-[#6f7b68]">{comment}</span> : null,
-    ].filter(Boolean) as React.ReactNode[];
-  }
+          {props.step === 1 ? (
+            <div className="grid gap-3">
+              <Field label="Nome do ambiente"><Input value={props.draft.environmentName} onChange={(event) => props.onDraftChange({ ...props.draft, environmentName: event.target.value })} placeholder="hml" /></Field>
+              <Field label="Base URL"><Input value={props.draft.baseUrl} onChange={(event) => props.onDraftChange({ ...props.draft, baseUrl: event.target.value })} placeholder="https://app.local" /></Field>
+              <Field label="Variaveis"><Textarea className="min-h-36 font-mono text-xs" value={props.draft.variables} onChange={(event) => props.onDraftChange({ ...props.draft, variables: event.target.value })} placeholder="TOKEN=abc" /></Field>
+            </div>
+          ) : null}
 
-  const [, indent, dash = '', key, rest] = match;
-  return [
-    indent ? <span key={`${lineIndex}:indent`} className="text-[#73806f]">{indent}</span> : null,
-    dash ? <span key={`${lineIndex}:dash`} className="text-[#f5c542]">{dash}</span> : null,
-    <span key={`${lineIndex}:key`} className="text-[#c7d957]">{key}</span>,
-    <Fragment key={`${lineIndex}:value`}>{highlightYamlValue(rest)}</Fragment>,
-    comment ? <span key={`${lineIndex}:comment`} className="text-[#6f7b68]">{comment}</span> : null,
-  ].filter(Boolean) as React.ReactNode[];
-}
+          {props.step === 2 ? (
+            <div className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                <Field label="Nome da suite"><Input value={props.draft.suiteName} onChange={(event) => props.onDraftChange({ ...props.draft, suiteName: event.target.value })} /></Field>
+                <Field label="Tipo">
+                  <Select value={props.draft.suiteType} onValueChange={(value) => props.onDraftChange({ ...props.draft, suiteType: value as Suite['type'] })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="api">API</SelectItem>
+                      <SelectItem value="web">Frontend</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+              <Field label="YAML"><YamlEditor value={props.draft.specContent} onChange={(value) => props.onDraftChange({ ...props.draft, specContent: value })} /></Field>
+            </div>
+          ) : null}
 
-function highlightYamlValue(value: string): React.ReactNode {
-  const leading = value.match(/^\s*/)?.[0] ?? '';
-  const raw = value.slice(leading.length);
-  if (!raw) return leading;
+          {props.step === 3 ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              <RunFact label="Projeto" value={props.draft.projectName || '-'} />
+              <RunFact label="Ambiente" value={props.draft.environmentName || '-'} />
+              <RunFact label="Suite" value={`${props.draft.suiteName || '-'} · ${suiteTypeLabel(props.draft.suiteType)}`} />
+            </div>
+          ) : null}
 
-  const token = raw.trim();
-  const trailing = raw.slice(token.length);
-  const color = yamlValueColor(token);
-  return (
-    <>
-      {leading}
-      <span className={color}>{token}</span>
-      {trailing}
-    </>
-  );
-}
-
-function yamlValueColor(token: string): string {
-  if (/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/i.test(token)) return 'text-[#79d7ff]';
-  if (/^(true|false|null|on|off)$/i.test(token)) return 'text-[#d5a7ff]';
-  if (/^-?\d+(\.\d+)?$/.test(token)) return 'text-[#f5c542]';
-  if (/^['"].*['"]$/.test(token)) return 'text-[#9de6b8]';
-  if (/^\/|^https?:\/\//.test(token)) return 'text-[#9de6b8]';
-  return 'text-[#f7f6f0]';
-}
-
-function Panel({ title, icon: Icon, className, children }: { title: string; icon: LucideIcon; className?: string; children: React.ReactNode }) {
-  return (
-    <section className={cn('rounded-2xl bg-[#111812]/78 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.055),inset_0_1px_0_rgba(255,255,255,0.08),0_22px_52px_rgba(0,0,0,0.26)] backdrop-blur', className)}>
-      <div className="mb-4 flex items-center justify-between gap-3 border-b border-white/8 pb-3">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-[#c7d957]" />
-          <h2 className="font-mono text-xs font-bold uppercase tracking-[0.26em] text-[#f7f6f0]">{title}</h2>
+          <div className="flex flex-wrap justify-between gap-2 border-t pt-4">
+            <Button variant="outline" onClick={() => props.onOpenChange(false)}>Fechar</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" disabled={props.step === 0} onClick={() => props.onStepChange(Math.max(0, props.step - 1))}>Voltar</Button>
+              {props.step < 3 ? (
+                <Button disabled={!canNext} onClick={() => props.onStepChange(Math.min(3, props.step + 1))}>Continuar</Button>
+              ) : (
+                <Button disabled={props.busy || !canNext} onClick={props.onFinish}>{props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}Criar workspace</Button>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-      {children}
-    </section>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="grid gap-1">
-      <span className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-[#a9b19d]">{label}</span>
+      <span className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">{label}</span>
       {children}
     </label>
   );
@@ -892,19 +1984,20 @@ function Status({ status }: { status: RunStatus }) {
   const passed = status === 'passed';
   const failed = status === 'failed' || status === 'error';
   const active = status === 'queued' || status === 'running';
+  const variant = passed ? 'success' : failed ? 'destructive' : active ? 'warning' : 'muted';
   return (
-    <span className={cn('inline-flex h-7 items-center gap-2 border px-2 font-mono text-[11px] font-bold uppercase', passed && 'border-[#31c48d] text-[#31c48d]', failed && 'border-[#ff7a66] text-[#ff7a66]', active && 'border-[#f5c542] text-[#f5c542]', !passed && !failed && !active && 'border-[#a9b19d] text-[#a9b19d]')}>
-      {passed ? <CheckCircle2 className="h-3.5 w-3.5" /> : failed ? <XCircle className="h-3.5 w-3.5" /> : active ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+    <Badge variant={variant} className="h-7 gap-2 font-mono uppercase">
+      {passed ? <CheckCircle2 data-icon="inline-start" /> : failed ? <XCircle data-icon="inline-start" /> : active ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Square data-icon="inline-start" />}
       {status}
-    </span>
+    </Badge>
   );
 }
 
 function Score({ label, value, tone }: { label: string; value: number; tone: 'good' | 'bad' | 'warn' }) {
   return (
-    <div className="border-r border-white/8 p-3 last:border-r-0">
-      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#a9b19d]">{label}</p>
-      <p className={cn('mt-2 text-2xl font-black', tone === 'good' && 'text-[#31c48d]', tone === 'bad' && 'text-[#ff7a66]', tone === 'warn' && 'text-[#f5c542]')}>{value}</p>
+    <div className="border-r border-[#e1ddd1] p-2.5 last:border-r-0">
+      <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#66705f]">{label}</p>
+      <p className={cn('mt-1 text-lg font-extrabold', tone === 'good' && 'text-[#1f7a50]', tone === 'bad' && 'text-[#b43c2e]', tone === 'warn' && 'text-[#8a6417]')}>{value}</p>
     </div>
   );
 }
@@ -913,27 +2006,52 @@ function Signal({ tone, text }: { tone: 'good' | 'bad'; text: string }) {
   return <div className={cn('rounded-lg border px-3 py-2 font-mono text-xs', tone === 'good' ? 'border-[#1d4f3a]/50 bg-[#e9f4d0] text-[#1d4f3a]' : 'border-[#b42318]/50 bg-[#fff0ed] text-[#9f1f16]')}>{text}</div>;
 }
 
-function ValidationBadge({ validation }: { validation: ValidationResult | null }) {
-  if (!validation) return <span className="font-mono text-xs text-[#a9b19d]">Spec aguardando validacao.</span>;
-  if (validation.valid) return <span className="inline-flex items-center gap-2 font-mono text-xs text-[#31c48d]"><ShieldCheck className="h-4 w-4" /> {validation.type} · {validation.tests} tests</span>;
-  return <span className="inline-flex min-w-0 items-center gap-2 break-words font-mono text-xs text-[#ff7a66]"><XCircle className="h-4 w-4 shrink-0" /> {validation.error}</span>;
-}
-
-function ArtifactLink({ label, path, type }: { label: string; path: string; type: string }) {
+function ArtifactLink({ label, path, type, compact }: { label: string; path: string; type: string; compact?: boolean }) {
   return (
-    <a className="flex items-center justify-between gap-3 rounded-xl bg-[#151d16]/70 p-3 text-sm shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition hover:bg-[#192219]/80 hover:shadow-[inset_0_0_0_1px_rgba(199,217,87,0.22)]" href={artifactUrl(path)} target="_blank">
+    <a className={cn('flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white text-sm transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', compact ? 'p-2' : 'p-3')} href={artifactUrl(path)} target="_blank">
       <span className="min-w-0 truncate font-semibold">{label}</span>
       <Badge variant="outline">{type}</Badge>
     </a>
   );
 }
 
-function RailIcon({ icon: Icon, active }: { icon: LucideIcon; active?: boolean }) {
-  return <div className={cn('grid h-11 w-11 place-items-center rounded-xl transition', active ? 'bg-[#1a241b]/80 text-[#c7d957] shadow-[inset_0_0_0_1px_rgba(199,217,87,0.24),0_10px_24px_rgba(0,0,0,0.16)]' : 'text-[#a9b19d] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]')}><Icon className="h-5 w-5" /></div>;
+function RailIcon({ icon: Icon, active, label, onClick }: { icon: LucideIcon; active?: boolean; label: string; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={onClick}
+          className={cn('grid h-10 w-10 cursor-pointer place-items-center rounded-lg transition hover:bg-white/10 hover:text-[#d7e35f]', active ? 'bg-white/10 text-[#d7e35f]' : 'text-[#9da596] ring-1 ring-white/10')}
+        >
+          <Icon className="h-5 w-5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={10}>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RailLink({ icon: Icon, active, label, href }: { icon: LucideIcon; active?: boolean; label: string; href: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Link
+          aria-label={label}
+          href={href}
+          className={cn('grid h-10 w-10 cursor-pointer place-items-center rounded-lg transition hover:bg-white/10 hover:text-[#d7e35f]', active ? 'bg-white/10 text-[#d7e35f]' : 'text-[#9da596] ring-1 ring-white/10')}
+        >
+          <Icon className="h-5 w-5" />
+        </Link>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={10}>{label}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 function DarkEmpty({ text }: { text: string }) {
-  return <div className="rounded-xl border border-dashed border-white/10 bg-[#0f1510]/70 p-6 text-center text-sm text-[#a9b19d]">{text}</div>;
+  return <div className="rounded-lg border border-dashed border-[#cfc9ba] bg-white p-6 text-center text-sm text-[#66705f]">{text}</div>;
 }
 
 function summarize(runs: Run[]) {
@@ -946,10 +2064,45 @@ function summarize(runs: Run[]) {
 }
 
 function collectArtifacts(report: RunReport | null): Artifact[] {
-  return [
+  return dedupeArtifacts([
     ...(report?.artifacts ?? []),
     ...((report?.results ?? []).flatMap((result) => result.artifacts ?? [])),
-  ];
+  ]);
+}
+
+function dedupeArtifacts(artifacts: Artifact[]): Artifact[] {
+  const seen = new Set<string>();
+  return artifacts.filter((artifact) => {
+    const key = `${artifact.type}:${artifact.path}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function groupHttpArtifacts(artifacts: Artifact[]): Array<{ request?: Artifact; response?: Artifact }> {
+  const groups: Array<{ request?: Artifact; response?: Artifact }> = [];
+  for (const artifact of artifacts) {
+    if (artifact.type === 'request') {
+      groups.push({ request: artifact });
+      continue;
+    }
+    if (artifact.type === 'response') {
+      let openGroup: { request?: Artifact; response?: Artifact } | undefined;
+      for (let index = groups.length - 1; index >= 0; index -= 1) {
+        if (groups[index].request && !groups[index].response) {
+          openGroup = groups[index];
+          break;
+        }
+      }
+      if (openGroup) {
+        openGroup.response = artifact;
+      } else {
+        groups.push({ response: artifact });
+      }
+    }
+  }
+  return groups;
 }
 
 async function api<T>(apiPath: string, options: RequestInit = {}): Promise<T> {
@@ -961,14 +2114,6 @@ async function api<T>(apiPath: string, options: RequestInit = {}): Promise<T> {
   if (!response.ok) throw new Error(await response.text());
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
-}
-
-function parseVars(input: string): Record<string, string> {
-  return Object.fromEntries(input.split('\n').filter(Boolean).map((line) => {
-    const index = line.indexOf('=');
-    if (index === -1) return [line.trim(), ''];
-    return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
-  }));
 }
 
 function runSummary(run: Run): string {
@@ -990,8 +2135,20 @@ function shortPath(value: string): string {
   return value.split('/').slice(-2).join('/');
 }
 
+function suiteTypeLabel(type: Suite['type']): string {
+  return type === 'web' ? 'Frontend' : 'API';
+}
+
 function artifactUrl(path: string): string {
   return `${apiBase}/artifacts?path=${encodeURIComponent(path)}`;
+}
+
+function parseVars(input: string): Record<string, string> {
+  return Object.fromEntries(input.split('\n').filter(Boolean).map((line) => {
+    const index = line.indexOf('=');
+    if (index === -1) return [line.trim(), ''];
+    return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
+  }));
 }
 
 function messageOf(error: unknown): string {
