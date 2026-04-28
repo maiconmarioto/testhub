@@ -222,7 +222,7 @@ TESTHUB_VIEWER_GROUPS=readers
 
 CLI/MCP:
 
-- Em auth local, login retorna um token de sessao. Use como bearer ou exporte `TESTHUB_SESSION_TOKEN=<token>`.
+- Em auth local, login retorna um token de sessao. Use como bearer; MCP tambem aceita `TESTHUB_SESSION_TOKEN=<token>`.
 - Em modo token, exporte `TESTHUB_AUTH_MODE=token` e `TESTHUB_TOKEN=secret`; use `authorization: Bearer secret`.
 
 Permissões:

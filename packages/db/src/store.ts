@@ -152,6 +152,7 @@ export interface Store {
   getEnvironmentVariables(environmentId: string): Promise<Record<string, string>> | Record<string, string>;
   getAiConnection(connectionId?: string): Promise<AiConnection | undefined> | AiConnection | undefined;
   createUser(input: { email: string; name?: string; passwordHash: string }): Promise<User> | User;
+  hasActiveUsers(): Promise<boolean> | boolean;
   findUserByEmail(email: string): Promise<User | undefined> | User | undefined;
   findUserById(id: string): Promise<User | undefined> | User | undefined;
   updateUserPassword(userId: string, passwordHash: string): Promise<User | undefined> | User | undefined;
@@ -267,6 +268,10 @@ export class JsonStore {
     db.users.push(user);
     this.write(db);
     return user;
+  }
+
+  hasActiveUsers(): boolean {
+    return this.read().users.some((user) => user.status === 'active');
   }
 
   findUserByEmail(email: string): User | undefined {

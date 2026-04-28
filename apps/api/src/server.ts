@@ -190,7 +190,7 @@ export function createApp() {
 
   app.addHook('preHandler', async (req, reply) => {
     if (isPublicRoute(req.url)) return;
-    if (authMode() === 'local' && (await getDb()).users.length === 0) {
+    if (authMode() === 'local' && !(await store.hasActiveUsers())) {
       return reply.code(401).send({ error: 'SetupRequired', setupRequired: true });
     }
     const actor = await actorFromRequest(req);
@@ -252,7 +252,7 @@ export function createApp() {
 
   app.get('/api/system/security', { schema: { tags: ['system'], summary: 'Security status' } }, async () => {
     const status = systemSecurityStatus();
-    const localUsers = (await getDb()).users.length > 0;
+    const localUsers = await store.hasActiveUsers();
     return {
       ...status,
       auth: {
@@ -270,7 +270,7 @@ export function createApp() {
       password: passwordSchema,
       organizationName: z.string().min(1).max(200),
     }).parse(req.body);
-    if ((await getDb()).users.length > 0 && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
+    if ((await store.hasActiveUsers()) && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
       return reply.code(403).send({ error: 'Cadastro publico desabilitado' });
     }
     const existing = await store.findUserByEmail(input.email);

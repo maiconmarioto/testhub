@@ -109,6 +109,11 @@ export class PgStore implements Store {
     return rowToUser(user);
   }
 
+  async hasActiveUsers(): Promise<boolean> {
+    const [user] = await this.db.select({ id: users.id }).from(users).where(eq(users.status, 'active')).limit(1);
+    return Boolean(user);
+  }
+
   async findUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await this.db.select().from(users).where(and(eq(sql<string>`lower(${users.email})`, normalizeEmail(email)), eq(users.status, 'active')));
     return user ? rowToUser(user) : undefined;
