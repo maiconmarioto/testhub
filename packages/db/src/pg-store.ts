@@ -100,7 +100,12 @@ export class PgStore implements Store {
       createdAt: now,
       updatedAt: now,
     };
-    await this.db.insert(users).values(user);
+    try {
+      await this.db.insert(users).values(user);
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new Error('Email ja cadastrado');
+      throw error;
+    }
     return rowToUser(user);
   }
 
@@ -123,29 +128,28 @@ export class PgStore implements Store {
   }
 
   async createOrganization(input: { name: string; slug?: string }): Promise<Organization> {
-    const now = new Date();
-    const slug = await this.nextOrganizationSlug(input.slug ?? input.name);
-    const organization = {
-      id: randomUUID(),
-      name: input.name,
-      slug,
-      status: 'active',
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.db.insert(organizations).values(organization);
-    return rowToOrganization(organization);
-  }
-
-  private async nextOrganizationSlug(value: string): Promise<string> {
-    const base = slugify(value);
-    let slug = base;
-    let suffix = 2;
-    while ((await this.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, slug))).length > 0) {
-      slug = `${base}-${suffix}`;
-      suffix += 1;
+    const baseSlug = slugify(input.slug ?? input.name);
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      const now = new Date();
+      const slug = attempt === 1 ? baseSlug : `${baseSlug}-${attempt}`;
+      const [existing] = await this.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, slug));
+      if (existing) continue;
+      const organization = {
+        id: randomUUID(),
+        name: input.name,
+        slug,
+        status: 'active',
+        createdAt: now,
+        updatedAt: now,
+      };
+      try {
+        await this.db.insert(organizations).values(organization);
+        return rowToOrganization(organization);
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+      }
     }
-    return slug;
+    throw new Error('Slug de organizacao ja cadastrado');
   }
 
   async listOrganizationsForUser(userId: string): Promise<Organization[]> {
@@ -169,7 +173,15 @@ export class PgStore implements Store {
       createdAt: now,
       updatedAt: now,
     };
-    await this.db.insert(memberships).values(membership);
+    try {
+      await this.db.insert(memberships).values(membership);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const duplicate = await this.findMembership(input.userId, input.organizationId);
+        if (duplicate) return duplicate;
+      }
+      throw error;
+    }
     return rowToMembership(membership);
   }
 
@@ -200,7 +212,12 @@ export class PgStore implements Store {
       createdAt: new Date(),
       lastUsedAt: null,
     };
-    await this.db.insert(sessions).values(session);
+    try {
+      await this.db.insert(sessions).values(session);
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new Error('Sessao ja cadastrada');
+      throw error;
+    }
     return rowToSession(session);
   }
 
@@ -226,7 +243,12 @@ export class PgStore implements Store {
       usedAt: null,
       createdAt: new Date(),
     };
-    await this.db.insert(passwordResetTokens).values(resetToken);
+    try {
+      await this.db.insert(passwordResetTokens).values(resetToken);
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new Error('Token de reset ja cadastrado');
+      throw error;
+    }
     return rowToPasswordResetToken(resetToken);
   }
 
@@ -519,4 +541,11 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'team';
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  if ('code' in error && error.code === '23505') return true;
+  if ('cause' in error) return isUniqueViolation(error.cause);
+  return false;
 }
