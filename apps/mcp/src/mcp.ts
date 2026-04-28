@@ -22,11 +22,9 @@ const server = new McpServer({
 const commandCatalog = {
   project: ['testhub_list_projects', 'testhub_create_project', 'testhub_get_project', 'testhub_update_project', 'testhub_archive_project'],
   environment: ['testhub_list_environments', 'testhub_create_environment', 'testhub_update_environment', 'testhub_archive_environment', 'testhub_get_environment', 'testhub_list_envs', 'testhub_create_env', 'list_environments', 'create_environment', 'get_environment'],
-  suite: ['testhub_list_suites', 'testhub_create_suite', 'testhub_get_suite', 'testhub_update_suite', 'testhub_validate_spec', 'testhub_import_openapi', 'testhub_get_spec_examples'],
+  suite: ['testhub_list_suites', 'testhub_create_suite', 'testhub_get_suite', 'testhub_update_suite', 'testhub_validate_spec', 'testhub_get_spec_examples'],
   flow: ['testhub_list_flows', 'testhub_get_flow', 'testhub_create_flow', 'testhub_update_flow', 'testhub_archive_flow'],
   run: ['testhub_get_test_context', 'testhub_list_runs', 'testhub_run_suite', 'testhub_get_run_status', 'testhub_wait_run', 'testhub_get_run_report', 'testhub_get_artifacts', 'testhub_cancel_run'],
-  ai: ['testhub_list_ai_connections', 'testhub_upsert_ai_connection', 'testhub_explain_failure'],
-  maintenance: ['testhub_cleanup'],
 };
 
 const specExamples = {
@@ -178,7 +176,6 @@ Use TestHub as a test-management and execution platform. Do not guess state. Alw
 - Do not run tests without confirming project, environment, and suite match the target.
 - API assertion failures should be treated as failed. Infra/config/runtime issues should be treated as error.
 - Web/app tests should produce recording artifacts by default. Backend/API tests should expose request, response, payload, and report artifacts.
-- AI is optional. Use testhub_explain_failure only when an enabled AI connection exists or user asks for AI review.
 - Variables in specs use environment variables. Keep secrets inside environments, not YAML when possible.
 - For long web journeys, prefer flows + use + with instead of duplicating login/setup steps.
 - For organization-wide reuse, prefer Flow Library refs like use: auth.login. Use testhub_create_flow/update_flow to maintain shared flows.
@@ -221,8 +218,6 @@ ${specExamples['web-library-flow']}
 - Suite: ${commandCatalog.suite.join(', ')}
 - Flow Library: ${commandCatalog.flow.join(', ')}
 - Run: ${commandCatalog.run.join(', ')}
-- AI: ${commandCatalog.ai.join(', ')}
-- Maintenance: ${commandCatalog.maintenance.join(', ')}
 `;
 
 server.registerResource('testhub-guide', 'testhub://guide', {
@@ -488,14 +483,6 @@ server.tool('testhub_archive_flow', 'Arquiva flow reutilizavel por soft delete',
   return text({ archived: true, flowId });
 });
 
-server.tool('testhub_import_openapi', 'Importa OpenAPI JSON como suite API basica', {
-  projectId: z.string(),
-  name: z.string(),
-  spec: z.record(z.unknown()),
-}, async (input) => {
-  return text(await api('/api/import/openapi', { method: 'POST', body: JSON.stringify(input) }));
-});
-
 server.tool('testhub_list_runs', 'Lista runs, opcionalmente por projeto', {
   projectId: z.string().optional(),
 }, async ({ projectId }) => {
@@ -569,35 +556,6 @@ server.tool('testhub_get_artifacts', 'Lista artifacts do report da run', {
     runArtifacts: normalize(report.artifacts),
     testArtifacts: report.results?.flatMap((result) => normalize(result.artifacts)) ?? [],
   });
-});
-
-server.tool('testhub_list_ai_connections', 'Lista AI connections mascaradas', {}, async () => {
-  return text(await api('/api/ai/connections'));
-});
-
-server.tool('testhub_upsert_ai_connection', 'Cria ou atualiza AI connection opcional', {
-  id: z.string().optional(),
-  name: z.string(),
-  provider: z.enum(['openrouter', 'openai', 'anthropic']),
-  apiKey: z.string().optional(),
-  model: z.string(),
-  baseUrl: z.string().optional(),
-  enabled: z.boolean().default(true),
-}, async (input) => {
-  return text(await api('/api/ai/connections', { method: 'POST', body: JSON.stringify(input) }));
-});
-
-server.tool('testhub_explain_failure', 'Explica falha usando AI connection configurada no TestHub', {
-  connectionId: z.string().optional(),
-  context: z.record(z.unknown()),
-}, async (input) => {
-  return text(await api('/api/ai/explain-failure', { method: 'POST', body: JSON.stringify(input) }));
-});
-
-server.tool('testhub_cleanup', 'Arquiva runs antigas conforme politica de cleanup', {
-  days: z.number().int().min(1).default(30),
-}, async (input) => {
-  return text(await api('/api/cleanup', { method: 'POST', body: JSON.stringify(input) }));
 });
 
 async function getProjectContext(projectId: string): Promise<unknown> {

@@ -73,7 +73,7 @@ export async function runWebSpec(
               const currentIndex = stepIndex++;
               const stepStarted = Date.now();
               try {
-                const output = await runWebStep(page!, spec.baseUrl, step);
+                const output = await runWebStep(page!, spec.baseUrl, step, test.timeoutMs ?? spec.defaults?.timeoutMs ?? 10_000);
                 if (output?.extract) {
                   runtime[output.extract.name] = output.extract.value;
                   frame[output.extract.name] = output.extract.value;
@@ -170,7 +170,7 @@ export async function runWebSpec(
   return results;
 }
 
-async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep): Promise<{ extract?: { name: string; value: string } } | void> {
+async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep, timeoutMs: number): Promise<{ extract?: { name: string; value: string } } | void> {
   if ('goto' in step) {
     if (!baseUrl && !/^https?:\/\//i.test(step.goto)) {
       throw new Error('baseUrl ausente. Use baseUrl no spec ou --base-url.');
@@ -218,35 +218,35 @@ async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep
   }
   if ('expectText' in step) {
     const target = typeof step.expectText === 'string' ? page.getByText(step.expectText) : locator(page, step.expectText);
-    await expect(target).toBeVisible();
+    await expect(target).toBeVisible({ timeout: timeoutMs });
     return;
   }
   if ('expectUrlContains' in step) {
-    await expect(page).toHaveURL(new RegExp(escapeRegExp(step.expectUrlContains)));
+    await expect(page).toHaveURL(new RegExp(escapeRegExp(step.expectUrlContains)), { timeout: timeoutMs });
     return;
   }
   if ('expectVisible' in step) {
-    await expect(locator(page, step.expectVisible)).toBeVisible();
+    await expect(locator(page, step.expectVisible)).toBeVisible({ timeout: timeoutMs });
     return;
   }
   if ('expectHidden' in step) {
-    await expect(locator(page, step.expectHidden)).toBeHidden();
+    await expect(locator(page, step.expectHidden)).toBeHidden({ timeout: timeoutMs });
     return;
   }
   if ('expectAttribute' in step) {
     if (!step.expectAttribute.attribute) throw new Error('expectAttribute.attribute ausente');
     if (step.expectAttribute.value === undefined) throw new Error('expectAttribute.value ausente');
-    await expect(locator(page, step.expectAttribute)).toHaveAttribute(step.expectAttribute.attribute, step.expectAttribute.value);
+    await expect(locator(page, step.expectAttribute)).toHaveAttribute(step.expectAttribute.attribute, step.expectAttribute.value, { timeout: timeoutMs });
     return;
   }
   if ('expectValue' in step) {
     if (step.expectValue.value === undefined) throw new Error('expectValue.value ausente');
-    await expect(locator(page, step.expectValue)).toHaveValue(step.expectValue.value);
+    await expect(locator(page, step.expectValue)).toHaveValue(step.expectValue.value, { timeout: timeoutMs });
     return;
   }
   if ('expectCount' in step) {
     if (step.expectCount.count === undefined) throw new Error('expectCount.count ausente');
-    await expect(locator(page, step.expectCount)).toHaveCount(step.expectCount.count);
+    await expect(locator(page, step.expectCount)).toHaveCount(step.expectCount.count, { timeout: timeoutMs });
     return;
   }
   if ('uploadFile' in step) {
@@ -255,7 +255,7 @@ async function runWebStep(page: Page, baseUrl: string | undefined, step: WebStep
     return;
   }
   if ('extract' in step) {
-    const value = await extractValue(page, step.extract);
+    const value = await extractValue(page, step.extract, timeoutMs);
     return { extract: { name: step.extract.as, value } };
   }
 }
@@ -288,15 +288,15 @@ function locator(page: Page, input: SelectorInput): Locator {
   throw new Error('selector requer selector, text ou by');
 }
 
-async function extractValue(page: Page, input: Extract<WebStep, { extract: unknown }>['extract']): Promise<string> {
+async function extractValue(page: Page, input: Extract<WebStep, { extract: unknown }>['extract'], timeoutMs: number): Promise<string> {
   if (input.property === 'url') return page.url();
   if (!input.from) throw new Error(`extract.${input.property} requer from`);
   const target = locator(page, input.from);
-  if (input.property === 'text') return (await target.textContent()) ?? '';
-  if (input.property === 'value') return await target.inputValue();
+  if (input.property === 'text') return (await target.textContent({ timeout: timeoutMs })) ?? '';
+  if (input.property === 'value') return await target.inputValue({ timeout: timeoutMs });
   if (input.property === 'attribute') {
     if (!input.attribute) throw new Error('extract.attribute requer attribute');
-    return (await target.getAttribute(input.attribute)) ?? '';
+    return (await target.getAttribute(input.attribute, { timeout: timeoutMs })) ?? '';
   }
   return '';
 }

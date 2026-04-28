@@ -18,7 +18,10 @@ export async function runSpec(options: RunOptions): Promise<RunReport> {
     ...loadEnvFile(options.envFile),
   };
 
-  const parsed = parseSpecFile(options.specPath, { externalFlows: options.externalFlows });
+  const externalFlows = options.externalFlows
+    ? resolveVariables(options.externalFlows, env, { allowMissing: true })
+    : undefined;
+  const parsed = parseSpecFile(options.specPath, { externalFlows });
   const withOverride = applyBaseUrlOverride(parsed, options.baseUrl);
   const spec = resolveVariables(withOverride, env, { allowMissing: true });
   const filteredSpec = filterSpec(spec, options.tags);
@@ -26,7 +29,7 @@ export async function runSpec(options: RunOptions): Promise<RunReport> {
   const results =
     filteredSpec.type === 'api'
       ? await runApiSpec(filteredSpec, runDir)
-      : await runWebSpec(filteredSpec, runDir, { headed: options.headed, externalFlows: options.externalFlows });
+      : await runWebSpec(filteredSpec, runDir, { headed: options.headed, externalFlows });
 
   const finishedAt = new Date();
   return createRunReport({

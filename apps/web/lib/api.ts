@@ -1,4 +1,6 @@
-export const apiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localhost:4321';
+const configuredApiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localhost:4321';
+
+export const apiBase = resolveApiBase(configuredApiBase);
 
 const authPaths = ['/login', '/register', '/forgot-password', '/reset-password'];
 
@@ -8,14 +10,10 @@ type ApiRequestInit = RequestInit & {
 
 export async function api<T>(apiPath: string, options: ApiRequestInit = {}): Promise<T> {
   const { redirectOnUnauthorized = true, ...fetchOptions } = options;
-  const headers = new Headers(fetchOptions.headers);
-  const token = browserToken() ?? process.env.NEXT_PUBLIC_TESTHUB_TOKEN;
+  const headers = authHeaders(fetchOptions.headers);
 
   if (fetchOptions.body && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
-  }
-  if (token && !headers.has('authorization')) {
-    headers.set('authorization', `Bearer ${token}`);
   }
 
   const response = await fetch(`${apiBase}${apiPath}`, {
@@ -33,9 +31,25 @@ export async function api<T>(apiPath: string, options: ApiRequestInit = {}): Pro
   return response.json() as Promise<T>;
 }
 
+export function authHeaders(init?: HeadersInit): Headers {
+  const headers = new Headers(init);
+  const token = browserToken() ?? process.env.NEXT_PUBLIC_TESTHUB_TOKEN;
+  if (token && !headers.has('authorization')) {
+    headers.set('authorization', `Bearer ${token}`);
+  }
+  return headers;
+}
+
 function browserToken(): string | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.localStorage.getItem('testhub.token') ?? undefined;
+}
+
+function resolveApiBase(value: string): string {
+  if (typeof window === 'undefined' || window.location.hostname !== 'host.docker.internal') return value;
+  return value
+    .replace('://localhost:', '://host.docker.internal:')
+    .replace('://127.0.0.1:', '://host.docker.internal:');
 }
 
 function shouldRedirectToLogin(): boolean {

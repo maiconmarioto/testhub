@@ -20,7 +20,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { api, apiBase } from '@/lib/api';
+import { api, apiBase, authHeaders } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 type Project = { id: string; name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean };
@@ -98,7 +98,7 @@ type RunReport = {
     durationMs?: number;
     error?: string;
     artifacts?: Artifact[];
-    steps?: Array<{ index?: number; name: string; status: RunStatus; error?: string; durationMs?: number }>;
+    steps?: Array<{ index?: number; name: string; status: RunStatus; error?: string; durationMs?: number; artifacts?: Artifact[] }>;
   }>;
 };
 type EvidenceTab = 'overview' | 'timeline' | 'artifacts' | 'payload';
@@ -198,6 +198,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [approvedAiPatch, setApprovedAiPatch] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [suitePreviewOpen, setSuitePreviewOpen] = useState(false);
+  const [suitePreview, setSuitePreview] = useState<SuiteWithContent | null>(null);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardDraft, setWizardDraft] = useState({
     projectName: '',
@@ -428,6 +430,24 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       setTab('overview');
       setValidation(null);
     }, `Editando ${suite.name}.`);
+  }
+
+  async function openSuitePreview() {
+    if (!selectedSuite) {
+      setError('Selecione uma suite para visualizar.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const loaded = await api<SuiteWithContent>(`/api/suites/${selectedSuite.id}`);
+      setSuitePreview(loaded);
+      setSuitePreviewOpen(true);
+    } catch (nextError) {
+      setError(messageOf(nextError));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function newSuiteDraft() {
@@ -917,7 +937,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                   setSelectedRunId(run.id);
                   setTab('overview');
                 }}
-                onOpenSuites={() => window.location.assign(projectId ? `/suites?project=${projectId}` : '/suites')}
+                onOpenSuites={openSuitePreview}
                 onOpenEnvironments={() => window.location.assign(projectId ? `/projects?project=${projectId}` : '/projects')}
                 onOpenEvidence={() => setOpenSheet('evidence')}
               />
@@ -1019,7 +1039,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
             )}
           </div>
           <Sheet open={openSheet === 'evidence'} onOpenChange={(open) => setOpenSheet(open ? 'evidence' : null)}>
-            <SheetContent className="w-full overflow-hidden p-0 sm:max-w-xl md:max-w-2xl">
+            <SheetContent className="w-full overflow-hidden p-0 sm:max-w-2xl md:max-w-3xl lg:max-w-5xl">
               <SheetHeader className="border-b px-5 py-4 pr-12">
                 <SheetTitle className="text-lg">Evidence</SheetTitle>
                 <SheetDescription>{selectedRun ? `${shortId(selectedRun.id)} · ${runSummary(selectedRun)}` : 'Selecione uma run para ver evidências.'}</SheetDescription>
@@ -1059,6 +1079,12 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
             onStepChange={setWizardStep}
             onDraftChange={setWizardDraft}
             onFinish={finishWizard}
+          />
+          <SuitePreviewDialog
+            open={suitePreviewOpen}
+            suite={suitePreview}
+            projectId={projectId}
+            onOpenChange={setSuitePreviewOpen}
           />
         </section>
       </div>
@@ -1703,8 +1729,12 @@ function SettingsWorkspace(props: {
                 <Field label="Nome"><Input value={props.flowDraft.name} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, name: event.target.value })} placeholder="login" /></Field>
               </div>
               <Field label="Descricao"><Input value={props.flowDraft.description} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, description: event.target.value })} placeholder="Opcional" /></Field>
-              <Field label="Params YAML"><Textarea className="min-h-24 font-mono text-xs" value={props.flowDraft.params} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, params: event.target.value })} /></Field>
-              <Field label="Steps YAML"><Textarea className="min-h-72 font-mono text-xs" value={props.flowDraft.steps} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, steps: event.target.value })} /></Field>
+              <Field label="Params YAML">
+                <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} height="140px" />
+              </Field>
+              <Field label="Steps YAML">
+                <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, steps: value })} validateSpec={false} height="360px" />
+              </Field>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={props.onSaveFlow} disabled={props.busy || !props.canWrite || !props.flowDraft.namespace.trim() || !props.flowDraft.name.trim() || !props.flowDraft.steps.trim()}>Salvar flow</Button>
                 <Button variant="outline" onClick={props.onNewFlow}>Novo</Button>
@@ -2196,11 +2226,11 @@ headers:
       ),
     },
     {
-      id: 'mcp-ai',
+      id: 'mcp',
       group: 'Automacao',
-      title: 'MCP e IA',
-      description: 'Operar TestHub por agentes e explicar falhas.',
-      tags: ['MCP', 'PAT', 'AI', 'agent'],
+      title: 'MCP',
+      description: 'Criar, validar e executar suites YAML por agentes.',
+      tags: ['MCP', 'PAT', 'YAML', 'agent'],
       content: (
         <div className="grid gap-4">
           <DocPanel title="Configurar MCP em agente">
@@ -2230,6 +2260,7 @@ headers:
 9. testhub_get_run_report`} />
           </DocPanel>
           <DocCallout title="IA" text="A IA nao executa testes. Ela usa report, timeline, artifacts e redaction para explicar falhas ou sugerir ajustes." />
+          <DocCallout title="Escopo do MCP" text="O MCP nao gerencia usuarios, tokens, OpenAPI import, cleanup ou AI connections. Essas operacoes ficam na aplicacao. O MCP fica focado em projetos, ambientes, Flow Library, suites YAML, runs e evidence." />
         </div>
       ),
     },
@@ -2258,6 +2289,7 @@ beforeEach: []
 afterEach: []
 flows: {}
 tests: []`} />
+            <DocCallout title="Timeout" text="`defaults.timeoutMs` controla navegacao, clicks, fills, expects e extract. Para telas lentas, use valores maiores como `60000` ou `90000`; tambem e possivel sobrescrever por teste com `timeoutMs`." />
           </DocPanel>
           <DocPanel title="Erros comuns">
             <div className="grid gap-2 text-sm text-[#4b5348]">
@@ -3543,7 +3575,31 @@ function EnvironmentMenu(props: {
   );
 }
 
-function YamlEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function SuitePreviewDialog({ open, suite, projectId, onOpenChange }: { open: boolean; suite: SuiteWithContent | null; projectId: string; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>{suite?.name ?? 'Suite'}</DialogTitle>
+          <DialogDescription>{suite ? `${suiteTypeLabel(suite.type)} · ${shortId(suite.id)}` : 'YAML readonly da suite selecionada.'}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <YamlEditor value={suite?.specContent ?? ''} onChange={() => undefined} readOnly height="520px" />
+          <div className="flex justify-end gap-2 border-t pt-4">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
+            {suite ? (
+              <Button asChild>
+                <Link href={`/suites?project=${projectId}&suite=${suite.id}`}>Alterar</Link>
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, height = 'calc(100vh - 410px)' }: { value: string; onChange: (value: string) => void; readOnly?: boolean; validateSpec?: boolean; height?: string }) {
   const monacoRef = useRef<any>(null);
   const editorRef = useRef<any>(null);
   useEffect(() => {
@@ -3551,13 +3607,13 @@ function YamlEditor({ value, onChange }: { value: string; onChange: (value: stri
     const editor = editorRef.current;
     const model = editor?.getModel?.();
     if (!monaco || !model) return;
-    monaco.editor.setModelMarkers(model, 'testhub-yaml', yamlDiagnostics(value, monaco));
-  }, [value]);
+    monaco.editor.setModelMarkers(model, 'testhub-yaml', validateSpec ? yamlDiagnostics(value, monaco) : yamlSyntaxDiagnostics(value, monaco));
+  }, [value, validateSpec]);
 
   return (
-    <div className="min-h-[calc(100vh-410px)] overflow-hidden rounded-md border border-input bg-[#0b100c]">
+    <div className="overflow-hidden rounded-md border border-input bg-[#0b100c]" style={{ height }}>
       <MonacoEditor
-        height="calc(100vh - 410px)"
+        height={height}
         defaultLanguage="yaml"
         value={value}
         onChange={(nextValue) => onChange(nextValue ?? '')}
@@ -3581,7 +3637,7 @@ function YamlEditor({ value, onChange }: { value: string; onChange: (value: stri
           editorRef.current = editor;
           monacoRef.current = monaco;
           const model = editor.getModel();
-          if (model) monaco.editor.setModelMarkers(model, 'testhub-yaml', yamlDiagnostics(value, monaco));
+          if (model) monaco.editor.setModelMarkers(model, 'testhub-yaml', validateSpec ? yamlDiagnostics(value, monaco) : yamlSyntaxDiagnostics(value, monaco));
         }}
         options={{
           minimap: { enabled: false },
@@ -3594,11 +3650,27 @@ function YamlEditor({ value, onChange }: { value: string; onChange: (value: stri
           automaticLayout: true,
           glyphMargin: true,
           quickSuggestions: true,
+          readOnly,
+          renderValidationDecorations: readOnly ? 'off' : 'on',
         }}
         theme="vs-dark"
       />
     </div>
   );
+}
+
+function yamlSyntaxDiagnostics(source: string, monaco: any) {
+  const markers: Array<ReturnType<typeof marker>> = [];
+  try {
+    const doc = YAML.parseDocument(source);
+    for (const error of doc.errors) {
+      const line = lineFromOffset(source, error.pos?.[0] ?? 0);
+      markers.push(marker(monaco, line, error.message, monaco.MarkerSeverity.Error));
+    }
+  } catch (error) {
+    markers.push(marker(monaco, 1, messageOf(error), monaco.MarkerSeverity.Error));
+  }
+  return markers;
 }
 
 function yamlDiagnostics(source: string, monaco: any) {
@@ -3684,7 +3756,9 @@ function EvidenceColumn(props: {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 font-mono uppercase">Sem run</Badge>}
-              <CardTitle className="mt-3 truncate text-2xl font-extrabold">{props.selectedSuite?.name ?? 'Sem run'}</CardTitle>
+              <CardTitle className="mt-3 max-w-full truncate text-2xl font-extrabold" title={props.selectedSuite?.name ?? 'Sem run'}>
+                {props.selectedSuite?.name ?? 'Sem run'}
+              </CardTitle>
               <CardDescription className="break-all font-mono">{props.selectedEnv?.baseUrl ?? 'target ausente'}</CardDescription>
             </div>
             {props.selectedRun && ['queued', 'running'].includes(props.selectedRun.status) ? (
@@ -3745,7 +3819,7 @@ function EvidenceColumn(props: {
           </TabsContent>
           <TabsContent value="artifacts" className="m-0">
             <EvidenceTabContent>
-              <ArtifactEvidence run={props.selectedRun} artifacts={props.artifacts} />
+              <ArtifactEvidence run={props.selectedRun} artifacts={props.artifacts} report={props.report} />
             </EvidenceTabContent>
           </TabsContent>
           <TabsContent value="payload" className="m-0">
@@ -3792,29 +3866,72 @@ function OtherRuns({ runs, selectedRun, onSelectRun }: { runs: Run[]; selectedRu
   );
 }
 
-function OverviewEvidence({ run, report, videos }: { run?: Run; report: RunReport | null; videos: Artifact[] }) {
+function OverviewEvidence({ run, report }: { run?: Run; report: RunReport | null; videos: Artifact[] }) {
   if (!run) return <DarkEmpty text="Selecione uma run." />;
+  const results = report?.results ?? [];
   return (
     <div className="grid gap-4">
       <div className="rounded-lg border border-[#e1ddd1] bg-white p-4">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#66705f]">Run</p>
-        <p className="mt-3 text-lg font-extrabold">{run.status.toUpperCase()}</p>
-        <p className="mt-2 text-sm text-[#66705f]">{runSummary(run)}</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#66705f]">Run</p>
+            <p className="mt-3 text-lg font-extrabold">{run.status.toUpperCase()}</p>
+            <p className="mt-2 text-sm text-[#66705f]">{runSummary(run)}</p>
+          </div>
+          {results.length > 0 ? (
+            <div className="grid grid-cols-4 overflow-hidden rounded-md border border-[#e1ddd1] bg-[#fbfaf6]">
+              <Score label="Total" value={results.length} tone="warn" />
+              <Score label="Pass" value={results.filter((result) => result.status === 'passed').length} tone="good" />
+              <Score label="Fail" value={results.filter((result) => result.status === 'failed').length} tone="bad" />
+              <Score label="Error" value={results.filter((result) => result.status === 'error').length} tone="bad" />
+            </div>
+          ) : null}
+        </div>
         {run.error ? <pre className="mt-3 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{run.error}</pre> : null}
       </div>
-      {videos[0] ? (
-        <div className="overflow-hidden rounded-xl bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_18px_38px_rgba(0,0,0,0.22)]">
-          <video className="aspect-video w-full bg-black" src={artifactUrl(videos[0].path)} controls preload="metadata" />
-        </div>
-      ) : null}
-      <div className="grid gap-2">
-        {(report?.results ?? []).slice(0, 4).map((result) => (
-          <div key={result.name} className="flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
-            <span className="font-semibold">{result.name}</span>
-            <Status status={result.status} />
-          </div>
-        ))}
-      </div>
+      {results.length > 0 ? <TestEvidenceList results={results} /> : <DarkEmpty text="Cenarios ainda indisponiveis para esta run." />}
+    </div>
+  );
+}
+
+function TestEvidenceList({ results }: { results: NonNullable<RunReport['results']> }) {
+  return (
+    <div className="grid gap-3">
+      {results.map((result, index) => {
+        const artifacts = dedupeArtifacts(result.artifacts ?? []);
+        const videos = artifacts.filter((artifact) => artifact.type === 'video');
+        const traces = artifacts.filter((artifact) => artifact.type === 'trace');
+        const screenshots = artifacts.filter((artifact) => artifact.type === 'screenshot');
+        const logs = artifacts.filter((artifact) => artifact.type === 'log');
+        return (
+          <Card key={`${result.name}:${index}`}>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Cenario {index + 1}</p>
+                  <CardTitle className="mt-1 truncate text-lg" title={result.name}>{result.name}</CardTitle>
+                  <CardDescription>{result.durationMs ? `${result.durationMs}ms` : `${result.steps?.length ?? 0} steps`} · {artifacts.length} artifacts</CardDescription>
+                </div>
+                <Status status={result.status} />
+              </div>
+              {result.error ? <pre className="mt-3 max-h-44 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{result.error}</pre> : null}
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              {videos[0] ? (
+                <div className="overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_12px_24px_rgba(0,0,0,0.18)]">
+                  <video className="aspect-video w-full bg-black" src={artifactUrl(videos[0].path)} controls preload="metadata" />
+                </div>
+              ) : <DarkEmpty text="Video indisponivel para este cenario." />}
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {videos.slice(1).map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Video'} path={artifact.path} type={artifact.type} compact />)}
+                {screenshots.map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Screenshot'} path={artifact.path} type={artifact.type} compact />)}
+                {traces.map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Trace'} path={artifact.path} type={artifact.type} compact />)}
+                {logs.map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Console'} path={artifact.path} type={artifact.type} compact />)}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -3847,7 +3964,7 @@ function TimelineEvidence({ report }: { report: RunReport | null }) {
   );
 }
 
-function ArtifactEvidence({ run, artifacts }: { run?: Run; artifacts: Artifact[] }) {
+function ArtifactEvidence({ run, artifacts, report }: { run?: Run; artifacts: Artifact[]; report?: RunReport | null }) {
   const uniqueArtifacts = dedupeArtifacts(artifacts).filter((artifact) => artifact.path !== run?.reportHtmlPath);
   const payloadGroups = groupHttpArtifacts(uniqueArtifacts);
   const otherArtifacts = uniqueArtifacts.filter((artifact) => artifact.type !== 'request' && artifact.type !== 'response');
@@ -3855,7 +3972,24 @@ function ArtifactEvidence({ run, artifacts }: { run?: Run; artifacts: Artifact[]
   return (
     <div className="grid gap-3">
       {run?.reportHtmlPath ? <ArtifactLink label="HTML report" path={run.reportHtmlPath} type="html" /> : null}
-      {otherArtifacts.map((artifact) => <ArtifactLink key={`${artifact.type}:${artifact.path}`} label={artifact.label ?? shortPath(artifact.path)} path={artifact.path} type={artifact.type} />)}
+      {(report?.results ?? []).map((result) => {
+        const resultArtifacts = dedupeArtifacts(result.artifacts ?? []).filter((artifact) => artifact.type !== 'request' && artifact.type !== 'response');
+        if (resultArtifacts.length === 0) return null;
+        return (
+          <Card key={result.name}>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="truncate text-base" title={result.name}>{result.name}</CardTitle>
+                <Status status={result.status} />
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-2 sm:grid-cols-2">
+              {resultArtifacts.map((artifact) => <ArtifactLink key={`${result.name}:${artifact.type}:${artifact.path}`} label={artifact.label ?? shortPath(artifact.path)} path={artifact.path} type={artifact.type} compact />)}
+            </CardContent>
+          </Card>
+        );
+      })}
+      {otherArtifacts.filter((artifact) => !(report?.results ?? []).some((result) => (result.artifacts ?? []).some((item) => item.path === artifact.path))).map((artifact) => <ArtifactLink key={`${artifact.type}:${artifact.path}`} label={artifact.label ?? shortPath(artifact.path)} path={artifact.path} type={artifact.type} />)}
       {payloadGroups.map((group, index) => <HttpArtifactGroup key={`${group.request?.path ?? ''}:${group.response?.path ?? ''}:${index}`} group={group} index={index} />)}
     </div>
   );
@@ -3891,7 +4025,7 @@ function PayloadCard({ artifact }: { artifact: Artifact }) {
   const [error, setError] = useState('');
   useEffect(() => {
     let active = true;
-    fetch(artifactUrl(artifact.path))
+    fetch(artifactUrl(artifact.path), { credentials: 'include', headers: authHeaders() })
       .then(async (response) => {
         if (!response.ok) throw new Error(await response.text());
         return response.json() as Promise<unknown>;
@@ -4051,6 +4185,52 @@ function Signal({ tone, text }: { tone: 'good' | 'bad'; text: string }) {
 }
 
 function ArtifactLink({ label, path, type, compact }: { label: string; path: string; type: string; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [content, setContent] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function openLog() {
+    setOpen(true);
+    if (content || loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch(artifactUrl(path), { credentials: 'include', headers: authHeaders() });
+      if (!response.ok) throw new Error(await response.text());
+      setContent(await response.text());
+    } catch (nextError) {
+      setError(messageOf(nextError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (type === 'log') {
+    return (
+      <>
+        <button
+          type="button"
+          className={cn('flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white text-left text-sm transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', compact ? 'p-2' : 'p-3')}
+          onClick={openLog}
+        >
+          <span className="min-w-0 truncate font-semibold">{label}</span>
+          <Badge variant="outline">{type}</Badge>
+        </button>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>{label}</DialogTitle>
+              <DialogDescription className="break-all font-mono text-xs">{shortPath(path)}</DialogDescription>
+            </DialogHeader>
+            {error ? <Signal tone="bad" text={error} /> : null}
+            <pre className="max-h-[70vh] overflow-auto rounded-lg bg-[#0b100c] p-4 font-mono text-xs leading-5 text-[#f7f6f0]">{loading ? 'loading...' : content || 'Sem logs.'}</pre>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
   return (
     <a className={cn('flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white text-sm transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', compact ? 'p-2' : 'p-3')} href={artifactUrl(path)} target="_blank">
       <span className="min-w-0 truncate font-semibold">{label}</span>
