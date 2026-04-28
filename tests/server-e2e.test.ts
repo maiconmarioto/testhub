@@ -1,18 +1,47 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../apps/api/src/server.js';
 
+const originalDataDir = process.env.TESTHUB_DATA_DIR;
 const originalAuthMode = process.env.TESTHUB_AUTH_MODE;
-process.env.TESTHUB_AUTH_MODE = 'off';
-const app = createApp();
+const originalNodeEnv = process.env.NODE_ENV;
+let app: ReturnType<typeof createApp>;
+let token: string;
+
+function auth() {
+  return { authorization: `Bearer ${token}` };
+}
 
 beforeAll(async () => {
+  process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-e2e-'));
+  process.env.TESTHUB_AUTH_MODE = 'local';
+  process.env.NODE_ENV = 'test';
+  app = createApp();
   await app.ready();
+
+  const register = await app.inject({
+    method: 'POST',
+    url: '/api/auth/register',
+    payload: {
+      email: 'e2e@example.com',
+      password: 'correct-horse',
+      organizationName: 'E2E Team',
+    },
+  });
+  expect(register.statusCode).toBe(201);
+  token = (register.json() as { token: string }).token;
 });
 
 afterAll(async () => {
   await app.close();
+  if (originalDataDir === undefined) delete process.env.TESTHUB_DATA_DIR;
+  else process.env.TESTHUB_DATA_DIR = originalDataDir;
   if (originalAuthMode === undefined) delete process.env.TESTHUB_AUTH_MODE;
   else process.env.TESTHUB_AUTH_MODE = originalAuthMode;
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
 });
 
 describe('server e2e', () => {
@@ -28,17 +57,18 @@ describe('server e2e', () => {
   });
 
   it('creates project, env, suite and run', async () => {
-    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'E2E' } });
+    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'E2E' } });
     expect(projectResponse.statusCode).toBe(201);
     const project = projectResponse.json() as { id: string };
 
-    const envResponse = await app.inject({ method: 'POST', url: '/api/environments', payload: { projectId: project.id, name: 'local', baseUrl: 'https://httpbin.org' } });
+    const envResponse = await app.inject({ method: 'POST', url: '/api/environments', headers: auth(), payload: { projectId: project.id, name: 'local', baseUrl: 'https://httpbin.org' } });
     expect(envResponse.statusCode).toBe(201);
     const environment = envResponse.json() as { id: string };
 
     const suiteResponse = await app.inject({
       method: 'POST',
       url: '/api/suites',
+      headers: auth(),
       payload: {
         projectId: project.id,
         name: 'health',
@@ -49,27 +79,27 @@ describe('server e2e', () => {
     expect(suiteResponse.statusCode).toBe(201);
     const suite = suiteResponse.json() as { id: string };
 
-    const runResponse = await app.inject({ method: 'POST', url: '/api/runs', payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id } });
+    const runResponse = await app.inject({ method: 'POST', url: '/api/runs', headers: auth(), payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id } });
     expect(runResponse.statusCode).toBe(202);
   });
 
   it('updates and soft deletes environments', async () => {
-    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Env CRUD' } });
+    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Env CRUD' } });
     const project = projectResponse.json() as { id: string };
 
-    const createdResponse = await app.inject({ method: 'POST', url: '/api/environments', payload: { projectId: project.id, name: 'hml', baseUrl: 'https://example.com', variables: { TOKEN: 'abc' } } });
+    const createdResponse = await app.inject({ method: 'POST', url: '/api/environments', headers: auth(), payload: { projectId: project.id, name: 'hml', baseUrl: 'https://example.com', variables: { TOKEN: 'abc' } } });
     expect(createdResponse.statusCode).toBe(201);
     const created = createdResponse.json() as { id: string };
     expect(created).toMatchObject({ name: 'hml', baseUrl: 'https://example.com', variables: { TOKEN: '[REDACTED]' } });
 
-    const updatedResponse = await app.inject({ method: 'PUT', url: `/api/environments/${created.id}`, payload: { name: 'prod', baseUrl: 'https://httpbin.org', variables: { TOKEN: 'def' } } });
+    const updatedResponse = await app.inject({ method: 'PUT', url: `/api/environments/${created.id}`, headers: auth(), payload: { name: 'prod', baseUrl: 'https://httpbin.org', variables: { TOKEN: 'def' } } });
     expect(updatedResponse.statusCode).toBe(200);
     expect(updatedResponse.json()).toMatchObject({ id: created.id, name: 'prod', baseUrl: 'https://httpbin.org', variables: { TOKEN: '[REDACTED]' } });
 
-    const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/environments/${created.id}` });
+    const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/environments/${created.id}`, headers: auth() });
     expect(deleteResponse.statusCode).toBe(204);
 
-    const listResponse = await app.inject({ method: 'GET', url: `/api/environments?projectId=${project.id}` });
+    const listResponse = await app.inject({ method: 'GET', url: `/api/environments?projectId=${project.id}`, headers: auth() });
     expect(listResponse.statusCode).toBe(200);
     expect(listResponse.json()).toEqual([]);
   });
@@ -78,6 +108,7 @@ describe('server e2e', () => {
     const validResponse = await app.inject({
       method: 'POST',
       url: '/api/spec/validate',
+      headers: auth(),
       payload: { specContent: 'version: 1\ntype: api\nname: valid\ntests:\n  - name: ok\n    request:\n      method: GET\n      path: /health\n' },
     });
     expect(validResponse.statusCode).toBe(200);
@@ -86,6 +117,7 @@ describe('server e2e', () => {
     const invalidResponse = await app.inject({
       method: 'POST',
       url: '/api/spec/validate',
+      headers: auth(),
       payload: { specContent: 'version: 1\ntype: web\nname: broken\ntests: []\n' },
     });
     expect(invalidResponse.statusCode).toBe(400);
@@ -93,22 +125,22 @@ describe('server e2e', () => {
   });
 
   it('updates and soft deletes projects', async () => {
-    const createdResponse = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'CRUD draft', description: 'old' } });
+    const createdResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'CRUD draft', description: 'old' } });
     expect(createdResponse.statusCode).toBe(201);
     const created = createdResponse.json() as { id: string };
 
-    const updatedResponse = await app.inject({ method: 'PUT', url: `/api/projects/${created.id}`, payload: { name: 'CRUD final', description: 'new' } });
+    const updatedResponse = await app.inject({ method: 'PUT', url: `/api/projects/${created.id}`, headers: auth(), payload: { name: 'CRUD final', description: 'new' } });
     expect(updatedResponse.statusCode).toBe(200);
     expect(updatedResponse.json()).toMatchObject({ id: created.id, name: 'CRUD final', description: 'new', status: 'active' });
 
-    const getResponse = await app.inject({ method: 'GET', url: `/api/projects/${created.id}` });
+    const getResponse = await app.inject({ method: 'GET', url: `/api/projects/${created.id}`, headers: auth() });
     expect(getResponse.statusCode).toBe(200);
     expect(getResponse.json()).toMatchObject({ id: created.id, name: 'CRUD final' });
 
-    const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/projects/${created.id}` });
+    const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/projects/${created.id}`, headers: auth() });
     expect(deleteResponse.statusCode).toBe(204);
 
-    const deletedGetResponse = await app.inject({ method: 'GET', url: `/api/projects/${created.id}` });
+    const deletedGetResponse = await app.inject({ method: 'GET', url: `/api/projects/${created.id}`, headers: auth() });
     expect(deletedGetResponse.statusCode).toBe(404);
   });
 });

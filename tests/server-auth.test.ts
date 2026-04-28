@@ -232,6 +232,127 @@ describe('server local auth', () => {
     });
     expect(secondPasswordLogin.statusCode).toBe(401);
   });
+
+  it('isolates projects and child resources by organization', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-org-scope-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = 'true';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const registerA = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'orga@example.com',
+        password: 'correct-horse',
+        organizationName: 'Org A',
+      },
+    });
+    expect(registerA.statusCode).toBe(201);
+    const userA = registerA.json() as { token: string };
+
+    const registerB = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'orgb@example.com',
+        password: 'correct-horse',
+        organizationName: 'Org B',
+      },
+    });
+    expect(registerB.statusCode).toBe(201);
+    const userB = registerB.json() as { token: string };
+
+    const authA = { authorization: `Bearer ${userA.token}` };
+    const authB = { authorization: `Bearer ${userB.token}` };
+
+    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: authA, payload: { name: 'Org A Project' } });
+    expect(projectResponse.statusCode).toBe(201);
+    const project = projectResponse.json() as { id: string };
+
+    const environmentResponse = await app.inject({
+      method: 'POST',
+      url: '/api/environments',
+      headers: authA,
+      payload: { projectId: project.id, name: 'local', baseUrl: 'https://example.com' },
+    });
+    expect(environmentResponse.statusCode).toBe(201);
+    const environment = environmentResponse.json() as { id: string };
+
+    const suiteResponse = await app.inject({
+      method: 'POST',
+      url: '/api/suites',
+      headers: authA,
+      payload: {
+        projectId: project.id,
+        name: 'health',
+        type: 'api',
+        specContent: 'version: 1\ntype: api\nname: health\ntests:\n  - name: ok\n    request:\n      method: GET\n      path: /health\n',
+      },
+    });
+    expect(suiteResponse.statusCode).toBe(201);
+    const suite = suiteResponse.json() as { id: string };
+
+    const runResponse = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      headers: authA,
+      payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id },
+    });
+    expect(runResponse.statusCode).toBe(202);
+    const run = runResponse.json() as { id: string };
+
+    const bProjects = await app.inject({ method: 'GET', url: '/api/projects', headers: authB });
+    expect(bProjects.statusCode).toBe(200);
+    expect(bProjects.json()).toEqual([]);
+
+    const bGetProject = await app.inject({ method: 'GET', url: `/api/projects/${project.id}`, headers: authB });
+    expect(bGetProject.statusCode).toBe(404);
+
+    const bListEnvironments = await app.inject({ method: 'GET', url: `/api/environments?projectId=${project.id}`, headers: authB });
+    expect(bListEnvironments.statusCode).toBe(404);
+    const bCreateEnvironment = await app.inject({
+      method: 'POST',
+      url: '/api/environments',
+      headers: authB,
+      payload: { projectId: project.id, name: 'blocked', baseUrl: 'https://example.com' },
+    });
+    expect(bCreateEnvironment.statusCode).toBe(404);
+    const bGetEnvironment = await app.inject({ method: 'GET', url: `/api/environments/${environment.id}`, headers: authB });
+    expect(bGetEnvironment.statusCode).toBe(404);
+
+    const bListSuites = await app.inject({ method: 'GET', url: `/api/suites?projectId=${project.id}`, headers: authB });
+    expect(bListSuites.statusCode).toBe(404);
+    const bCreateSuite = await app.inject({
+      method: 'POST',
+      url: '/api/suites',
+      headers: authB,
+      payload: {
+        projectId: project.id,
+        name: 'blocked',
+        type: 'api',
+        specContent: 'version: 1\ntype: api\nname: blocked\ntests: []\n',
+      },
+    });
+    expect(bCreateSuite.statusCode).toBe(404);
+    const bGetSuite = await app.inject({ method: 'GET', url: `/api/suites/${suite.id}`, headers: authB });
+    expect(bGetSuite.statusCode).toBe(404);
+
+    const bListRuns = await app.inject({ method: 'GET', url: `/api/runs?projectId=${project.id}`, headers: authB });
+    expect(bListRuns.statusCode).toBe(404);
+    const bCreateRun = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      headers: authB,
+      payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id },
+    });
+    expect(bCreateRun.statusCode).toBe(404);
+    const bGetRun = await app.inject({ method: 'GET', url: `/api/runs/${run.id}`, headers: authB });
+    expect(bGetRun.statusCode).toBe(404);
+  });
 });
 
 function restoreEnv(): void {

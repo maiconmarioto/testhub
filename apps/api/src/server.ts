@@ -19,7 +19,7 @@ import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
 import { actorFromAuthorization, actorLabel, authMode, hasPermission, isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus, type AuthActor, type Permission } from '../../../packages/db/src/security.js';
 import { createStore } from '../../../packages/db/src/store-factory.js';
-import type { User } from '../../../packages/db/src/store.js';
+import type { Database, Environment, Project, RunRecord, Suite, User } from '../../../packages/db/src/store.js';
 
 const sessionCookieName = 'testhub_session';
 const passwordSchema = z.string().min(8).max(200);
@@ -138,9 +138,55 @@ export function createApp() {
     };
   }
 
+  function requireOrganization(actor?: AuthActor): string {
+    if (!actor) throw new Error('Unauthorized');
+    if (actor.source === 'local' && authMode() !== 'off') {
+      if (!actor.organizationId) throw new Error('Local actor sem organizacao');
+      return actor.organizationId;
+    }
+    return actor.organizationId ?? 'legacy-local';
+  }
+
+  async function getDb(): Promise<Database> {
+    return store.read();
+  }
+
+  async function getProjectInActorOrg(projectId: string, actor?: AuthActor): Promise<Project | undefined> {
+    const organizationId = requireOrganization(actor);
+    const project = await store.getProject(projectId);
+    return project?.organizationId === organizationId ? project : undefined;
+  }
+
+  async function getEnvironmentInActorOrg(environmentId: string, actor?: AuthActor): Promise<Environment | undefined> {
+    const db = await getDb();
+    const organizationId = requireOrganization(actor);
+    const environment = db.environments.find((item) => item.id === environmentId && item.status !== 'inactive');
+    if (!environment) return undefined;
+    const project = db.projects.find((item) => item.id === environment.projectId && item.status !== 'inactive');
+    return project?.organizationId === organizationId ? environment : undefined;
+  }
+
+  async function getSuiteInActorOrg(suiteId: string, actor?: AuthActor): Promise<Suite | undefined> {
+    const db = await getDb();
+    const organizationId = requireOrganization(actor);
+    const suite = db.suites.find((item) => item.id === suiteId && item.status !== 'inactive');
+    if (!suite) return undefined;
+    const project = db.projects.find((item) => item.id === suite.projectId && item.status !== 'inactive');
+    return project?.organizationId === organizationId ? suite : undefined;
+  }
+
+  async function getRunInActorOrg(runId: string, actor?: AuthActor): Promise<RunRecord | undefined> {
+    const db = await getDb();
+    const organizationId = requireOrganization(actor);
+    const run = db.runs.find((item) => item.id === runId && item.status !== 'deleted');
+    if (!run) return undefined;
+    const project = db.projects.find((item) => item.id === run.projectId && item.status !== 'inactive');
+    return project?.organizationId === organizationId ? run : undefined;
+  }
+
   app.addHook('preHandler', async (req, reply) => {
     if (isPublicRoute(req.url)) return;
-    if (authMode() === 'local' && (await store.read()).users.length === 0) {
+    if (authMode() === 'local' && (await getDb()).users.length === 0) {
       return reply.code(401).send({ error: 'SetupRequired', setupRequired: true });
     }
     const actor = await actorFromRequest(req);
@@ -209,7 +255,7 @@ export function createApp() {
       password: passwordSchema,
       organizationName: z.string().min(1).max(200),
     }).parse(req.body);
-    if ((await store.read()).users.length > 0 && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
+    if ((await getDb()).users.length > 0 && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
       return reply.code(403).send({ error: 'Cadastro publico desabilitado' });
     }
     const existing = await store.findUserByEmail(input.email);
@@ -317,7 +363,7 @@ export function createApp() {
     return auditCsv(readAudit(query, store.rootDir));
   });
 
-  app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async () => (await store.read()).projects.filter((project) => project.status !== 'inactive'));
+  app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async (req) => store.listProjectsForOrganization(requireOrganization(req.actor)));
   app.post('/api/projects', { schema: { tags: ['projects'], summary: 'Create project' } }, async (req, reply) => {
     const input = z.object({
       name: z.string().min(1),
@@ -325,12 +371,12 @@ export function createApp() {
       retentionDays: z.number().int().min(1).optional(),
       cleanupArtifacts: z.boolean().optional(),
     }).parse(req.body);
-    const organizationId = (req.actor as (AuthActor & { organizationId?: string }) | undefined)?.organizationId ?? 'legacy-local';
+    const organizationId = requireOrganization(req.actor);
     return reply.code(201).send(await store.createProject({ organizationId, ...input }));
   });
   app.get('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Get project' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
-    const project = await store.getProject(params.id);
+    const project = await getProjectInActorOrg(params.id, req.actor);
     if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     return project;
   });
@@ -342,26 +388,36 @@ export function createApp() {
       retentionDays: z.number().int().min(1).optional(),
       cleanupArtifacts: z.boolean().optional(),
     }).parse(req.body);
+    const existing = await getProjectInActorOrg(params.id, req.actor);
+    if (!existing) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     const project = await store.updateProject(params.id, input);
     if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     return project;
   });
   app.delete('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Soft delete project and child records' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
+    const project = await getProjectInActorOrg(params.id, req.actor);
+    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     const archived = await store.archiveProject(params.id);
     if (!archived) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     return reply.code(204).send();
   });
 
-  app.get('/api/environments', { schema: { tags: ['environments'], summary: 'List environments' } }, async (req) => {
+  app.get('/api/environments', { schema: { tags: ['environments'], summary: 'List environments' } }, async (req, reply) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query);
-    return (await store.read()).environments
-      .filter((environment) => environment.status !== 'inactive' && (!query.projectId || environment.projectId === query.projectId))
+    const organizationId = requireOrganization(req.actor);
+    const db = await getDb();
+    if (query.projectId && !db.projects.some((project) => project.id === query.projectId && project.organizationId === organizationId && project.status !== 'inactive')) {
+      return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    }
+    const projectIds = new Set(db.projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive').map((project) => project.id));
+    return db.environments
+      .filter((environment) => environment.status !== 'inactive' && projectIds.has(environment.projectId) && (!query.projectId || environment.projectId === query.projectId))
       .map((environment) => ({ ...environment, variables: maskVariables(environment.variables) }));
   });
   app.get('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Get environment' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
-    const environment = (await store.read()).environments.find((item) => item.id === params.id && item.status !== 'inactive');
+    const environment = await getEnvironmentInActorOrg(params.id, req.actor);
     if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
     return { ...environment, variables: maskVariables(environment.variables) };
   });
@@ -375,6 +431,8 @@ export function createApp() {
     if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.variables && Object.keys(input.variables).length > 0) {
       return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de secrets em producao.' });
     }
+    const project = await getProjectInActorOrg(input.projectId, req.actor);
+    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     return reply.code(201).send(await store.createEnvironment(input));
   });
   app.put('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Update environment' } }, async (req, reply) => {
@@ -387,23 +445,35 @@ export function createApp() {
     if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.variables && Object.keys(input.variables).length > 0) {
       return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de secrets em producao.' });
     }
+    const existing = await getEnvironmentInActorOrg(params.id, req.actor);
+    if (!existing) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
     const environment = await store.updateEnvironment(params.id, input);
     if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
     return environment;
   });
   app.delete('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Soft delete environment and child runs' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
+    const environment = await getEnvironmentInActorOrg(params.id, req.actor);
+    if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
     const archived = await store.archiveEnvironment(params.id);
     if (!archived) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
     return reply.code(204).send();
   });
 
-  app.get('/api/suites', { schema: { tags: ['suites'], summary: 'List suites' } }, async (req) => {
+  app.get('/api/suites', { schema: { tags: ['suites'], summary: 'List suites' } }, async (req, reply) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query);
-    return (await store.read()).suites.filter((suite) => suite.status !== 'inactive' && (!query.projectId || suite.projectId === query.projectId));
+    const organizationId = requireOrganization(req.actor);
+    const db = await getDb();
+    if (query.projectId && !db.projects.some((project) => project.id === query.projectId && project.organizationId === organizationId && project.status !== 'inactive')) {
+      return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    }
+    const projectIds = new Set(db.projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive').map((project) => project.id));
+    return db.suites.filter((suite) => suite.status !== 'inactive' && projectIds.has(suite.projectId) && (!query.projectId || suite.projectId === query.projectId));
   });
   app.get('/api/suites/:id', { schema: { tags: ['suites'], summary: 'Get suite with spec content' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
+    const existing = await getSuiteInActorOrg(params.id, req.actor);
+    if (!existing) return reply.code(404).send({ error: 'Suite nao encontrada' });
     const suite = await store.getSuiteContent(params.id);
     if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
     return suite;
@@ -415,6 +485,8 @@ export function createApp() {
       type: z.enum(['web', 'api']),
       specContent: z.string().min(1),
     }).parse(req.body);
+    const project = await getProjectInActorOrg(input.projectId, req.actor);
+    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     return reply.code(201).send(await store.createSuite(input));
   });
   app.put('/api/suites/:id', { schema: { tags: ['suites'], summary: 'Update suite spec content' } }, async (req, reply) => {
@@ -424,6 +496,8 @@ export function createApp() {
       type: z.enum(['web', 'api']),
       specContent: z.string().min(1),
     }).parse(req.body);
+    const existing = await getSuiteInActorOrg(params.id, req.actor);
+    if (!existing) return reply.code(404).send({ error: 'Suite nao encontrada' });
     const suite = await store.updateSuite(params.id, input);
     if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
     return suite;
@@ -460,6 +534,8 @@ export function createApp() {
       includeBodyExamples: z.boolean().optional(),
     }).parse(req.body);
     try {
+      const project = await getProjectInActorOrg(input.projectId, req.actor);
+      if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
       const specContent = openApiToSuite(input.spec, input.name, input);
       return reply.code(201).send(await store.createSuite({ projectId: input.projectId, name: input.name, type: 'api', specContent }));
     } catch (error) {
@@ -467,22 +543,32 @@ export function createApp() {
     }
   });
 
-  app.get('/api/runs', { schema: { tags: ['runs'], summary: 'List runs' } }, async (req) => {
+  app.get('/api/runs', { schema: { tags: ['runs'], summary: 'List runs' } }, async (req, reply) => {
     const query = z.object({ projectId: z.string().optional() }).parse(req.query);
-    return (await store.read()).runs.filter((run) => run.status !== 'deleted' && (!query.projectId || run.projectId === query.projectId));
+    const organizationId = requireOrganization(req.actor);
+    const db = await getDb();
+    if (query.projectId && !db.projects.some((project) => project.id === query.projectId && project.organizationId === organizationId && project.status !== 'inactive')) {
+      return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    }
+    const projectIds = new Set(db.projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive').map((project) => project.id));
+    return db.runs.filter((run) => run.status !== 'deleted' && projectIds.has(run.projectId) && (!query.projectId || run.projectId === query.projectId));
   });
   app.get('/api/runs/:id', { schema: { tags: ['runs'], summary: 'Get run' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
-    const run = (await store.read()).runs.find((item) => item.id === params.id);
-    if (!run || run.status === 'deleted') return reply.code(404).send({ error: 'Run nao encontrada' });
+    const run = await getRunInActorOrg(params.id, req.actor);
+    if (!run) return reply.code(404).send({ error: 'Run nao encontrada' });
     return run;
   });
   app.post('/api/runs', { schema: { tags: ['runs'], summary: 'Create run' } }, async (req, reply) => {
     const input = z.object({ projectId: z.string(), environmentId: z.string(), suiteId: z.string() }).parse(req.body);
-    const db = await store.read();
-    const environment = db.environments.find((item) => item.id === input.environmentId);
-    const suite = db.suites.find((item) => item.id === input.suiteId);
-    if (!environment || !suite || environment.status === 'inactive' || suite.status === 'inactive') return reply.code(400).send({ error: 'Environment ou suite invalido' });
+    const project = await getProjectInActorOrg(input.projectId, req.actor);
+    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    const environment = await getEnvironmentInActorOrg(input.environmentId, req.actor);
+    const suite = await getSuiteInActorOrg(input.suiteId, req.actor);
+    if (!environment || !suite) return reply.code(400).send({ error: 'Environment ou suite invalido' });
+    if (environment.projectId !== input.projectId || suite.projectId !== input.projectId) {
+      return reply.code(400).send({ error: 'Environment e suite precisam pertencer ao projeto informado' });
+    }
     if (!isHostAllowed(environment.baseUrl)) {
       writeAudit({
         action: 'run.blocked.host_allowlist',
@@ -500,9 +586,8 @@ export function createApp() {
   });
   app.post('/api/runs/:id/cancel', { schema: { tags: ['runs'], summary: 'Cancel run' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
-    const db = await store.read();
-    const run = db.runs.find((item) => item.id === params.id);
-    if (!run || run.status === 'deleted') return reply.code(404).send({ error: 'Run nao encontrada' });
+    const run = await getRunInActorOrg(params.id, req.actor);
+    if (!run) return reply.code(404).send({ error: 'Run nao encontrada' });
     if (!['queued', 'running'].includes(run.status)) return run;
     if (runQueue) {
       const jobs = await runQueue.getJobs(['waiting', 'delayed', 'prioritized']);
@@ -512,8 +597,8 @@ export function createApp() {
   });
   app.get('/api/runs/:id/report', { schema: { tags: ['runs'], summary: 'Get run JSON report' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
-    const run = (await store.read()).runs.find((item) => item.id === params.id);
-    if (!run?.reportPath || run.status === 'deleted' || !fs.existsSync(run.reportPath)) return reply.code(404).send({ error: 'Report nao encontrado' });
+    const run = await getRunInActorOrg(params.id, req.actor);
+    if (!run?.reportPath || !fs.existsSync(run.reportPath)) return reply.code(404).send({ error: 'Report nao encontrado' });
     return JSON.parse(fs.readFileSync(run.reportPath, 'utf8'));
   });
 
@@ -523,7 +608,9 @@ export function createApp() {
       days: z.number().int().min(1).optional(),
       cleanupArtifacts: z.boolean().optional(),
     }).parse(req.body ?? {});
-    const project = input.projectId ? await store.getProject(input.projectId) : undefined;
+    const project = input.projectId ? await getProjectInActorOrg(input.projectId, req.actor) : undefined;
+    if (input.projectId && !project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!input.projectId && authMode() === 'local') return reply.code(400).send({ error: 'projectId obrigatorio em auth local' });
     const days = input.days ?? project?.retentionDays ?? retentionDays();
     const cleanupArtifacts = input.cleanupArtifacts ?? project?.cleanupArtifacts ?? false;
     return reply.send(await cleanupOldRuns(store, days, { projectId: input.projectId, cleanupArtifacts }));
@@ -534,6 +621,8 @@ export function createApp() {
     const requested = path.resolve(query.path);
     const allowedRoots = [path.resolve('.testhub-runs'), path.resolve(store.rootDir)];
     if (!allowedRoots.some((root) => requested.startsWith(root))) return reply.code(403).send({ error: 'Artifact fora de area permitida' });
+    const matchingRun = (await getDb()).runs.find((run) => [run.reportPath, run.reportHtmlPath].filter(Boolean).map((item) => path.resolve(String(item))).includes(requested));
+    if (matchingRun && !(await getRunInActorOrg(matchingRun.id, req.actor))) return reply.code(404).send({ error: 'Artifact nao encontrado' });
     if (!fs.existsSync(requested)) return reply.code(404).send({ error: 'Artifact nao encontrado' });
     const contentType = contentTypeFor(requested);
     if (contentType) reply.type(contentType);
@@ -590,6 +679,8 @@ export function createApp() {
       reason: z.string().optional(),
     }).parse(req.body);
     if (!input.approved) return reply.code(400).send({ error: 'Aprovacao humana obrigatoria.' });
+    const existing = await getSuiteInActorOrg(input.suiteId, req.actor);
+    if (!existing) return reply.code(404).send({ error: 'Suite nao encontrada' });
     const suite = await store.updateSuite(input.suiteId, { name: input.name, type: input.type, specContent: input.specContent });
     if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
     writeAudit({
