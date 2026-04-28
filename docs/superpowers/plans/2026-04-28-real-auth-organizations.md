@@ -1352,7 +1352,7 @@ git commit -m "test: cover authenticated web flows"
 - Modify: `apps/api/src/server.ts`
 - Modify: `packages/db/src/security.ts`
 
-- [ ] **Step 1: Update security status response**
+- [x] **Step 1: Update security status response**
 
 Make `/api/system/security` report:
 
@@ -1369,7 +1369,7 @@ Make `/api/system/security` report:
 
 Do not include counts if that requires a full DB scan in the security helper; the API route can augment the response with store data.
 
-- [ ] **Step 2: Update README auth docs**
+- [x] **Step 2: Update README auth docs**
 
 Replace the old "Auth opcional" section with:
 
@@ -1397,7 +1397,7 @@ TESTHUB_ALLOW_DISPLAY_RESET=true
 `off` is for local demos only and must not be used in production.
 ```
 
-- [ ] **Step 3: Run docs-neutral checks**
+- [x] **Step 3: Run docs-neutral checks**
 
 Run:
 
@@ -1408,7 +1408,7 @@ npm test -- tests/server-auth.test.ts tests/server-e2e.test.ts tests/mcp.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md apps/api/src/server.ts packages/db/src/security.ts
