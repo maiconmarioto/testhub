@@ -1290,7 +1290,7 @@ git commit -m "chore: keep mcp auth token compatible"
 **Files:**
 - Modify: `tests/e2e/v2.spec.ts`
 
-- [ ] **Step 1: Add auth setup helper**
+- [x] **Step 1: Add auth setup helper**
 
 At the top of `tests/e2e/v2.spec.ts`, add:
 
@@ -1308,7 +1308,7 @@ async function login(page, email = `web-${Date.now()}@example.com`) {
 
 Call `await login(page)` before navigating to protected pages in each test, or use Playwright storage state if this gets slow.
 
-- [ ] **Step 2: Add protected route test**
+- [x] **Step 2: Add protected route test**
 
 Add:
 
@@ -1319,7 +1319,7 @@ test('protected routes redirect anonymous user to login', async ({ page }) => {
 });
 ```
 
-- [ ] **Step 3: Update seedWorkspace helper**
+- [x] **Step 3: Update seedWorkspace helper**
 
 Because API calls from `seedWorkspace()` are direct `fetch`, first register/login through API and pass bearer:
 
@@ -1328,7 +1328,7 @@ const token = await createApiUser();
 headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }
 ```
 
-- [ ] **Step 4: Run E2E**
+- [x] **Step 4: Run E2E**
 
 Run:
 
@@ -1338,7 +1338,7 @@ TESTHUB_AUTH_MODE=local npm run test:e2e
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/e2e/v2.spec.ts
