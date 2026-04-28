@@ -7,6 +7,7 @@ import { createApp } from '../apps/api/src/server.js';
 const originalDataDir = process.env.TESTHUB_DATA_DIR;
 const originalAuthMode = process.env.TESTHUB_AUTH_MODE;
 const originalNodeEnv = process.env.NODE_ENV;
+const originalAllowPublicSignup = process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP;
 const apps: ReturnType<typeof createApp>[] = [];
 
 afterEach(async () => {
@@ -51,6 +52,7 @@ describe('server local auth', () => {
     expect(registered.membership).toMatchObject({ role: 'admin' });
     expect(registered.token).toEqual(expect.any(String));
 
+    process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = 'true';
     const duplicate = await app.inject({
       method: 'POST',
       url: '/api/auth/register',
@@ -61,6 +63,18 @@ describe('server local auth', () => {
       },
     });
     expect(duplicate.statusCode).toBe(409);
+    process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = 'false';
+
+    const duplicateWithoutSignup = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'owner@example.com',
+        password: 'correct-horse',
+        organizationName: 'Duplicate Team',
+      },
+    });
+    expect(duplicateWithoutSignup.statusCode).toBe(403);
 
     const publicSignup = await app.inject({
       method: 'POST',
@@ -112,6 +126,14 @@ describe('server local auth', () => {
     });
     expect(logout.statusCode).toBe(204);
     expect(logout.cookies.find((item) => item.name === 'testhub_session')?.value).toBe('');
+
+    const staleLogout = await app.inject({
+      method: 'POST',
+      url: '/api/auth/logout',
+      cookies: { testhub_session: 'stale-token' },
+    });
+    expect(staleLogout.statusCode).toBe(204);
+    expect(staleLogout.cookies.find((item) => item.name === 'testhub_session')?.value).toBe('');
 
     const afterLogout = await app.inject({
       method: 'GET',
@@ -219,4 +241,6 @@ function restoreEnv(): void {
   else process.env.TESTHUB_AUTH_MODE = originalAuthMode;
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = originalNodeEnv;
+  if (originalAllowPublicSignup === undefined) delete process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP;
+  else process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = originalAllowPublicSignup;
 }

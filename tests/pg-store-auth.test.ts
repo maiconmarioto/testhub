@@ -70,7 +70,7 @@ if (!pgTestDatabaseUrl) {
       const used = await store.markPasswordResetUsed(reset.id);
       expect(used?.usedAt).toBeTruthy();
       expect(await store.findPasswordResetByTokenHash('reset-hash')).toBeUndefined();
-      expect((await store.markPasswordResetUsed(reset.id))?.usedAt).toBe(used?.usedAt);
+      expect(await store.markPasswordResetUsed(reset.id)).toBeUndefined();
       expect(await store.listProjectsForOrganization(organization.id)).toEqual([expect.objectContaining({ id: project.id, organizationId: organization.id })]);
     });
 

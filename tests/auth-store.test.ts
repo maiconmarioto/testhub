@@ -28,7 +28,7 @@ describe('JsonStore auth and organization methods', () => {
     expect(store.findPasswordResetByTokenHash('reset-hash')).toBeUndefined();
 
     const usedAgain = store.markPasswordResetUsed(reset.id);
-    expect(usedAgain?.usedAt).toBe(used?.usedAt);
+    expect(usedAgain).toBeUndefined();
   });
 
   it('scopes projects to an organization', () => {

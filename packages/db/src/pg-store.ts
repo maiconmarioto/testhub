@@ -264,8 +264,6 @@ export class PgStore implements Store {
       .where(and(eq(passwordResetTokens.id, id), isNull(passwordResetTokens.usedAt), gt(passwordResetTokens.expiresAt, new Date())))
       .returning();
     if (resetToken) return rowToPasswordResetToken(resetToken);
-    const [current] = await this.db.select().from(passwordResetTokens).where(eq(passwordResetTokens.id, id));
-    if (current?.usedAt) return rowToPasswordResetToken(current);
     return undefined;
   }
 

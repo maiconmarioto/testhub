@@ -396,7 +396,7 @@ export class JsonStore {
     const db = this.read();
     const index = db.passwordResetTokens.findIndex((resetToken) => resetToken.id === id);
     if (index === -1) return undefined;
-    if (db.passwordResetTokens[index].usedAt) return db.passwordResetTokens[index];
+    if (db.passwordResetTokens[index].usedAt) return undefined;
     if (db.passwordResetTokens[index].expiresAt <= nowIso()) return undefined;
     const resetToken: PasswordResetToken = {
       ...db.passwordResetTokens[index],

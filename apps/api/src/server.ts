@@ -209,11 +209,11 @@ export function createApp() {
       password: passwordSchema,
       organizationName: z.string().min(1).max(200),
     }).parse(req.body);
-    const existing = await store.findUserByEmail(input.email);
-    if (existing) return reply.code(409).send({ error: 'Email ja cadastrado' });
     if ((await store.read()).users.length > 0 && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
       return reply.code(403).send({ error: 'Cadastro publico desabilitado' });
     }
+    const existing = await store.findUserByEmail(input.email);
+    if (existing) return reply.code(409).send({ error: 'Email ja cadastrado' });
 
     const user = await store.createUser({
       email: input.email,
@@ -290,7 +290,7 @@ export function createApp() {
     if (!resetToken) return reply.code(400).send({ error: 'Token invalido ou expirado' });
     const usedToken = await store.markPasswordResetUsed(resetToken.id);
     if (!usedToken) return reply.code(400).send({ error: 'Token invalido ou expirado' });
-    const user = await store.updateUserPassword(resetToken.userId, await hashPassword(input.password));
+    const user = await store.updateUserPassword(usedToken.userId, await hashPassword(input.password));
     if (!user) return reply.code(400).send({ error: 'Token invalido ou expirado' });
     return reply.code(204).send();
   });
@@ -622,6 +622,7 @@ function isPublicRoute(url: string): boolean {
     || path === '/api/system/security'
     || path === '/api/auth/register'
     || path === '/api/auth/login'
+    || path === '/api/auth/logout'
     || path === '/api/auth/password-reset/request'
     || path === '/api/auth/password-reset/confirm';
 }
