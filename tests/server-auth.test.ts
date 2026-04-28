@@ -16,6 +16,28 @@ afterEach(async () => {
 });
 
 describe('server local auth', () => {
+  it('allows credentialed browser auth CORS preflight', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-cors-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const preflight = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/auth/login',
+      headers: {
+        origin: 'http://localhost:3334',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers['access-control-allow-origin']).toBe('http://localhost:3334');
+    expect(preflight.headers['access-control-allow-credentials']).toBe('true');
+  });
+
   it('registers, logs in, reads current user and logs out', async () => {
     process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-auth-'));
     process.env.TESTHUB_AUTH_MODE = 'local';

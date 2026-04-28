@@ -102,6 +102,7 @@ export function createApp() {
   app.register(cookie);
   app.register(cors, {
     origin: true,
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   app.register(swagger, {
