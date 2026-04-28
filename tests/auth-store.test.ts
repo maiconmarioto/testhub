@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createSessionToken, hashPassword, hashToken, verifyPassword } from '../packages/db/src/auth.js';
 import { JsonStore } from '../packages/db/src/store.js';
 
 describe('JsonStore auth and organization methods', () => {
@@ -76,5 +77,20 @@ describe('JsonStore auth and organization methods', () => {
     expect(store.findPasswordResetByTokenHash(reset.tokenHash)).toBeUndefined();
     expect(store.markPasswordResetUsed(reset.id)).toBeUndefined();
     expect(store.read().passwordResetTokens[0].usedAt).toBeUndefined();
+  });
+});
+
+describe('auth helpers', () => {
+  it('hashes and verifies passwords', async () => {
+    const hash = await hashPassword('correct horse battery staple');
+    expect(hash).not.toContain('correct horse');
+    await expect(verifyPassword('correct horse battery staple', hash)).resolves.toBe(true);
+    await expect(verifyPassword('wrong', hash)).resolves.toBe(false);
+  });
+
+  it('hashes opaque tokens before persistence', () => {
+    const token = createSessionToken();
+    expect(token).toHaveLength(48);
+    expect(hashToken(token)).toMatch(/^[a-f0-9]{64}$/);
   });
 });
