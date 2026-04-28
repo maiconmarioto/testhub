@@ -22,6 +22,10 @@ describe('JsonStore auth and organization methods', () => {
 
     const used = store.markPasswordResetUsed(reset.id);
     expect(used?.usedAt).toBeTruthy();
+    expect(store.findPasswordResetByTokenHash('reset-hash')).toBeUndefined();
+
+    const usedAgain = store.markPasswordResetUsed(reset.id);
+    expect(usedAgain?.usedAt).toBe(used?.usedAt);
   });
 
   it('scopes projects to an organization', () => {
@@ -35,5 +39,40 @@ describe('JsonStore auth and organization methods', () => {
 
     expect(store.listProjectsForOrganization(orgA.id)).toEqual([expect.objectContaining({ id: projectA.id, organizationId: orgA.id })]);
     expect(store.listProjectsForOrganization(orgB.id)).toHaveLength(1);
+  });
+
+  it('backfills legacy projects into the local organization', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-auth-legacy-projects-'));
+    fs.writeFileSync(path.join(root, 'db.json'), JSON.stringify({
+      projects: [{
+        id: 'legacy-project',
+        name: 'Legacy CRM',
+        status: 'active',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      }],
+      environments: [],
+      suites: [],
+      runs: [],
+      aiConnections: [],
+    }), 'utf8');
+    const store = new JsonStore(root);
+
+    expect(store.read().projects).toEqual([expect.objectContaining({ id: 'legacy-project', organizationId: 'legacy-local' })]);
+    expect(store.listProjectsForOrganization('legacy-local')).toEqual([expect.objectContaining({ id: 'legacy-project', organizationId: 'legacy-local' })]);
+  });
+
+  it('ignores expired sessions and reset tokens', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-auth-expired-'));
+    const store = new JsonStore(root);
+    const user = store.createUser({ email: 'expired@example.com', passwordHash: 'hash' });
+    const organization = store.createOrganization({ name: 'Expired Team' });
+    const session = store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: 'expired-token', expiresAt: '2000-01-01T00:00:00.000Z' });
+    const reset = store.createPasswordResetToken({ userId: user.id, tokenHash: 'expired-reset', expiresAt: '2000-01-01T00:00:00.000Z' });
+
+    expect(store.findSessionByTokenHash(session.tokenHash)).toBeUndefined();
+    expect(store.findPasswordResetByTokenHash(reset.tokenHash)).toBeUndefined();
+    expect(store.markPasswordResetUsed(reset.id)).toBeUndefined();
+    expect(store.read().passwordResetTokens[0].usedAt).toBeUndefined();
   });
 });

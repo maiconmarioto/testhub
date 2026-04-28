@@ -183,6 +183,8 @@ const emptyDb: Database = {
   aiConnections: [],
 };
 
+const LEGACY_ORGANIZATION_ID = 'legacy-local';
+
 export class JsonStore {
   public readonly rootDir: string;
   private readonly dbPath: string;
@@ -206,7 +208,21 @@ export class JsonStore {
 
   read(): Database {
     const db = JSON.parse(fs.readFileSync(this.dbPath, 'utf8')) as Partial<Database>;
-    return { ...emptyDb, ...db };
+    return {
+      users: db.users ?? [],
+      organizations: db.organizations ?? [],
+      memberships: db.memberships ?? [],
+      sessions: db.sessions ?? [],
+      passwordResetTokens: db.passwordResetTokens ?? [],
+      projects: (db.projects ?? []).map((project) => ({
+        ...project,
+        organizationId: project.organizationId ?? LEGACY_ORGANIZATION_ID,
+      })),
+      environments: db.environments ?? [],
+      suites: db.suites ?? [],
+      runs: db.runs ?? [],
+      aiConnections: db.aiConnections ?? [],
+    };
   }
 
   write(db: Database): void {
@@ -380,6 +396,8 @@ export class JsonStore {
     const db = this.read();
     const index = db.passwordResetTokens.findIndex((resetToken) => resetToken.id === id);
     if (index === -1) return undefined;
+    if (db.passwordResetTokens[index].usedAt) return db.passwordResetTokens[index];
+    if (db.passwordResetTokens[index].expiresAt <= nowIso()) return undefined;
     const resetToken: PasswordResetToken = {
       ...db.passwordResetTokens[index],
       usedAt: nowIso(),
