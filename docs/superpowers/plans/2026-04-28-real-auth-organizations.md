@@ -566,9 +566,14 @@ git commit -m "feat: add local auth crypto helpers"
 - Modify: `package-lock.json`
 - Modify: `apps/api/src/server.ts`
 - Modify: `packages/db/src/security.ts`
+- Modify: `packages/db/src/store.ts`
+- Modify: `packages/db/src/pg-store.ts`
+- Modify: `tests/auth-store.test.ts`
+- Modify: `tests/pg-store-auth.test.ts`
+- Modify: `tests/server-e2e.test.ts`
 - Create: `tests/server-auth.test.ts`
 
-- [ ] **Step 1: Install cookie dependency**
+- [x] **Step 1: Install cookie dependency**
 
 Run:
 
@@ -578,7 +583,7 @@ npm install @fastify/cookie
 
 Expected: `package.json` and `package-lock.json` updated.
 
-- [ ] **Step 2: Write failing API auth tests**
+- [x] **Step 2: Write failing API auth tests**
 
 Create `tests/server-auth.test.ts`:
 
@@ -658,7 +663,7 @@ describe('local auth api', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run:
 
@@ -668,7 +673,7 @@ npm test -- tests/server-auth.test.ts
 
 Expected: FAIL because `/api/auth/register` does not exist.
 
-- [ ] **Step 4: Register cookie and add auth route schemas**
+- [x] **Step 4: Register cookie and add auth route schemas**
 
 In `apps/api/src/server.ts`, add:
 
@@ -690,7 +695,7 @@ const sessionCookieName = 'testhub_session';
 const passwordSchema = z.string().min(8).max(200);
 ```
 
-- [ ] **Step 5: Implement auth endpoints**
+- [x] **Step 5: Implement auth endpoints**
 
 Add these routes before the `preHandler` hook or make them public in the hook:
 
@@ -745,7 +750,7 @@ function setSessionCookie(reply: FastifyReply, token: string, expiresAt: string)
 }
 ```
 
-- [ ] **Step 6: Resolve local actor from cookie or bearer token**
+- [x] **Step 6: Resolve local actor from cookie or bearer token**
 
 In `packages/db/src/security.ts`, extend:
 
@@ -783,7 +788,7 @@ async function actorFromRequest(req: FastifyRequest): Promise<AuthActor | null> 
 
 Use `actorFromRequest(req)` in the preHandler.
 
-- [ ] **Step 7: Run auth tests**
+- [x] **Step 7: Run auth tests**
 
 Run:
 
@@ -793,7 +798,7 @@ npm test -- tests/server-auth.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add package.json package-lock.json apps/api/src/server.ts packages/db/src/security.ts tests/server-auth.test.ts
