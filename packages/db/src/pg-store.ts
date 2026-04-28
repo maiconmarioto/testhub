@@ -5,11 +5,12 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { and, desc, eq, lt, ne } from 'drizzle-orm';
 import { ensureDir } from '../../shared/src/fs-utils.js';
-import { aiConnections, environments, projects, runs, suites } from './schema.js';
-import type { AiConnection, Database, Environment, Project, RunRecord, Store, Suite } from './store.js';
+import { aiConnections, environments, memberships, organizations, passwordResetTokens, projects, runs, sessions, suites, users } from './schema.js';
+import type { AiConnection, AuthSession, Database, Environment, MembershipRole, Organization, OrganizationMembership, PasswordResetToken, Project, RunRecord, Store, Suite, User } from './store.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 
 const { Pool } = pg;
+const LEGACY_ORGANIZATION_ID = 'legacy-local';
 
 export class PgStore implements Store {
   public readonly rootDir: string;
@@ -33,7 +34,12 @@ export class PgStore implements Store {
   }
 
   async read(): Promise<Database> {
-    const [projectRows, environmentRows, suiteRows, runRows, aiRows] = await Promise.all([
+    const [userRows, organizationRows, membershipRows, sessionRows, passwordResetRows, projectRows, environmentRows, suiteRows, runRows, aiRows] = await Promise.all([
+      this.db.select().from(users),
+      this.db.select().from(organizations),
+      this.db.select().from(memberships),
+      this.db.select().from(sessions),
+      this.db.select().from(passwordResetTokens),
       this.db.select().from(projects),
       this.db.select().from(environments),
       this.db.select().from(suites),
@@ -41,6 +47,11 @@ export class PgStore implements Store {
       this.db.select().from(aiConnections),
     ]);
     return {
+      users: userRows.map(rowToUser),
+      organizations: organizationRows.map(rowToOrganization),
+      memberships: membershipRows.map(rowToMembership),
+      sessions: sessionRows.map(rowToSession),
+      passwordResetTokens: passwordResetRows.map(rowToPasswordResetToken),
       projects: projectRows.map(rowToProject),
       environments: environmentRows.map(rowToEnvironmentSafe),
       suites: suiteRows.map(rowToSuite),
@@ -54,10 +65,11 @@ export class PgStore implements Store {
     return project ? rowToProject(project) : undefined;
   }
 
-  async createProject(input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project> {
+  async createProject(input: { organizationId: string; name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project> {
     const now = new Date();
     const project = {
       id: randomUUID(),
+      organizationId: input.organizationId,
       name: input.name,
       description: input.description ?? null,
       retentionDays: input.retentionDays ?? null,
@@ -68,6 +80,149 @@ export class PgStore implements Store {
     };
     await this.db.insert(projects).values(project);
     return rowToProject(project);
+  }
+
+  async createUser(input: { email: string; name?: string; passwordHash: string }): Promise<User> {
+    const now = new Date();
+    const user = {
+      id: randomUUID(),
+      email: normalizeEmail(input.email),
+      name: input.name ?? null,
+      passwordHash: input.passwordHash,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.insert(users).values(user);
+    return rowToUser(user);
+  }
+
+  async findUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await this.db.select().from(users).where(and(eq(users.email, normalizeEmail(email)), eq(users.status, 'active')));
+    return user ? rowToUser(user) : undefined;
+  }
+
+  async findUserById(id: string): Promise<User | undefined> {
+    const [user] = await this.db.select().from(users).where(and(eq(users.id, id), eq(users.status, 'active')));
+    return user ? rowToUser(user) : undefined;
+  }
+
+  async updateUserPassword(userId: string, passwordHash: string): Promise<User | undefined> {
+    const [user] = await this.db.update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(and(eq(users.id, userId), eq(users.status, 'active')))
+      .returning();
+    return user ? rowToUser(user) : undefined;
+  }
+
+  async createOrganization(input: { name: string; slug?: string }): Promise<Organization> {
+    const now = new Date();
+    const organization = {
+      id: randomUUID(),
+      name: input.name,
+      slug: input.slug ?? slugify(input.name),
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.insert(organizations).values(organization);
+    return rowToOrganization(organization);
+  }
+
+  async listOrganizationsForUser(userId: string): Promise<Organization[]> {
+    const [membershipRows, organizationRows] = await Promise.all([
+      this.db.select().from(memberships).where(eq(memberships.userId, userId)),
+      this.db.select().from(organizations).where(eq(organizations.status, 'active')),
+    ]);
+    const organizationIds = new Set(membershipRows.map((membership) => membership.organizationId));
+    return organizationRows.filter((organization) => organizationIds.has(organization.id)).map(rowToOrganization);
+  }
+
+  async createMembership(input: { userId: string; organizationId: string; role: MembershipRole }): Promise<OrganizationMembership> {
+    const now = new Date();
+    const membership = {
+      id: randomUUID(),
+      userId: input.userId,
+      organizationId: input.organizationId,
+      role: input.role,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.db.insert(memberships).values(membership);
+    return rowToMembership(membership);
+  }
+
+  async listMembershipsForUser(userId: string): Promise<OrganizationMembership[]> {
+    const rows = await this.db.select().from(memberships).where(eq(memberships.userId, userId));
+    return rows.map(rowToMembership);
+  }
+
+  async findMembership(userId: string, organizationId: string): Promise<OrganizationMembership | undefined> {
+    const [membership] = await this.db.select().from(memberships).where(and(eq(memberships.userId, userId), eq(memberships.organizationId, organizationId)));
+    return membership ? rowToMembership(membership) : undefined;
+  }
+
+  async listMembershipsForOrganization(organizationId: string): Promise<OrganizationMembership[]> {
+    const rows = await this.db.select().from(memberships).where(eq(memberships.organizationId, organizationId));
+    return rows.map(rowToMembership);
+  }
+
+  async createSession(input: { userId: string; organizationId: string; tokenHash: string; expiresAt: string }): Promise<AuthSession> {
+    const session = {
+      id: randomUUID(),
+      userId: input.userId,
+      organizationId: input.organizationId,
+      tokenHash: input.tokenHash,
+      expiresAt: new Date(input.expiresAt),
+      createdAt: new Date(),
+      lastUsedAt: null,
+    };
+    await this.db.insert(sessions).values(session);
+    return rowToSession(session);
+  }
+
+  async findSessionByTokenHash(tokenHash: string): Promise<AuthSession | undefined> {
+    const [session] = await this.db.select().from(sessions).where(eq(sessions.tokenHash, tokenHash));
+    if (!session || session.expiresAt <= new Date()) return undefined;
+    return rowToSession(session);
+  }
+
+  async deleteSession(id: string): Promise<boolean> {
+    const deleted = await this.db.delete(sessions).where(eq(sessions.id, id)).returning({ id: sessions.id });
+    return deleted.length > 0;
+  }
+
+  async createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): Promise<PasswordResetToken> {
+    const resetToken = {
+      id: randomUUID(),
+      userId: input.userId,
+      tokenHash: input.tokenHash,
+      expiresAt: new Date(input.expiresAt),
+      usedAt: null,
+      createdAt: new Date(),
+    };
+    await this.db.insert(passwordResetTokens).values(resetToken);
+    return rowToPasswordResetToken(resetToken);
+  }
+
+  async findPasswordResetByTokenHash(tokenHash: string): Promise<PasswordResetToken | undefined> {
+    const [resetToken] = await this.db.select().from(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, tokenHash));
+    if (!resetToken || resetToken.expiresAt <= new Date() || resetToken.usedAt) return undefined;
+    return rowToPasswordResetToken(resetToken);
+  }
+
+  async markPasswordResetUsed(id: string): Promise<PasswordResetToken | undefined> {
+    const [current] = await this.db.select().from(passwordResetTokens).where(eq(passwordResetTokens.id, id));
+    if (!current) return undefined;
+    if (current.usedAt) return rowToPasswordResetToken(current);
+    if (current.expiresAt <= new Date()) return undefined;
+    const [resetToken] = await this.db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, id)).returning();
+    return resetToken ? rowToPasswordResetToken(resetToken) : undefined;
+  }
+
+  async listProjectsForOrganization(organizationId: string): Promise<Project[]> {
+    const rows = await this.db.select().from(projects).where(and(eq(projects.organizationId, organizationId), ne(projects.status, 'inactive')));
+    return rows.map(rowToProject);
   }
 
   async updateProject(id: string, input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project | undefined> {
@@ -223,9 +378,67 @@ export class PgStore implements Store {
   }
 }
 
-function rowToProject(row: { id: string; name: string; description?: string | null; retentionDays?: number | null; cleanupArtifacts?: boolean | null; status: string; createdAt: Date | string; updatedAt: Date | string }): Project {
+function rowToUser(row: { id: string; email: string; name?: string | null; passwordHash: string; status: string; createdAt: Date | string; updatedAt: Date | string }): User {
   return {
     id: row.id,
+    email: row.email,
+    name: row.name ?? undefined,
+    passwordHash: row.passwordHash,
+    status: row.status as User['status'],
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
+function rowToOrganization(row: { id: string; name: string; slug: string; status: string; createdAt: Date | string; updatedAt: Date | string }): Organization {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    status: row.status as Organization['status'],
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
+function rowToMembership(row: { id: string; organizationId: string; userId: string; role: string; createdAt: Date | string; updatedAt: Date | string }): OrganizationMembership {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    userId: row.userId,
+    role: row.role as OrganizationMembership['role'],
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
+function rowToSession(row: { id: string; userId: string; organizationId: string; tokenHash: string; expiresAt: Date | string; createdAt: Date | string; lastUsedAt?: Date | string | null }): AuthSession {
+  return {
+    id: row.id,
+    userId: row.userId,
+    organizationId: row.organizationId,
+    tokenHash: row.tokenHash,
+    expiresAt: toIso(row.expiresAt),
+    createdAt: toIso(row.createdAt),
+    lastUsedAt: row.lastUsedAt ? toIso(row.lastUsedAt) : undefined,
+  };
+}
+
+function rowToPasswordResetToken(row: { id: string; userId: string; tokenHash: string; expiresAt: Date | string; usedAt?: Date | string | null; createdAt: Date | string }): PasswordResetToken {
+  return {
+    id: row.id,
+    userId: row.userId,
+    tokenHash: row.tokenHash,
+    expiresAt: toIso(row.expiresAt),
+    usedAt: row.usedAt ? toIso(row.usedAt) : undefined,
+    createdAt: toIso(row.createdAt),
+  };
+}
+
+function rowToProject(row: { id: string; organizationId?: string | null; name: string; description?: string | null; retentionDays?: number | null; cleanupArtifacts?: boolean | null; status: string; createdAt: Date | string; updatedAt: Date | string }): Project {
+  return {
+    id: row.id,
+    organizationId: row.organizationId ?? LEGACY_ORGANIZATION_ID,
     name: row.name,
     description: row.description ?? undefined,
     retentionDays: row.retentionDays ?? undefined,
@@ -267,4 +480,16 @@ function rowToAiSafe(row: { id: string; name: string; provider: string; apiKey?:
 
 function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'team';
 }

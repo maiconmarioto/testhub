@@ -202,7 +202,8 @@ export function createApp() {
       retentionDays: z.number().int().min(1).optional(),
       cleanupArtifacts: z.boolean().optional(),
     }).parse(req.body);
-    return reply.code(201).send(await store.createProject(input));
+    const organizationId = (req.actor as (AuthActor & { organizationId?: string }) | undefined)?.organizationId ?? 'legacy-local';
+    return reply.code(201).send(await store.createProject({ organizationId, ...input }));
   });
   app.get('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Get project' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);

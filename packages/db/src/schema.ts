@@ -2,6 +2,7 @@ import { boolean, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/p
 
 export const projects = pgTable('projects', {
   id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
   name: text('name').notNull(),
   description: text('description'),
   retentionDays: integer('retention_days'),
@@ -9,6 +10,53 @@ export const projects = pgTable('projects', {
   status: text('status').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+});
+
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull(),
+  name: text('name'),
+  passwordHash: text('password_hash').notNull(),
+  status: text('status').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+});
+
+export const organizations = pgTable('organizations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  status: text('status').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+});
+
+export const memberships = pgTable('organization_memberships', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  userId: text('user_id').notNull(),
+  role: text('role').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+});
+
+export const sessions = pgTable('auth_sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  organizationId: text('organization_id').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+});
+
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
 });
 
 export const environments = pgTable('environments', {
