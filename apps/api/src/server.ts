@@ -619,11 +619,18 @@ export function createApp() {
   app.get('/artifacts', { schema: { tags: ['artifacts'], summary: 'Stream local artifact' } }, async (req, reply) => {
     const query = z.object({ path: z.string() }).parse(req.query);
     const requested = path.resolve(query.path);
-    const allowedRoots = [path.resolve('.testhub-runs'), path.resolve(store.rootDir)];
-    if (!allowedRoots.some((root) => requested.startsWith(root))) return reply.code(403).send({ error: 'Artifact fora de area permitida' });
-    const matchingRun = (await getDb()).runs.find((run) => [run.reportPath, run.reportHtmlPath].filter(Boolean).map((item) => path.resolve(String(item))).includes(requested));
-    if (matchingRun && !(await getRunInActorOrg(matchingRun.id, req.actor))) return reply.code(404).send({ error: 'Artifact nao encontrado' });
+    const organizationId = requireOrganization(req.actor);
+    const db = await getDb();
+    const projectIds = new Set(db.projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive').map((project) => project.id));
+    const authorizedReportPaths = db.runs
+      .filter((run) => run.status !== 'deleted' && projectIds.has(run.projectId))
+      .flatMap((run) => [run.reportPath, run.reportHtmlPath])
+      .filter((item): item is string => Boolean(item))
+      .map((item) => path.resolve(item));
+    const authorized = authorizedReportPaths.some((reportPath) => requested === reportPath || isPathInside(path.dirname(reportPath), requested));
+    if (!authorized) return reply.code(403).send({ error: 'Artifact fora de area permitida' });
     if (!fs.existsSync(requested)) return reply.code(404).send({ error: 'Artifact nao encontrado' });
+    if (!fs.statSync(requested).isFile()) return reply.code(404).send({ error: 'Artifact nao encontrado' });
     const contentType = contentTypeFor(requested);
     if (contentType) reply.type(contentType);
     return reply.send(fs.createReadStream(requested));
@@ -772,6 +779,11 @@ function contentTypeFor(filePath: string): string | undefined {
   if (filePath.endsWith('.png')) return 'image/png';
   if (filePath.endsWith('.log')) return 'text/plain; charset=utf-8';
   return undefined;
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return relative === '' || (relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 const isCliEntry = process.argv.some((arg) => arg.endsWith('apps/api/src/server.ts') || arg.endsWith('apps/api/src/server.js'));

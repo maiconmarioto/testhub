@@ -234,7 +234,8 @@ describe('server local auth', () => {
   });
 
   it('isolates projects and child resources by organization', async () => {
-    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-org-scope-'));
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-org-scope-'));
+    process.env.TESTHUB_DATA_DIR = dataDir;
     process.env.TESTHUB_AUTH_MODE = 'local';
     process.env.NODE_ENV = 'test';
     process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = 'true';
@@ -304,6 +305,31 @@ describe('server local auth', () => {
     });
     expect(runResponse.statusCode).toBe(202);
     const run = runResponse.json() as { id: string };
+
+    const reportDir = path.join(dataDir, 'runs', run.id);
+    const reportPath = path.join(reportDir, 'report.json');
+    const screenshotPath = path.join(reportDir, 'screenshots', 'home.png');
+    fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+    fs.writeFileSync(reportPath, JSON.stringify({ ok: true }), 'utf8');
+    fs.writeFileSync(screenshotPath, 'fake-png', 'utf8');
+    const dbPath = path.join(dataDir, 'db.json');
+    const db = JSON.parse(fs.readFileSync(dbPath, 'utf8')) as { runs: Array<{ id: string; reportPath?: string }> };
+    db.runs = db.runs.map((item) => item.id === run.id ? { ...item, reportPath } : item);
+    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+
+    const aReport = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(reportPath)}`, headers: authA });
+    expect(aReport.statusCode).toBe(200);
+    expect(aReport.json()).toEqual({ ok: true });
+
+    const aChildArtifact = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(screenshotPath)}`, headers: authA });
+    expect(aChildArtifact.statusCode).toBe(200);
+    expect(aChildArtifact.payload).toBe('fake-png');
+
+    const aDb = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(dbPath)}`, headers: authA });
+    expect(aDb.statusCode).toBe(403);
+
+    const bReport = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(reportPath)}`, headers: authB });
+    expect(bReport.statusCode).toBe(403);
 
     const bProjects = await app.inject({ method: 'GET', url: '/api/projects', headers: authB });
     expect(bProjects.statusCode).toBe(200);
