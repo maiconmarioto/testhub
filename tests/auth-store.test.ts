@@ -11,11 +11,13 @@ describe('JsonStore auth and organization methods', () => {
 
     const user = store.createUser({ email: 'qa@example.com', name: 'QA', passwordHash: 'hash' });
     const organization = store.createOrganization({ name: 'QA Team' });
+    const symbolOrganization = store.createOrganization({ name: '!!!' });
     const membership = store.createMembership({ userId: user.id, organizationId: organization.id, role: 'admin' });
     const session = store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: 'token-hash', expiresAt: '2099-01-01T00:00:00.000Z' });
     const reset = store.createPasswordResetToken({ userId: user.id, tokenHash: 'reset-hash', expiresAt: '2099-01-01T00:00:00.000Z' });
 
     expect(store.findUserByEmail('QA@EXAMPLE.COM')).toMatchObject({ id: user.id, email: 'qa@example.com' });
+    expect(symbolOrganization.slug).toBe('team');
     expect(store.listMembershipsForUser(user.id)).toEqual([expect.objectContaining({ id: membership.id, role: 'admin' })]);
     expect(store.findSessionByTokenHash('token-hash')).toMatchObject({ id: session.id, organizationId: organization.id });
     expect(store.findPasswordResetByTokenHash('reset-hash')).toMatchObject({ id: reset.id, usedAt: undefined });
