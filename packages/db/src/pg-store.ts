@@ -237,6 +237,11 @@ export class PgStore implements Store {
     return deleted.length > 0;
   }
 
+  async deleteSessionsForUser(userId: string): Promise<number> {
+    const deleted = await this.db.delete(sessions).where(eq(sessions.userId, userId)).returning({ id: sessions.id });
+    return deleted.length;
+  }
+
   async createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): Promise<PasswordResetToken> {
     const [existing] = await this.db.select({ id: passwordResetTokens.id }).from(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, input.tokenHash));
     if (existing) throw new Error('Token de reset ja cadastrado');
@@ -400,9 +405,10 @@ export class PgStore implements Store {
 
   async upsertAiConnection(input: Omit<AiConnection, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<AiConnection> {
     const now = new Date();
-    const existing = input.id ? (await this.db.select().from(aiConnections).where(eq(aiConnections.id, input.id)))[0] : undefined;
+    const existing = input.id ? (await this.db.select().from(aiConnections).where(and(eq(aiConnections.id, input.id), eq(aiConnections.organizationId, input.organizationId))))[0] : undefined;
     const connection = {
       id: input.id ?? randomUUID(),
+      organizationId: input.organizationId,
       name: input.name,
       provider: input.provider,
       apiKey: input.apiKey ? encryptSecret(input.apiKey) : existing?.apiKey,
@@ -417,14 +423,21 @@ export class PgStore implements Store {
     return rowToAiSafe(connection);
   }
 
+  async listAiConnectionsForOrganization(organizationId: string): Promise<AiConnection[]> {
+    const rows = await this.db.select().from(aiConnections).where(eq(aiConnections.organizationId, organizationId));
+    return rows.map(rowToAiSafe);
+  }
+
   async getEnvironmentVariables(environmentId: string): Promise<Record<string, string>> {
     const [environment] = await this.db.select().from(environments).where(eq(environments.id, environmentId));
     return decryptVariables(environment?.variables ?? undefined);
   }
 
-  async getAiConnection(connectionId?: string): Promise<AiConnection | undefined> {
-    const rows = await this.db.select().from(aiConnections);
-    const connection = connectionId ? rows.find((item) => item.id === connectionId) : rows.find((item) => item.enabled === 'true');
+  async getAiConnection(organizationId: string, connectionId?: string): Promise<AiConnection | undefined> {
+    const conditions = [eq(aiConnections.organizationId, organizationId)];
+    if (connectionId) conditions.push(eq(aiConnections.id, connectionId));
+    const rows = await this.db.select().from(aiConnections).where(and(...conditions));
+    const connection = connectionId ? rows[0] : rows.find((item) => item.enabled === 'true');
     if (!connection) return undefined;
     return { ...rowToAiSafe(connection), apiKey: connection.apiKey ? decryptSecret(connection.apiKey) : undefined };
   }
@@ -526,8 +539,8 @@ function rowToRun(row: Record<string, unknown>): RunRecord {
   };
 }
 
-function rowToAiSafe(row: { id: string; name: string; provider: string; apiKey?: string | null; model: string; baseUrl?: string | null; enabled: string | boolean; createdAt: Date | string; updatedAt: Date | string }): AiConnection {
-  return { id: row.id, name: row.name, provider: row.provider as AiConnection['provider'], apiKey: row.apiKey ? '[REDACTED]' : undefined, model: row.model, baseUrl: row.baseUrl ?? undefined, enabled: row.enabled === true || row.enabled === 'true', createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
+function rowToAiSafe(row: { id: string; organizationId: string; name: string; provider: string; apiKey?: string | null; model: string; baseUrl?: string | null; enabled: string | boolean; createdAt: Date | string; updatedAt: Date | string }): AiConnection {
+  return { id: row.id, organizationId: row.organizationId, name: row.name, provider: row.provider as AiConnection['provider'], apiKey: row.apiKey ? '[REDACTED]' : undefined, model: row.model, baseUrl: row.baseUrl ?? undefined, enabled: row.enabled === true || row.enabled === 'true', createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
 }
 
 function toIso(value: Date | string): string {

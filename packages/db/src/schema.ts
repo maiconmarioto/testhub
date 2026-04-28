@@ -98,6 +98,7 @@ export const runs = pgTable('runs', {
 
 export const aiConnections = pgTable('ai_connections', {
   id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
   name: text('name').notNull(),
   provider: text('provider').notNull(),
   apiKey: text('api_key'),

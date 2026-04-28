@@ -8,6 +8,8 @@ const originalDataDir = process.env.TESTHUB_DATA_DIR;
 const originalAuthMode = process.env.TESTHUB_AUTH_MODE;
 const originalNodeEnv = process.env.NODE_ENV;
 const originalAllowPublicSignup = process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP;
+const originalWebUrl = process.env.TESTHUB_WEB_URL;
+const originalCorsOrigins = process.env.TESTHUB_CORS_ORIGINS;
 const apps: ReturnType<typeof createApp>[] = [];
 
 afterEach(async () => {
@@ -19,6 +21,7 @@ describe('server local auth', () => {
   it('allows credentialed browser auth CORS preflight', async () => {
     process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-cors-'));
     process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.TESTHUB_CORS_ORIGINS = 'http://allowed.example';
     const app = createApp();
     apps.push(app);
     await app.ready();
@@ -36,6 +39,28 @@ describe('server local auth', () => {
     expect(preflight.statusCode).toBe(204);
     expect(preflight.headers['access-control-allow-origin']).toBe('http://localhost:3334');
     expect(preflight.headers['access-control-allow-credentials']).toBe('true');
+
+    const configured = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/auth/login',
+      headers: {
+        origin: 'http://allowed.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+    expect(configured.headers['access-control-allow-origin']).toBe('http://allowed.example');
+
+    const blocked = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/auth/login',
+      headers: {
+        origin: 'https://evil.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+    expect(blocked.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('registers, logs in, reads current user and logs out', async () => {
@@ -430,6 +455,13 @@ describe('server local auth', () => {
     });
     expect(confirm.statusCode).toBe(204);
 
+    const oldSession = await app.inject({
+      method: 'GET',
+      url: '/api/auth/me',
+      headers: { authorization: `Bearer ${(register.json() as { token: string }).token}` },
+    });
+    expect(oldSession.statusCode).toBe(401);
+
     const reused = await app.inject({
       method: 'POST',
       url: '/api/auth/password-reset/confirm',
@@ -597,6 +629,45 @@ describe('server local auth', () => {
     expect(bCreateRun.statusCode).toBe(404);
     const bGetRun = await app.inject({ method: 'GET', url: `/api/runs/${run.id}`, headers: authB });
     expect(bGetRun.statusCode).toBe(404);
+
+    const aiA = await app.inject({
+      method: 'POST',
+      url: '/api/ai/connections',
+      headers: authA,
+      payload: { name: 'Org A AI', provider: 'openai', apiKey: 'sk-a', model: 'gpt-4o-mini', enabled: true },
+    });
+    expect(aiA.statusCode).toBe(201);
+    const aiAConnection = aiA.json() as { id: string; organizationId: string; apiKey?: string };
+    expect(aiAConnection.apiKey).toBe('[REDACTED]');
+
+    const aiBList = await app.inject({ method: 'GET', url: '/api/ai/connections', headers: authB });
+    expect(aiBList.statusCode).toBe(200);
+    expect(aiBList.json()).toEqual([]);
+
+    const aiBUpdateA = await app.inject({
+      method: 'POST',
+      url: '/api/ai/connections',
+      headers: authB,
+      payload: { id: aiAConnection.id, name: 'Stolen', provider: 'openai', model: 'gpt-4o-mini', enabled: true },
+    });
+    expect(aiBUpdateA.statusCode).toBe(404);
+
+    const projectBResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: authB, payload: { name: 'Org B Project' } });
+    expect(projectBResponse.statusCode).toBe(201);
+
+    const auditA = await app.inject({ method: 'GET', url: '/api/audit?limit=100', headers: authA });
+    expect(auditA.statusCode).toBe(200);
+    const entriesA = auditA.json() as Array<{ organizationId?: string; actor: string; action: string }>;
+    expect(entriesA.length).toBeGreaterThan(0);
+    expect(entriesA.every((entry) => entry.organizationId === aiAConnection.organizationId)).toBe(true);
+    expect(entriesA.some((entry) => entry.actor === 'orgb@example.com')).toBe(false);
+
+    const auditB = await app.inject({ method: 'GET', url: '/api/audit?limit=100', headers: authB });
+    expect(auditB.statusCode).toBe(200);
+    const entriesB = auditB.json() as Array<{ organizationId?: string; actor: string }>;
+    expect(entriesB.length).toBeGreaterThan(0);
+    expect(entriesB.every((entry) => entry.organizationId && entry.organizationId !== aiAConnection.organizationId)).toBe(true);
+    expect(entriesB.some((entry) => entry.actor === 'orga@example.com')).toBe(false);
   });
 });
 
@@ -609,4 +680,8 @@ function restoreEnv(): void {
   else process.env.NODE_ENV = originalNodeEnv;
   if (originalAllowPublicSignup === undefined) delete process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP;
   else process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = originalAllowPublicSignup;
+  if (originalWebUrl === undefined) delete process.env.TESTHUB_WEB_URL;
+  else process.env.TESTHUB_WEB_URL = originalWebUrl;
+  if (originalCorsOrigins === undefined) delete process.env.TESTHUB_CORS_ORIGINS;
+  else process.env.TESTHUB_CORS_ORIGINS = originalCorsOrigins;
 }

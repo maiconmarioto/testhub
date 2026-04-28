@@ -107,6 +107,7 @@ export interface RunRecord {
 
 export interface AiConnection {
   id: string;
+  organizationId: string;
   name: string;
   provider: 'openrouter' | 'openai' | 'anthropic';
   apiKey?: string;
@@ -149,8 +150,9 @@ export interface Store {
   updateRun(id: string, patch: Partial<RunRecord>): Promise<RunRecord> | RunRecord;
   archiveRunsBefore?(cutoffIso: string, options?: { projectId?: string; cleanupArtifacts?: boolean; runsDir?: string }): Promise<number> | number;
   upsertAiConnection(input: Omit<AiConnection, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<AiConnection> | AiConnection;
+  listAiConnectionsForOrganization(organizationId: string): Promise<AiConnection[]> | AiConnection[];
   getEnvironmentVariables(environmentId: string): Promise<Record<string, string>> | Record<string, string>;
-  getAiConnection(connectionId?: string): Promise<AiConnection | undefined> | AiConnection | undefined;
+  getAiConnection(organizationId: string, connectionId?: string): Promise<AiConnection | undefined> | AiConnection | undefined;
   createUser(input: { email: string; name?: string; passwordHash: string }): Promise<User> | User;
   hasActiveUsers(): Promise<boolean> | boolean;
   findUserByEmail(email: string): Promise<User | undefined> | User | undefined;
@@ -165,6 +167,7 @@ export interface Store {
   createSession(input: { userId: string; organizationId: string; tokenHash: string; expiresAt: string }): Promise<AuthSession> | AuthSession;
   findSessionByTokenHash(tokenHash: string): Promise<AuthSession | undefined> | AuthSession | undefined;
   deleteSession(id: string): Promise<boolean> | boolean;
+  deleteSessionsForUser(userId: string): Promise<number> | number;
   createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): Promise<PasswordResetToken> | PasswordResetToken;
   findPasswordResetByTokenHash(tokenHash: string): Promise<PasswordResetToken | undefined> | PasswordResetToken | undefined;
   markPasswordResetUsed(id: string): Promise<PasswordResetToken | undefined> | PasswordResetToken | undefined;
@@ -222,7 +225,10 @@ export class JsonStore {
       environments: db.environments ?? [],
       suites: db.suites ?? [],
       runs: db.runs ?? [],
-      aiConnections: db.aiConnections ?? [],
+      aiConnections: (db.aiConnections ?? []).map((connection) => ({
+        ...connection,
+        organizationId: connection.organizationId ?? LEGACY_ORGANIZATION_ID,
+      })),
     };
   }
 
@@ -374,6 +380,15 @@ export class JsonStore {
     if (db.sessions.length === before) return false;
     this.write(db);
     return true;
+  }
+
+  deleteSessionsForUser(userId: string): number {
+    const db = this.read();
+    const before = db.sessions.length;
+    db.sessions = db.sessions.filter((session) => session.userId !== userId);
+    const deleted = before - db.sessions.length;
+    if (deleted > 0) this.write(db);
+    return deleted;
   }
 
   createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): PasswordResetToken {
@@ -577,9 +592,10 @@ export class JsonStore {
   upsertAiConnection(input: Omit<AiConnection, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): AiConnection {
     const db = this.read();
     const now = nowIso();
-    const existing = input.id ? db.aiConnections.findIndex((connection) => connection.id === input.id) : -1;
+    const existing = input.id ? db.aiConnections.findIndex((connection) => connection.id === input.id && connection.organizationId === input.organizationId) : -1;
     const connection: AiConnection = {
       id: input.id ?? randomUUID(),
+      organizationId: input.organizationId,
       name: input.name,
       provider: input.provider,
       apiKey: input.apiKey ? encryptSecret(input.apiKey) : undefined,
@@ -595,15 +611,21 @@ export class JsonStore {
     return { ...connection, apiKey: connection.apiKey ? '[REDACTED]' : undefined };
   }
 
+  listAiConnectionsForOrganization(organizationId: string): AiConnection[] {
+    return this.read().aiConnections
+      .filter((connection) => connection.organizationId === organizationId)
+      .map((connection) => ({ ...connection, apiKey: connection.apiKey ? '[REDACTED]' : undefined }));
+  }
+
   getEnvironmentVariables(environmentId: string): Record<string, string> {
     const environment = this.read().environments.find((item) => item.id === environmentId);
     return decryptVariables(environment?.variables);
   }
 
-  getAiConnection(connectionId?: string): AiConnection | undefined {
+  getAiConnection(organizationId: string, connectionId?: string): AiConnection | undefined {
     const connection = connectionId
-      ? this.read().aiConnections.find((item) => item.id === connectionId)
-      : this.read().aiConnections.find((item) => item.enabled);
+      ? this.read().aiConnections.find((item) => item.id === connectionId && item.organizationId === organizationId)
+      : this.read().aiConnections.find((item) => item.enabled && item.organizationId === organizationId);
     if (!connection) return undefined;
     return { ...connection, apiKey: connection.apiKey ? decryptSecret(connection.apiKey) : undefined };
   }

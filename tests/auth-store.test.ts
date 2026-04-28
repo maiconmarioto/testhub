@@ -22,6 +22,8 @@ describe('JsonStore auth and organization methods', () => {
     expect(store.listMembershipsForUser(user.id)).toEqual([expect.objectContaining({ id: membership.id, role: 'admin' })]);
     expect(store.findSessionByTokenHash('token-hash')).toMatchObject({ id: session.id, organizationId: organization.id });
     expect(store.findPasswordResetByTokenHash('reset-hash')).toMatchObject({ id: reset.id, usedAt: undefined });
+    expect(store.deleteSessionsForUser(user.id)).toBe(1);
+    expect(store.findSessionByTokenHash('token-hash')).toBeUndefined();
 
     const used = store.markPasswordResetUsed(reset.id);
     expect(used?.usedAt).toBeTruthy();
@@ -29,6 +31,34 @@ describe('JsonStore auth and organization methods', () => {
 
     const usedAgain = store.markPasswordResetUsed(reset.id);
     expect(usedAgain).toBeUndefined();
+  });
+
+  it('scopes AI connections to an organization', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-auth-ai-'));
+    const store = new JsonStore(root);
+    const orgA = store.createOrganization({ name: 'Team A' });
+    const orgB = store.createOrganization({ name: 'Team B' });
+
+    const connectionA = store.upsertAiConnection({
+      organizationId: orgA.id,
+      name: 'Org A AI',
+      provider: 'openai',
+      apiKey: 'sk-a',
+      model: 'gpt-4o-mini',
+      enabled: true,
+    });
+    store.upsertAiConnection({
+      organizationId: orgB.id,
+      name: 'Org B AI',
+      provider: 'openai',
+      apiKey: 'sk-b',
+      model: 'gpt-4o-mini',
+      enabled: true,
+    });
+
+    expect(store.listAiConnectionsForOrganization(orgA.id)).toEqual([expect.objectContaining({ id: connectionA.id, organizationId: orgA.id, apiKey: '[REDACTED]' })]);
+    expect(store.getAiConnection(orgA.id, connectionA.id)).toMatchObject({ id: connectionA.id, organizationId: orgA.id, apiKey: 'sk-a' });
+    expect(store.getAiConnection(orgB.id, connectionA.id)).toBeUndefined();
   });
 
   it('scopes projects to an organization', () => {

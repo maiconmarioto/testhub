@@ -6,6 +6,7 @@ import { ensureDir } from '../../shared/src/fs-utils.js';
 export interface AuditEntry {
   id: string;
   action: string;
+  organizationId?: string;
   actor: string;
   actorRole?: string;
   target?: string;
@@ -30,7 +31,7 @@ export function writeAudit(entry: Omit<AuditEntry, 'id' | 'createdAt'>, rootDir?
   return full;
 }
 
-export function readAudit(options: number | { limit?: number; actor?: string; action?: string; status?: AuditEntry['status'] } = 50, rootDir?: string): AuditEntry[] {
+export function readAudit(options: number | { limit?: number; actor?: string; action?: string; status?: AuditEntry['status']; organizationId?: string } = 50, rootDir?: string): AuditEntry[] {
   const filters = typeof options === 'number' ? { limit: options } : options;
   const limit = filters.limit ?? 50;
   const file = auditPath(rootDir);
@@ -42,6 +43,7 @@ export function readAudit(options: number | { limit?: number; actor?: string; ac
     .filter((entry) => !filters.actor || entry.actor.toLowerCase().includes(filters.actor.toLowerCase()))
     .filter((entry) => !filters.action || entry.action.toLowerCase().includes(filters.action.toLowerCase()))
     .filter((entry) => !filters.status || entry.status === filters.status)
+    .filter((entry) => !filters.organizationId || entry.organizationId === filters.organizationId)
     .slice(-limit)
     .reverse();
 }

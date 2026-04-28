@@ -63,7 +63,11 @@ if (!pgTestDatabaseUrl) {
       expect(await store.listMembershipsForUser(user.id)).toEqual([expect.objectContaining({ id: membership.id, role: 'admin' })]);
       expect(await store.listMembershipsForOrganization(organization.id)).toEqual([expect.objectContaining({ id: membership.id })]);
       expect(await store.findSessionByTokenHash('token-hash')).toMatchObject({ id: session.id, organizationId: organization.id });
-      await expect(store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: 'token-hash', expiresAt: '2099-01-01T00:00:00.000Z' })).rejects.toThrow('Sessao ja cadastrada');
+      expect(await store.deleteSessionsForUser(user.id)).toBe(1);
+      expect(await store.findSessionByTokenHash('token-hash')).toBeUndefined();
+      const newSession = await store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: 'token-hash-2', expiresAt: '2099-01-01T00:00:00.000Z' });
+      expect(await store.findSessionByTokenHash(newSession.tokenHash)).toMatchObject({ id: newSession.id });
+      await expect(store.createSession({ userId: user.id, organizationId: organization.id, tokenHash: 'token-hash-2', expiresAt: '2099-01-01T00:00:00.000Z' })).rejects.toThrow('Sessao ja cadastrada');
       expect(await store.findPasswordResetByTokenHash('reset-hash')).toMatchObject({ id: reset.id, usedAt: undefined });
       await expect(store.createPasswordResetToken({ userId: user.id, tokenHash: 'reset-hash', expiresAt: '2099-01-01T00:00:00.000Z' })).rejects.toThrow('Token de reset ja cadastrado');
 
@@ -72,6 +76,12 @@ if (!pgTestDatabaseUrl) {
       expect(await store.findPasswordResetByTokenHash('reset-hash')).toBeUndefined();
       expect(await store.markPasswordResetUsed(reset.id)).toBeUndefined();
       expect(await store.listProjectsForOrganization(organization.id)).toEqual([expect.objectContaining({ id: project.id, organizationId: organization.id })]);
+
+      const aiA = await store.upsertAiConnection({ organizationId: organization.id, name: 'Org A AI', provider: 'openai', apiKey: 'sk-a', model: 'gpt-4o-mini', enabled: true });
+      await store.upsertAiConnection({ organizationId: duplicateOrganization.id, name: 'Org B AI', provider: 'openai', apiKey: 'sk-b', model: 'gpt-4o-mini', enabled: true });
+      expect(await store.listAiConnectionsForOrganization(organization.id)).toEqual([expect.objectContaining({ id: aiA.id, organizationId: organization.id, apiKey: '[REDACTED]' })]);
+      expect(await store.getAiConnection(organization.id, aiA.id)).toMatchObject({ id: aiA.id, organizationId: organization.id, apiKey: 'sk-a' });
+      expect(await store.getAiConnection(duplicateOrganization.id, aiA.id)).toBeUndefined();
     });
 
     it('ignores expired sessions and reset tokens', async () => {

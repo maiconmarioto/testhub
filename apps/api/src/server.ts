@@ -101,7 +101,9 @@ export function createApp() {
 
   app.register(cookie);
   app.register(cors, {
-    origin: true,
+    origin: (origin: string | undefined, callback: (error: Error | null, origin: string | boolean) => void) => {
+      callback(null, isCorsOriginAllowed(origin) ? (origin ?? true) : false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
@@ -201,6 +203,7 @@ export function createApp() {
     if (permission && !hasPermission(actor.role, permission)) {
       writeAudit({
         action: `rbac.denied ${req.method} ${req.url.split('?')[0]}`,
+        organizationId: actor.organizationId,
         actor: actorLabel(actor),
         actorRole: actor.role,
         status: 'blocked',
@@ -216,6 +219,7 @@ export function createApp() {
     const actor = req.actor ?? null;
     writeAudit({
       action: `${req.method} ${req.url.split('?')[0]}`,
+      organizationId: actor?.organizationId,
       actor: actorLabel(actor),
       actorRole: actor?.role,
       status: reply.statusCode >= 400 ? 'error' : 'ok',
@@ -395,6 +399,7 @@ export function createApp() {
     if (!usedToken) return reply.code(400).send({ error: 'Token invalido ou expirado' });
     const user = await store.updateUserPassword(usedToken.userId, await hashPassword(input.password));
     if (!user) return reply.code(400).send({ error: 'Token invalido ou expirado' });
+    await store.deleteSessionsForUser(user.id);
     return reply.code(204).send();
   });
 
@@ -405,7 +410,7 @@ export function createApp() {
       action: z.string().optional(),
       status: z.enum(['ok', 'blocked', 'error']).optional(),
     }).parse(req.query);
-    return readAudit(query, store.rootDir);
+    return readAudit({ ...query, organizationId: requireOrganization(req.actor) }, store.rootDir);
   });
 
   app.get('/api/audit/export', { schema: { tags: ['system'], summary: 'Audit CSV export' } }, async (req, reply) => {
@@ -417,7 +422,7 @@ export function createApp() {
     }).parse(req.query);
     reply.header('content-type', 'text/csv; charset=utf-8');
     reply.header('content-disposition', 'attachment; filename="testhub-audit.csv"');
-    return auditCsv(readAudit(query, store.rootDir));
+    return auditCsv(readAudit({ ...query, organizationId: requireOrganization(req.actor) }, store.rootDir));
   });
 
   app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async (req) => store.listProjectsForOrganization(requireOrganization(req.actor)));
@@ -629,6 +634,7 @@ export function createApp() {
     if (!isHostAllowed(environment.baseUrl)) {
       writeAudit({
         action: 'run.blocked.host_allowlist',
+        organizationId: req.actor?.organizationId,
         actor: actorLabel(req.actor ?? null),
         actorRole: req.actor?.role,
         target: environment.baseUrl,
@@ -693,9 +699,7 @@ export function createApp() {
     return reply.send(fs.createReadStream(requested));
   });
 
-  app.get('/api/ai/connections', { schema: { tags: ['ai'], summary: 'List AI connections' } }, async () => (
-    await store.read()
-  ).aiConnections.map((connection) => ({ ...connection, apiKey: connection.apiKey ? '[REDACTED]' : undefined })));
+  app.get('/api/ai/connections', { schema: { tags: ['ai'], summary: 'List AI connections' } }, async (req) => store.listAiConnectionsForOrganization(requireOrganization(req.actor)));
   app.post('/api/ai/connections', { schema: { tags: ['ai'], summary: 'Create or update AI connection' } }, async (req, reply) => {
     const input = z.object({
       id: z.string().optional(),
@@ -709,12 +713,14 @@ export function createApp() {
     if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.apiKey) {
       return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de API key em producao.' });
     }
-    return reply.code(201).send(await store.upsertAiConnection(input));
+    const organizationId = requireOrganization(req.actor);
+    if (input.id && !(await store.getAiConnection(organizationId, input.id))) return reply.code(404).send({ error: 'AI connection nao encontrada' });
+    return reply.code(201).send(await store.upsertAiConnection({ ...input, organizationId }));
   });
   app.post('/api/ai/:kind', { schema: { tags: ['ai'], summary: 'Run AI assistant task' } }, async (req, reply) => {
     const params = z.object({ kind: z.enum(['explain-failure', 'suggest-test-fix', 'suggest-test-cases']) }).parse(req.params);
     const body = z.object({ connectionId: z.string().optional(), context: z.unknown() }).parse(req.body);
-    const connection = await store.getAiConnection(body.connectionId);
+    const connection = await store.getAiConnection(requireOrganization(req.actor), body.connectionId);
     if (!connection) return reply.code(400).send({ error: 'Nenhuma AI connection habilitada' });
     const context = redactDeep(body.context);
     const prompt = params.kind === 'explain-failure'
@@ -725,6 +731,7 @@ export function createApp() {
     const result = await callAi(connection, prompt);
     writeAudit({
       action: `ai.${params.kind}`,
+      organizationId: req.actor?.organizationId,
       actor: actorLabel(req.actor ?? null),
       actorRole: req.actor?.role,
       status: 'ok',
@@ -749,6 +756,7 @@ export function createApp() {
     if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
     writeAudit({
       action: 'ai.apply-test-fix',
+      organizationId: req.actor?.organizationId,
       actor: actorLabel(req.actor ?? null),
       actorRole: req.actor?.role,
       target: input.suiteId,
@@ -810,6 +818,24 @@ function clearSessionCookie(reply: FastifyReply): void {
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
   });
+}
+
+function isCorsOriginAllowed(origin?: string): boolean {
+  if (!origin) return true;
+  return corsOrigins().has(origin);
+}
+
+function corsOrigins(): Set<string> {
+  const configured = [
+    process.env.TESTHUB_WEB_URL,
+    ...(process.env.TESTHUB_CORS_ORIGINS ?? '').split(','),
+  ]
+    .map((item) => item?.trim())
+    .filter((item): item is string => Boolean(item));
+  const defaults = process.env.NODE_ENV === 'production'
+    ? []
+    : ['http://localhost:3333', 'http://127.0.0.1:3333', 'http://localhost:3334', 'http://127.0.0.1:3334'];
+  return new Set([...defaults, ...configured]);
 }
 
 function permissionFor(method: string, url: string): Permission | null {
