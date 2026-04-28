@@ -6,9 +6,59 @@ import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskV
 
 export type EntityStatus = 'active' | 'inactive';
 export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
+export type UserStatus = 'active' | 'disabled';
+export type MembershipRole = 'admin' | 'editor' | 'viewer';
+
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+  passwordHash: string;
+  status: UserStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrganizationMembership {
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: MembershipRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuthSession {
+  id: string;
+  userId: string;
+  organizationId: string;
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+export interface PasswordResetToken {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+  usedAt?: string;
+  createdAt: string;
+}
 
 export interface Project {
   id: string;
+  organizationId: string;
   name: string;
   description?: string;
   retentionDays?: number;
@@ -68,6 +118,11 @@ export interface AiConnection {
 }
 
 export interface Database {
+  users: User[];
+  organizations: Organization[];
+  memberships: OrganizationMembership[];
+  sessions: AuthSession[];
+  passwordResetTokens: PasswordResetToken[];
   projects: Project[];
   environments: Environment[];
   suites: Suite[];
@@ -81,7 +136,7 @@ export interface Store {
   runsDir: string;
   read(): Promise<Database> | Database;
   getProject(id: string): Promise<Project | undefined> | Project | undefined;
-  createProject(input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project> | Project;
+  createProject(input: { organizationId: string; name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project> | Project;
   updateProject(id: string, input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project | undefined> | Project | undefined;
   archiveProject(id: string): Promise<boolean> | boolean;
   createEnvironment(input: { projectId: string; name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment> | Environment;
@@ -96,9 +151,31 @@ export interface Store {
   upsertAiConnection(input: Omit<AiConnection, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<AiConnection> | AiConnection;
   getEnvironmentVariables(environmentId: string): Promise<Record<string, string>> | Record<string, string>;
   getAiConnection(connectionId?: string): Promise<AiConnection | undefined> | AiConnection | undefined;
+  createUser(input: { email: string; name?: string; passwordHash: string }): Promise<User> | User;
+  findUserByEmail(email: string): Promise<User | undefined> | User | undefined;
+  findUserById(id: string): Promise<User | undefined> | User | undefined;
+  updateUserPassword(userId: string, passwordHash: string): Promise<User | undefined> | User | undefined;
+  createOrganization(input: { name: string; slug?: string }): Promise<Organization> | Organization;
+  listOrganizationsForUser(userId: string): Promise<Organization[]> | Organization[];
+  createMembership(input: { userId: string; organizationId: string; role: MembershipRole }): Promise<OrganizationMembership> | OrganizationMembership;
+  listMembershipsForUser(userId: string): Promise<OrganizationMembership[]> | OrganizationMembership[];
+  findMembership(userId: string, organizationId: string): Promise<OrganizationMembership | undefined> | OrganizationMembership | undefined;
+  listMembershipsForOrganization(organizationId: string): Promise<OrganizationMembership[]> | OrganizationMembership[];
+  createSession(input: { userId: string; organizationId: string; tokenHash: string; expiresAt: string }): Promise<AuthSession> | AuthSession;
+  findSessionByTokenHash(tokenHash: string): Promise<AuthSession | undefined> | AuthSession | undefined;
+  deleteSession(id: string): Promise<boolean> | boolean;
+  createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): Promise<PasswordResetToken> | PasswordResetToken;
+  findPasswordResetByTokenHash(tokenHash: string): Promise<PasswordResetToken | undefined> | PasswordResetToken | undefined;
+  markPasswordResetUsed(id: string): Promise<PasswordResetToken | undefined> | PasswordResetToken | undefined;
+  listProjectsForOrganization(organizationId: string): Promise<Project[]> | Project[];
 }
 
 const emptyDb: Database = {
+  users: [],
+  organizations: [],
+  memberships: [],
+  sessions: [],
+  passwordResetTokens: [],
   projects: [],
   environments: [],
   suites: [],
@@ -128,7 +205,8 @@ export class JsonStore {
   }
 
   read(): Database {
-    return JSON.parse(fs.readFileSync(this.dbPath, 'utf8')) as Database;
+    const db = JSON.parse(fs.readFileSync(this.dbPath, 'utf8')) as Partial<Database>;
+    return { ...emptyDb, ...db };
   }
 
   write(db: Database): void {
@@ -139,11 +217,12 @@ export class JsonStore {
     return this.read().projects.find((project) => project.id === id && project.status !== 'inactive');
   }
 
-  createProject(input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Project {
+  createProject(input: { organizationId: string; name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Project {
     const db = this.read();
     const now = nowIso();
     const project: Project = {
       id: randomUUID(),
+      organizationId: input.organizationId,
       name: input.name,
       description: input.description,
       retentionDays: input.retentionDays,
@@ -155,6 +234,163 @@ export class JsonStore {
     db.projects.push(project);
     this.write(db);
     return project;
+  }
+
+  createUser(input: { email: string; name?: string; passwordHash: string }): User {
+    const db = this.read();
+    const now = nowIso();
+    const user: User = {
+      id: randomUUID(),
+      email: normalizeEmail(input.email),
+      name: input.name,
+      passwordHash: input.passwordHash,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.users.push(user);
+    this.write(db);
+    return user;
+  }
+
+  findUserByEmail(email: string): User | undefined {
+    const normalized = normalizeEmail(email);
+    return this.read().users.find((user) => user.email === normalized && user.status === 'active');
+  }
+
+  findUserById(id: string): User | undefined {
+    return this.read().users.find((user) => user.id === id && user.status === 'active');
+  }
+
+  updateUserPassword(userId: string, passwordHash: string): User | undefined {
+    const db = this.read();
+    const index = db.users.findIndex((user) => user.id === userId && user.status === 'active');
+    if (index === -1) return undefined;
+    const user: User = {
+      ...db.users[index],
+      passwordHash,
+      updatedAt: nowIso(),
+    };
+    db.users[index] = user;
+    this.write(db);
+    return user;
+  }
+
+  createOrganization(input: { name: string; slug?: string }): Organization {
+    const db = this.read();
+    const now = nowIso();
+    const organization: Organization = {
+      id: randomUUID(),
+      name: input.name,
+      slug: input.slug ?? slugify(input.name),
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.organizations.push(organization);
+    this.write(db);
+    return organization;
+  }
+
+  listOrganizationsForUser(userId: string): Organization[] {
+    const db = this.read();
+    const organizationIds = new Set(db.memberships.filter((membership) => membership.userId === userId).map((membership) => membership.organizationId));
+    return db.organizations.filter((organization) => organizationIds.has(organization.id) && organization.status === 'active');
+  }
+
+  createMembership(input: { userId: string; organizationId: string; role: MembershipRole }): OrganizationMembership {
+    const db = this.read();
+    const now = nowIso();
+    const membership: OrganizationMembership = {
+      id: randomUUID(),
+      userId: input.userId,
+      organizationId: input.organizationId,
+      role: input.role,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.memberships.push(membership);
+    this.write(db);
+    return membership;
+  }
+
+  listMembershipsForUser(userId: string): OrganizationMembership[] {
+    return this.read().memberships.filter((membership) => membership.userId === userId);
+  }
+
+  findMembership(userId: string, organizationId: string): OrganizationMembership | undefined {
+    return this.read().memberships.find((membership) => membership.userId === userId && membership.organizationId === organizationId);
+  }
+
+  listMembershipsForOrganization(organizationId: string): OrganizationMembership[] {
+    return this.read().memberships.filter((membership) => membership.organizationId === organizationId);
+  }
+
+  createSession(input: { userId: string; organizationId: string; tokenHash: string; expiresAt: string }): AuthSession {
+    const db = this.read();
+    const session: AuthSession = {
+      id: randomUUID(),
+      userId: input.userId,
+      organizationId: input.organizationId,
+      tokenHash: input.tokenHash,
+      expiresAt: input.expiresAt,
+      createdAt: nowIso(),
+    };
+    db.sessions.push(session);
+    this.write(db);
+    return session;
+  }
+
+  findSessionByTokenHash(tokenHash: string): AuthSession | undefined {
+    const now = nowIso();
+    return this.read().sessions.find((session) => session.tokenHash === tokenHash && session.expiresAt > now);
+  }
+
+  deleteSession(id: string): boolean {
+    const db = this.read();
+    const before = db.sessions.length;
+    db.sessions = db.sessions.filter((session) => session.id !== id);
+    if (db.sessions.length === before) return false;
+    this.write(db);
+    return true;
+  }
+
+  createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): PasswordResetToken {
+    const db = this.read();
+    const resetToken: PasswordResetToken = {
+      id: randomUUID(),
+      userId: input.userId,
+      tokenHash: input.tokenHash,
+      expiresAt: input.expiresAt,
+      usedAt: undefined,
+      createdAt: nowIso(),
+    };
+    db.passwordResetTokens.push(resetToken);
+    this.write(db);
+    return resetToken;
+  }
+
+  findPasswordResetByTokenHash(tokenHash: string): PasswordResetToken | undefined {
+    const now = nowIso();
+    const resetToken = this.read().passwordResetTokens.find((item) => item.tokenHash === tokenHash && item.expiresAt > now && !item.usedAt);
+    return resetToken ? { ...resetToken, usedAt: resetToken.usedAt } : undefined;
+  }
+
+  markPasswordResetUsed(id: string): PasswordResetToken | undefined {
+    const db = this.read();
+    const index = db.passwordResetTokens.findIndex((resetToken) => resetToken.id === id);
+    if (index === -1) return undefined;
+    const resetToken: PasswordResetToken = {
+      ...db.passwordResetTokens[index],
+      usedAt: nowIso(),
+    };
+    db.passwordResetTokens[index] = resetToken;
+    this.write(db);
+    return resetToken;
+  }
+
+  listProjectsForOrganization(organizationId: string): Project[] {
+    return this.read().projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive');
   }
 
   updateProject(id: string, input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Project | undefined {
@@ -352,6 +588,18 @@ export class JsonStore {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 function cleanupRunArtifacts(allowedRoot: string, ...paths: Array<string | undefined>): void {
