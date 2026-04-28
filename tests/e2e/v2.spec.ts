@@ -1,18 +1,15 @@
-import fs from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:44321';
-const bootstrapUserPath = '.testhub-e2e/e2e-bootstrap-user.json';
 const userPassword = 'password-1234';
 
 type TestUser = {
-  email: string;
-  password: string;
-  organizationName: string;
   token: string;
 };
 
 let bootstrapUser: TestUser | undefined;
+
+test.describe.configure({ mode: 'serial' });
 
 test('protected routes redirect anonymous user to login', async ({ page }) => {
   await routeApi(page);
@@ -21,8 +18,8 @@ test('protected routes redirect anonymous user to login', async ({ page }) => {
 });
 
 test('v2 keeps shared query params and navigates real management pages', async ({ page }) => {
-  await login(page);
-  const fixture = await seedWorkspace();
+  const token = await login(page);
+  const fixture = await seedWorkspace(token);
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
   await expect(page.getByRole('button', { name: 'Wizard' })).toBeVisible();
@@ -48,8 +45,8 @@ test('v2 keeps shared query params and navigates real management pages', async (
 });
 
 test('project screen edits retention and environment, then suite edit link opens selected suite', async ({ page }) => {
-  await login(page);
-  const fixture = await seedWorkspace('crud-flow');
+  const token = await login(page);
+  const fixture = await seedWorkspace(token, 'crud-flow');
   await page.goto(`/projects?project=${fixture.project.id}`);
 
   await expect(page.getByRole('heading', { name: 'Ambientes do projeto' })).toBeVisible();
@@ -64,8 +61,8 @@ test('project screen edits retention and environment, then suite edit link opens
 });
 
 test('suites page imports OpenAPI with advanced options and saves Monaco YAML', async ({ page }) => {
-  await login(page);
-  const fixture = await seedWorkspace('openapi-flow');
+  const token = await login(page);
+  const fixture = await seedWorkspace(token, 'openapi-flow');
   await page.goto(`/suites?project=${fixture.project.id}&suite=${fixture.suite.id}`);
 
   await page.getByRole('button', { name: 'Nova suite' }).click();
@@ -107,8 +104,8 @@ test('settings cover AI connection, retention cleanup and audit export link', as
 });
 
 test('evidence sheet exposes tabs and artifacts without duplicate request rows', async ({ page }) => {
-  await login(page);
-  const fixture = await seedWorkspace('evidence-tabs');
+  const token = await login(page);
+  const fixture = await seedWorkspace(token, 'evidence-tabs');
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
   await page.getByRole('button', { name: 'Run suite' }).click();
@@ -144,8 +141,8 @@ test('wizard creates a full workspace and ignores Escape', async ({ page }) => {
 });
 
 test('v2 run flow creates evidence', async ({ page }) => {
-  await login(page);
-  const fixture = await seedWorkspace('run-flow');
+  const token = await login(page);
+  const fixture = await seedWorkspace(token, 'run-flow');
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
   await page.getByRole('button', { name: 'Run suite' }).click();
@@ -184,7 +181,7 @@ async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
 
   const token = await page.evaluate(() => window.localStorage.getItem('testhub.token'));
   if (!token) throw new Error('Login did not persist testhub.token');
-  setBootstrapUser({ email, password: userPassword, organizationName, token });
+  setBootstrapUser(token);
   return token;
 }
 
@@ -223,9 +220,8 @@ async function routeApi(page: Page): Promise<void> {
   });
 }
 
-async function seedWorkspace(name = 'v2-e2e') {
+async function seedWorkspace(token: string, name = 'v2-e2e') {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const token = await createApiUser();
   const project = await post<{ id: string }>('/api/projects', { name: `${name}-${suffix}` }, token);
   const environment = await post<{ id: string }>('/api/environments', {
     projectId: project.id,
@@ -258,7 +254,7 @@ async function createApiUser(email = uniqueEmail('api'), password = userPassword
   });
   if (register.ok) {
     const body = await register.json() as { token: string };
-    setBootstrapUser({ email, password, organizationName, token: body.token });
+    setBootstrapUser(body.token);
     return body.token;
   }
 
@@ -266,7 +262,6 @@ async function createApiUser(email = uniqueEmail('api'), password = userPassword
   if (register.status !== 403 || !registerError.includes('Cadastro publico')) {
     throw new Error(registerError);
   }
-  bootstrapUser ??= readBootstrapUser();
   if (!bootstrapUser) throw new Error('Public signup disabled before a bootstrap user was available');
 
   await post('/api/organizations/current/members', {
@@ -304,18 +299,9 @@ function uniqueName(prefix: string): string {
   return `${prefix} ${Date.now()} ${Math.random().toString(16).slice(2)}`;
 }
 
-function setBootstrapUser(user: TestUser): void {
+function setBootstrapUser(token: string): void {
   if (bootstrapUser) return;
-  bootstrapUser = user;
-  fs.writeFileSync(bootstrapUserPath, JSON.stringify(user), 'utf8');
-}
-
-function readBootstrapUser(): TestUser | undefined {
-  try {
-    return JSON.parse(fs.readFileSync(bootstrapUserPath, 'utf8')) as TestUser;
-  } catch {
-    return undefined;
-  }
+  bootstrapUser = { token };
 }
 
 function corsHeaders(origin: string, headers: Record<string, string>): Record<string, string> {
