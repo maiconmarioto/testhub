@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Database, FileCode2, FolderKanban, Loader2, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Database, FileCode2, FolderKanban, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
 import YAML from 'yaml';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { api, apiBase } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 type Project = { id: string; name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean };
@@ -33,6 +34,7 @@ type SecurityStatus = {
   network: { allowedHosts: string[]; allowAllWhenEmpty: boolean };
   retention: { days: number };
 };
+type AuthMe = { user: { email: string; name?: string }; organization: { id: string; name: string }; membership: { role: 'admin' | 'editor' | 'viewer' }; organizations: Array<{ id: string; name: string }> };
 type AuditEntry = { id: string; action: string; actor: string; status: 'ok' | 'blocked' | 'error'; target?: string; createdAt: string; detail?: Record<string, unknown> };
 type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
 type Run = {
@@ -78,7 +80,6 @@ type WizardDraft = {
 };
 type OpenApiDraft = { name: string; spec: string; baseUrl: string; authTemplate: 'none' | 'bearer' | 'apiKey'; headers: string; tags: string; selectedOperations: string; includeBodyExamples: boolean };
 
-const apiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localhost:4321';
 const controlClass = 'h-10 border-[#d7d2c4] bg-white text-[#1f241f] shadow-none placeholder:text-[#8a877c] focus-visible:ring-[#426b4d]';
 const darkSelectClass = `min-w-52 ${controlClass}`;
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
@@ -100,6 +101,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [runs, setRuns] = useState<Run[]>([]);
   const [aiConnections, setAiConnections] = useState<AiConnection[]>([]);
   const [security, setSecurity] = useState<SecurityStatus | null>(null);
+  const [me, setMe] = useState<AuthMe | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [projectId, setProjectId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
@@ -148,7 +150,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     [projectRuns, suiteId, environmentId],
   );
   const selectedRun = scopedRuns.find((run) => run.id === selectedRunId) ?? scopedRuns[0];
-  const role = (security?.auth.rbacRole ?? 'admin') as 'admin' | 'editor' | 'viewer';
+  const role = (me?.membership.role ?? security?.auth.rbacRole ?? 'viewer') as 'admin' | 'editor' | 'viewer';
   const canWrite = role === 'admin' || role === 'editor';
   const canAdmin = role === 'admin';
   const stats = summarize(scopedRuns);
@@ -159,6 +161,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   async function refresh() {
     setError('');
     try {
+      const nextMe = await api<AuthMe>('/api/auth/me');
       const [nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
         api<Project[]>('/api/projects'),
         api<Environment[]>('/api/environments'),
@@ -168,6 +171,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
         api<SecurityStatus>('/api/system/security').catch(() => null),
         api<AuditEntry[]>('/api/audit?limit=40').catch(() => []),
       ]);
+      setMe(nextMe);
       setProjects(nextProjects);
       setEnvs(nextEnvs);
       setSuites(nextSuites);
@@ -185,6 +189,19 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       });
     } catch (nextError) {
       setError(messageOf(nextError));
+    }
+  }
+
+  async function logout() {
+    setBusy(true);
+    setError('');
+    try {
+      await api('/api/auth/logout', { method: 'POST', body: '{}' }).catch(() => undefined);
+      window.localStorage.removeItem('testhub.token');
+      window.location.assign('/login');
+    } catch (nextError) {
+      setError(messageOf(nextError));
+      setBusy(false);
     }
   }
 
@@ -575,6 +592,12 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 )}
               </div>
               <div className="flex flex-wrap items-end gap-2">
+                {me ? (
+                  <div className="grid min-w-44 rounded-md border border-[#d7d2c4] bg-white px-3 py-2 text-right">
+                    <span className="truncate text-sm font-semibold">{me.user.name || me.user.email}</span>
+                    <span className="truncate font-mono text-[10px] uppercase tracking-[0.16em] text-[#66705f]">{me.organization.name} · {role}</span>
+                  </div>
+                ) : null}
                 <Field label="Projeto">
                   <Select value={projectId} onValueChange={(value) => {
                     setProjectId(value);
@@ -610,6 +633,10 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={() => setOpenSheet('evidence')}>
                   <ClipboardCheck className="h-4 w-4" />
                   Evidence
+                </Button>
+                <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={logout} disabled={busy}>
+                  <LogOut className="h-4 w-4" />
+                  Sair
                 </Button>
               </div>
             </div>
@@ -1175,7 +1202,7 @@ function SettingsWorkspace(props: {
           <CardContent className="grid gap-2 md:grid-cols-2">
             <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
             <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
-            <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'admin'} />
+            <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'viewer'} />
             <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
             <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
             <SecurityLine label="Retention" ok value={`${props.security?.retention.days ?? props.cleanupDays} dias`} />
@@ -1424,7 +1451,7 @@ function SystemMenu(props: {
               <CardContent className="grid gap-2">
                 <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
                 <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
-                <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'admin'} />
+                <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'viewer'} />
                 <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
                 <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
               </CardContent>
@@ -2246,19 +2273,6 @@ function groupHttpArtifacts(artifacts: Artifact[]): Array<{ request?: Artifact; 
     }
   }
   return groups;
-}
-
-async function api<T>(apiPath: string, options: RequestInit = {}): Promise<T> {
-  const token = typeof window !== 'undefined' ? window.localStorage.getItem('testhub.token') : process.env.NEXT_PUBLIC_TESTHUB_TOKEN;
-  const headers = {
-    ...(options.body ? { 'content-type': 'application/json' } : {}),
-    ...(token ? { authorization: `Bearer ${token}` } : {}),
-    ...(options.headers ?? {}),
-  };
-  const response = await fetch(`${apiBase}${apiPath}`, { ...options, headers });
-  if (!response.ok) throw new Error(await response.text());
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
 }
 
 function runSummary(run: Run): string {
