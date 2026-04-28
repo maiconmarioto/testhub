@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 const TESTHUB_URL = process.env.TESTHUB_URL ?? 'http://localhost:4321';
-const TESTHUB_TOKEN = process.env.TESTHUB_TOKEN;
+const TESTHUB_TOKEN = process.env.TESTHUB_TOKEN ?? process.env.TESTHUB_SESSION_TOKEN;
 
 type EnvironmentSummary = {
   id: string;

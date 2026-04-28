@@ -20,7 +20,11 @@ describe('mcp server', () => {
     const previousDataDir = process.env.TESTHUB_DATA_DIR;
     const previousDatabaseUrl = process.env.DATABASE_URL;
     const previousRedisUrl = process.env.REDIS_URL;
+    const previousAuthMode = process.env.TESTHUB_AUTH_MODE;
+    const previousToken = process.env.TESTHUB_TOKEN;
     process.env.TESTHUB_DATA_DIR = dataDir;
+    process.env.TESTHUB_AUTH_MODE = 'token';
+    process.env.TESTHUB_TOKEN = 'mcp-test-token';
     delete process.env.DATABASE_URL;
     delete process.env.REDIS_URL;
 
@@ -40,6 +44,7 @@ describe('mcp server', () => {
         HOME: process.env.HOME ?? '',
         TESTHUB_URL: testhubUrl,
         TESTHUB_DATA_DIR: dataDir,
+        TESTHUB_TOKEN: 'mcp-test-token',
       },
       stderr: 'pipe',
     });
@@ -131,6 +136,10 @@ describe('mcp server', () => {
       else process.env.DATABASE_URL = previousDatabaseUrl;
       if (previousRedisUrl === undefined) delete process.env.REDIS_URL;
       else process.env.REDIS_URL = previousRedisUrl;
+      if (previousAuthMode === undefined) delete process.env.TESTHUB_AUTH_MODE;
+      else process.env.TESTHUB_AUTH_MODE = previousAuthMode;
+      if (previousToken === undefined) delete process.env.TESTHUB_TOKEN;
+      else process.env.TESTHUB_TOKEN = previousToken;
     }
   }, 30000);
 });
