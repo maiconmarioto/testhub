@@ -952,7 +952,7 @@ git commit -m "feat: scope api resources by organization"
 - Modify: `apps/api/src/server.ts`
 - Modify: `tests/server-auth.test.ts`
 
-- [ ] **Step 1: Add failing member tests**
+- [x] **Step 1: Add failing member tests**
 
 Append:
 
@@ -979,7 +979,7 @@ it('lets an org admin create a member with a temporary password', async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -989,7 +989,7 @@ npm test -- tests/server-auth.test.ts
 
 Expected: FAIL with route not found.
 
-- [ ] **Step 3: Add member routes**
+- [x] **Step 3: Add member routes**
 
 In `apps/api/src/server.ts`:
 
@@ -1018,7 +1018,7 @@ app.post('/api/organizations/current/members', async (req, reply) => {
 });
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -1028,7 +1028,7 @@ npm test -- tests/server-auth.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/server.ts tests/server-auth.test.ts
