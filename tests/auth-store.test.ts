@@ -88,6 +88,9 @@ describe('auth helpers', () => {
     await expect(verifyPassword('wrong', hash)).resolves.toBe(false);
     await expect(verifyPassword('correct horse battery staple', `${hash}:extra`)).resolves.toBe(false);
     await expect(verifyPassword('correct horse battery staple', 'scrypt:salt:not-hex')).resolves.toBe(false);
+    const [scheme, salt, digest] = hash.split(':');
+    await expect(verifyPassword('correct horse battery staple', `${scheme}:${salt}:${digest}a`)).resolves.toBe(false);
+    await expect(verifyPassword('correct horse battery staple', `${scheme}:bad-salt:${digest}`)).resolves.toBe(false);
   });
 
   it('hashes opaque tokens before persistence', () => {
