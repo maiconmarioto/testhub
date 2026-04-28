@@ -124,6 +124,30 @@ describe('server e2e', () => {
     expect(invalidResponse.json()).toMatchObject({ valid: false });
   });
 
+  it('requires cleanup to be project scoped', async () => {
+    const missingProjectResponse = await app.inject({
+      method: 'POST',
+      url: '/api/cleanup',
+      headers: auth(),
+      payload: { days: 1 },
+    });
+    expect(missingProjectResponse.statusCode).toBe(400);
+    expect(missingProjectResponse.json()).toMatchObject({ error: 'projectId obrigatorio para cleanup via API' });
+
+    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Cleanup' } });
+    expect(projectResponse.statusCode).toBe(201);
+    const project = projectResponse.json() as { id: string };
+
+    const scopedResponse = await app.inject({
+      method: 'POST',
+      url: '/api/cleanup',
+      headers: auth(),
+      payload: { projectId: project.id, days: 1 },
+    });
+    expect(scopedResponse.statusCode).toBe(200);
+    expect(scopedResponse.json()).toMatchObject({ projectId: project.id, days: 1 });
+  });
+
   it('updates and soft deletes projects', async () => {
     const createdResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'CRUD draft', description: 'old' } });
     expect(createdResponse.statusCode).toBe(201);

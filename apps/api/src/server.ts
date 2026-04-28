@@ -608,9 +608,9 @@ export function createApp() {
       days: z.number().int().min(1).optional(),
       cleanupArtifacts: z.boolean().optional(),
     }).parse(req.body ?? {});
-    const project = input.projectId ? await getProjectInActorOrg(input.projectId, req.actor) : undefined;
-    if (input.projectId && !project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
-    if (!input.projectId && authMode() === 'local') return reply.code(400).send({ error: 'projectId obrigatorio em auth local' });
+    if (!input.projectId) return reply.code(400).send({ error: 'projectId obrigatorio para cleanup via API' });
+    const project = await getProjectInActorOrg(input.projectId, req.actor);
+    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     const days = input.days ?? project?.retentionDays ?? retentionDays();
     const cleanupArtifacts = input.cleanupArtifacts ?? project?.cleanupArtifacts ?? false;
     return reply.send(await cleanupOldRuns(store, days, { projectId: input.projectId, cleanupArtifacts }));
