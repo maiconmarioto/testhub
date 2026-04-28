@@ -198,18 +198,20 @@ API basica:
 curl http://localhost:4321/api/health
 ```
 
-Auth opcional:
+Auth local:
 
-```bash
-TESTHUB_TOKEN=secret node dist/apps/cli/src/cli.js server
-curl -H "authorization: Bearer secret" http://localhost:4321/api/projects
-```
+- Modo web padrao: auth local (`TESTHUB_AUTH_MODE=local`).
+- Primeiro usuario criado vira admin, cria a organizacao/time inicial e conclui setup.
+- Rotas web: `/register`, `/login`, `/forgot-password`, `/reset-password`.
+- Reset de senha sem email configurado retorna o codigo apenas fora de producao ou com `TESTHUB_ALLOW_DISPLAY_RESET=true`.
+- `off` serve apenas para demos locais. Nao use em producao.
 
-Auth/RBAC:
+Modos e variaveis:
 
 ```text
-TESTHUB_AUTH_MODE=off|token|oidc
+TESTHUB_AUTH_MODE=local|token|oidc|off
 TESTHUB_TOKEN=secret
+TESTHUB_ALLOW_DISPLAY_RESET=true
 TESTHUB_ROLE=admin|editor|viewer
 AUTH_OIDC_ISSUER=https://issuer.example.com
 AUTH_OIDC_CLIENT_ID=testhub
@@ -217,6 +219,11 @@ TESTHUB_ADMIN_GROUPS=platform-admins
 TESTHUB_EDITOR_GROUPS=qa,developers
 TESTHUB_VIEWER_GROUPS=readers
 ```
+
+CLI/MCP:
+
+- Em auth local, login retorna um token de sessao. Use como bearer ou exporte `TESTHUB_SESSION_TOKEN=<token>`.
+- Em modo token, exporte `TESTHUB_AUTH_MODE=token` e `TESTHUB_TOKEN=secret`; use `authorization: Bearer secret`.
 
 Permissões:
 

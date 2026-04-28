@@ -250,7 +250,18 @@ export function createApp() {
     },
   }, async () => ({ ok: true }));
 
-  app.get('/api/system/security', { schema: { tags: ['system'], summary: 'Security status' } }, async () => systemSecurityStatus());
+  app.get('/api/system/security', { schema: { tags: ['system'], summary: 'Security status' } }, async () => {
+    const status = systemSecurityStatus();
+    const localUsers = (await getDb()).users.length > 0;
+    return {
+      ...status,
+      auth: {
+        ...status.auth,
+        localUsers,
+        setupRequired: status.auth.mode === 'local' && !localUsers,
+      },
+    };
+  });
 
   app.post('/api/auth/register', { schema: { tags: ['system'], summary: 'Register local account' } }, async (req, reply) => {
     const input = z.object({
