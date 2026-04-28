@@ -35,6 +35,10 @@ type SecurityStatus = {
   retention: { days: number };
 };
 type AuthMe = { user: { email: string; name?: string }; organization: { id: string; name: string }; membership: { role: 'admin' | 'editor' | 'viewer' }; organizations: Array<{ id: string; name: string }> };
+type OrganizationMember = {
+  user: { id: string; email: string; name?: string };
+  membership: { id: string; role: 'admin' | 'editor' | 'viewer' };
+};
 type AuditEntry = { id: string; action: string; actor: string; status: 'ok' | 'blocked' | 'error'; target?: string; createdAt: string; detail?: Record<string, unknown> };
 type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
 type Run = {
@@ -102,6 +106,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [aiConnections, setAiConnections] = useState<AiConnection[]>([]);
   const [security, setSecurity] = useState<SecurityStatus | null>(null);
   const [me, setMe] = useState<AuthMe | null>(null);
+  const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [projectId, setProjectId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
@@ -119,6 +124,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [suiteDraft, setSuiteDraft] = useState({ id: '', name: '', type: 'api' as 'api' | 'web', specContent: defaultSpec });
   const [envDraft, setEnvDraft] = useState({ id: '', name: '', baseUrl: '', variables: '' });
   const [aiDraft, setAiDraft] = useState({ id: '', name: 'OpenRouter', provider: 'openrouter' as AiConnection['provider'], apiKey: '', model: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1', enabled: true });
+  const [memberDraft, setMemberDraft] = useState({ email: '', name: '', role: 'viewer' as OrganizationMember['membership']['role'], temporaryPassword: '' });
   const [aiOutput, setAiOutput] = useState('');
   const [cleanupDays, setCleanupDays] = useState('30');
   const [cleanupResult, setCleanupResult] = useState('');
@@ -161,8 +167,9 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   async function refresh() {
     setError('');
     try {
-      const [nextMe, nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
+      const [nextMe, nextMembers, nextProjects, nextEnvs, nextSuites, nextRuns, nextConnections, nextSecurity, nextAudit] = await Promise.all([
         api<AuthMe>('/api/auth/me', { redirectOnUnauthorized: false }).catch(() => null),
+        api<OrganizationMember[]>('/api/organizations/current/members', { redirectOnUnauthorized: false }).catch(() => []),
         api<Project[]>('/api/projects'),
         api<Environment[]>('/api/environments'),
         api<Suite[]>('/api/suites'),
@@ -172,6 +179,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
         api<AuditEntry[]>('/api/audit?limit=40').catch(() => []),
       ]);
       setMe(nextMe);
+      setMembers(nextMembers);
       setProjects(nextProjects);
       setEnvs(nextEnvs);
       setSuites(nextSuites);
@@ -291,7 +299,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     try {
       await operation();
       await refresh();
-      if (success) setNotice(success);
+      if (success) setNotice((current) => current || success);
     } catch (nextError) {
       setError(messageOf(nextError));
     } finally {
@@ -486,6 +494,22 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
         enabled: aiDraft.enabled,
       }),
     }), aiDraft.id ? 'AI connection atualizada.' : 'AI connection criada.');
+  }
+
+  async function createMember() {
+    await mutate(async () => {
+      const response = await api<{ temporaryPassword?: string }>('/api/organizations/current/members', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: memberDraft.email,
+          name: memberDraft.name || undefined,
+          role: memberDraft.role,
+          temporaryPassword: memberDraft.temporaryPassword || undefined,
+        }),
+      });
+      if (response.temporaryPassword) setNotice(`Usuario criado. Senha temporaria: ${response.temporaryPassword}`);
+      setMemberDraft({ email: '', name: '', role: 'viewer', temporaryPassword: '' });
+    }, 'Membro criado.');
   }
 
   async function explainFailure(run?: Run) {
@@ -726,6 +750,9 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               />
             ) : (
               <SettingsWorkspace
+                me={me}
+                members={members}
+                memberDraft={memberDraft}
                 aiConnections={aiConnections}
                 aiDraft={aiDraft}
                 security={security}
@@ -735,6 +762,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 busy={busy}
                 canWrite={canWrite}
                 canAdmin={canAdmin}
+                onMemberDraftChange={setMemberDraft}
+                onCreateMember={createMember}
                 onAiDraftChange={setAiDraft}
                 onEditAiConnection={editAiConnection}
                 onSaveAiConnection={saveAiConnection}
@@ -1179,6 +1208,9 @@ function SuitesWorkspace(props: {
 }
 
 function SettingsWorkspace(props: {
+  me: AuthMe | null;
+  members: OrganizationMember[];
+  memberDraft: { email: string; name: string; role: OrganizationMember['membership']['role']; temporaryPassword: string };
   aiConnections: AiConnection[];
   aiDraft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean };
   security: SecurityStatus | null;
@@ -1188,6 +1220,8 @@ function SettingsWorkspace(props: {
   busy: boolean;
   canWrite: boolean;
   canAdmin: boolean;
+  onMemberDraftChange: (draft: { email: string; name: string; role: OrganizationMember['membership']['role']; temporaryPassword: string }) => void;
+  onCreateMember: () => void;
   onAiDraftChange: (draft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean }) => void;
   onEditAiConnection: (connection: AiConnection) => void;
   onSaveAiConnection: () => void;
@@ -1210,8 +1244,68 @@ function SettingsWorkspace(props: {
         </Card>
 
         <Card>
-          <CardHeader className="pb-3"><CardTitle>Sessao local</CardTitle><CardDescription>Token bearer/OIDC usado pela UI quando auth estiver ligada.</CardDescription></CardHeader>
-          <CardContent><ApiTokenControl /></CardContent>
+          <CardHeader className="pb-3">
+            <CardTitle>Organizacao</CardTitle>
+            <CardDescription>{props.me?.organization.name ?? 'Organizacao atual'} · {props.members.length} membros</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 md:grid-cols-3">
+              <InfoLine label="Usuario" value={props.me?.user.email ?? 'sem sessao'} />
+              <InfoLine label="Time" value={props.me?.organization.name ?? 'nao carregado'} />
+              <InfoLine label="Role" value={props.me?.membership.role ?? 'viewer'} />
+            </div>
+
+            {props.canAdmin ? (
+              <div className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-[#fbfaf6] p-3">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_160px]">
+                  <Field label="Email"><Input type="email" value={props.memberDraft.email} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, email: event.target.value })} placeholder="user@empresa.com" /></Field>
+                  <Field label="Nome"><Input value={props.memberDraft.name} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, name: event.target.value })} placeholder="Opcional" /></Field>
+                  <Field label="Role">
+                    <Select value={props.memberDraft.role} onValueChange={(value) => props.onMemberDraftChange({ ...props.memberDraft, role: value as OrganizationMember['membership']['role'] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">admin</SelectItem>
+                        <SelectItem value="editor">editor</SelectItem>
+                        <SelectItem value="viewer">viewer</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                  <Field label="Senha temporaria"><Input type="password" value={props.memberDraft.temporaryPassword} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, temporaryPassword: event.target.value })} placeholder="Opcional" /></Field>
+                  <Button className="self-end" onClick={props.onCreateMember} disabled={props.busy || !props.canAdmin || !props.memberDraft.email.trim()}>Criar membro</Button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="grid gap-2">
+              {props.members.map((member) => (
+                <div key={member.membership.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{member.user.email}</p>
+                    {member.user.name ? <p className="truncate text-xs text-[#66705f]">{member.user.name}</p> : null}
+                  </div>
+                  <Badge variant={member.membership.role === 'admin' ? 'success' : member.membership.role === 'editor' ? 'secondary' : 'outline'}>{member.membership.role}</Badge>
+                </div>
+              ))}
+              {props.members.length === 0 ? <DarkEmpty text="Nenhum membro carregado." /> : null}
+            </div>
+
+            <Collapsible>
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" size="sm" className="w-fit">
+                  <ChevronDown className="h-4 w-4" />
+                  Token para CLI/MCP
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-3">
+                <div className="grid gap-2 rounded-lg border border-dashed border-[#d7d2c4] bg-white p-3">
+                  <p className="text-xs text-[#66705f]">Fallback dev para ferramentas locais. Login web usa sessao autenticada.</p>
+                  <ApiTokenControl />
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </CardContent>
         </Card>
 
         <Card>
@@ -1497,6 +1591,15 @@ function SecurityLine({ label, ok, value }: { label: string; ok: boolean; value:
         <p className="break-words font-mono text-xs text-[#66705f]">{value}</p>
       </div>
       <Badge variant={ok ? 'success' : 'warning'}>{ok ? 'ok' : 'acao'}</Badge>
+    </div>
+  );
+}
+
+function InfoLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[#66705f]">{label}</p>
+      <p className="truncate text-sm font-semibold">{value}</p>
     </div>
   );
 }
