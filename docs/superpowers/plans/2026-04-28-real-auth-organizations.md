@@ -1243,7 +1243,7 @@ git commit -m "feat: add organization members ui"
 - Modify: `apps/mcp/src/mcp.ts`
 - Modify: `tests/mcp.test.ts`
 
-- [ ] **Step 1: Keep MCP token mode explicit**
+- [x] **Step 1: Keep MCP token mode explicit**
 
 In `tests/mcp.test.ts`, set:
 
@@ -1254,7 +1254,7 @@ process.env.TESTHUB_TOKEN = 'mcp-test-token';
 
 Pass `TESTHUB_TOKEN: 'mcp-test-token'` to the MCP process env.
 
-- [ ] **Step 2: Document MCP session token fallback**
+- [x] **Step 2: Document MCP session token fallback**
 
 In `apps/mcp/src/mcp.ts`, change:
 
@@ -1268,7 +1268,7 @@ to:
 const TESTHUB_TOKEN = process.env.TESTHUB_TOKEN ?? process.env.TESTHUB_SESSION_TOKEN;
 ```
 
-- [ ] **Step 3: Run MCP test**
+- [x] **Step 3: Run MCP test**
 
 Run:
 
@@ -1278,7 +1278,7 @@ npm test -- tests/mcp.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/mcp/src/mcp.ts tests/mcp.test.ts
