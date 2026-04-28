@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { and, desc, eq, lt, ne } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
 import { ensureDir } from '../../shared/src/fs-utils.js';
 import { aiConnections, environments, memberships, organizations, passwordResetTokens, projects, runs, sessions, suites, users } from './schema.js';
 import type { AiConnection, AuthSession, Database, Environment, MembershipRole, Organization, OrganizationMembership, PasswordResetToken, Project, RunRecord, Store, Suite, User } from './store.js';
@@ -31,6 +31,10 @@ export class PgStore implements Store {
 
   get runsDir(): string {
     return path.join(this.rootDir, 'runs');
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end();
   }
 
   async read(): Promise<Database> {
@@ -84,9 +88,12 @@ export class PgStore implements Store {
 
   async createUser(input: { email: string; name?: string; passwordHash: string }): Promise<User> {
     const now = new Date();
+    const email = normalizeEmail(input.email);
+    const [existing] = await this.db.select({ id: users.id }).from(users).where(eq(sql<string>`lower(${users.email})`, email));
+    if (existing) throw new Error('Email ja cadastrado');
     const user = {
       id: randomUUID(),
-      email: normalizeEmail(input.email),
+      email,
       name: input.name ?? null,
       passwordHash: input.passwordHash,
       status: 'active',
@@ -98,7 +105,7 @@ export class PgStore implements Store {
   }
 
   async findUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await this.db.select().from(users).where(and(eq(users.email, normalizeEmail(email)), eq(users.status, 'active')));
+    const [user] = await this.db.select().from(users).where(and(eq(sql<string>`lower(${users.email})`, normalizeEmail(email)), eq(users.status, 'active')));
     return user ? rowToUser(user) : undefined;
   }
 
@@ -117,16 +124,28 @@ export class PgStore implements Store {
 
   async createOrganization(input: { name: string; slug?: string }): Promise<Organization> {
     const now = new Date();
+    const slug = await this.nextOrganizationSlug(input.slug ?? input.name);
     const organization = {
       id: randomUUID(),
       name: input.name,
-      slug: input.slug ?? slugify(input.name),
+      slug,
       status: 'active',
       createdAt: now,
       updatedAt: now,
     };
     await this.db.insert(organizations).values(organization);
     return rowToOrganization(organization);
+  }
+
+  private async nextOrganizationSlug(value: string): Promise<string> {
+    const base = slugify(value);
+    let slug = base;
+    let suffix = 2;
+    while ((await this.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, slug))).length > 0) {
+      slug = `${base}-${suffix}`;
+      suffix += 1;
+    }
+    return slug;
   }
 
   async listOrganizationsForUser(userId: string): Promise<Organization[]> {
@@ -139,6 +158,8 @@ export class PgStore implements Store {
   }
 
   async createMembership(input: { userId: string; organizationId: string; role: MembershipRole }): Promise<OrganizationMembership> {
+    const existing = await this.findMembership(input.userId, input.organizationId);
+    if (existing) return existing;
     const now = new Date();
     const membership = {
       id: randomUUID(),
@@ -168,6 +189,8 @@ export class PgStore implements Store {
   }
 
   async createSession(input: { userId: string; organizationId: string; tokenHash: string; expiresAt: string }): Promise<AuthSession> {
+    const [existing] = await this.db.select({ id: sessions.id }).from(sessions).where(eq(sessions.tokenHash, input.tokenHash));
+    if (existing) throw new Error('Sessao ja cadastrada');
     const session = {
       id: randomUUID(),
       userId: input.userId,
@@ -193,6 +216,8 @@ export class PgStore implements Store {
   }
 
   async createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: string }): Promise<PasswordResetToken> {
+    const [existing] = await this.db.select({ id: passwordResetTokens.id }).from(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, input.tokenHash));
+    if (existing) throw new Error('Token de reset ja cadastrado');
     const resetToken = {
       id: randomUUID(),
       userId: input.userId,
@@ -212,12 +237,14 @@ export class PgStore implements Store {
   }
 
   async markPasswordResetUsed(id: string): Promise<PasswordResetToken | undefined> {
+    const [resetToken] = await this.db.update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(and(eq(passwordResetTokens.id, id), isNull(passwordResetTokens.usedAt), gt(passwordResetTokens.expiresAt, new Date())))
+      .returning();
+    if (resetToken) return rowToPasswordResetToken(resetToken);
     const [current] = await this.db.select().from(passwordResetTokens).where(eq(passwordResetTokens.id, id));
-    if (!current) return undefined;
-    if (current.usedAt) return rowToPasswordResetToken(current);
-    if (current.expiresAt <= new Date()) return undefined;
-    const [resetToken] = await this.db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, id)).returning();
-    return resetToken ? rowToPasswordResetToken(resetToken) : undefined;
+    if (current?.usedAt) return rowToPasswordResetToken(current);
+    return undefined;
   }
 
   async listProjectsForOrganization(organizationId: string): Promise<Project[]> {
