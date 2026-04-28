@@ -7,6 +7,7 @@ export interface AuditEntry {
   id: string;
   action: string;
   actor: string;
+  actorRole?: string;
   target?: string;
   status: 'ok' | 'blocked' | 'error';
   detail?: Record<string, unknown>;
@@ -29,13 +30,36 @@ export function writeAudit(entry: Omit<AuditEntry, 'id' | 'createdAt'>, rootDir?
   return full;
 }
 
-export function readAudit(limit = 50, rootDir?: string): AuditEntry[] {
+export function readAudit(options: number | { limit?: number; actor?: string; action?: string; status?: AuditEntry['status'] } = 50, rootDir?: string): AuditEntry[] {
+  const filters = typeof options === 'number' ? { limit: options } : options;
+  const limit = filters.limit ?? 50;
   const file = auditPath(rootDir);
   if (!fs.existsSync(file)) return [];
   return fs.readFileSync(file, 'utf8')
     .split(/\r?\n/)
     .filter(Boolean)
+    .map((line) => JSON.parse(line) as AuditEntry)
+    .filter((entry) => !filters.actor || entry.actor.toLowerCase().includes(filters.actor.toLowerCase()))
+    .filter((entry) => !filters.action || entry.action.toLowerCase().includes(filters.action.toLowerCase()))
+    .filter((entry) => !filters.status || entry.status === filters.status)
     .slice(-limit)
-    .reverse()
-    .map((line) => JSON.parse(line) as AuditEntry);
+    .reverse();
+}
+
+export function auditCsv(entries: AuditEntry[]): string {
+  const header = ['createdAt', 'actor', 'actorRole', 'action', 'status', 'target', 'detail'];
+  const rows = entries.map((entry) => [
+    entry.createdAt,
+    entry.actor,
+    entry.actorRole ?? '',
+    entry.action,
+    entry.status,
+    entry.target ?? '',
+    entry.detail ? JSON.stringify(entry.detail) : '',
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
+}
+
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
 }

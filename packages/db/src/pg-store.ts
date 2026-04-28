@@ -54,16 +54,31 @@ export class PgStore implements Store {
     return project ? rowToProject(project) : undefined;
   }
 
-  async createProject(input: { name: string; description?: string }): Promise<Project> {
+  async createProject(input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project> {
     const now = new Date();
-    const project = { id: randomUUID(), name: input.name, description: input.description ?? null, status: 'active', createdAt: now, updatedAt: now };
+    const project = {
+      id: randomUUID(),
+      name: input.name,
+      description: input.description ?? null,
+      retentionDays: input.retentionDays ?? null,
+      cleanupArtifacts: input.cleanupArtifacts ?? null,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
     await this.db.insert(projects).values(project);
     return rowToProject(project);
   }
 
-  async updateProject(id: string, input: { name: string; description?: string }): Promise<Project | undefined> {
+  async updateProject(id: string, input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project | undefined> {
     const [project] = await this.db.update(projects)
-      .set({ name: input.name, description: input.description ?? null, updatedAt: new Date() })
+      .set({
+        name: input.name,
+        description: input.description ?? null,
+        retentionDays: input.retentionDays ?? null,
+        cleanupArtifacts: input.cleanupArtifacts ?? null,
+        updatedAt: new Date(),
+      })
       .where(and(eq(projects.id, id), ne(projects.status, 'inactive')))
       .returning();
     return project ? rowToProject(project) : undefined;
@@ -169,8 +184,10 @@ export class PgStore implements Store {
     return rowToRun(row);
   }
 
-  async archiveRunsBefore(cutoffIso: string): Promise<number> {
-    const rows = await this.db.update(runs).set({ status: 'deleted', finishedAt: new Date() }).where(and(lt(runs.createdAt, new Date(cutoffIso)), ne(runs.status, 'deleted'))).returning({ id: runs.id });
+  async archiveRunsBefore(cutoffIso: string, options: { projectId?: string; cleanupArtifacts?: boolean; runsDir?: string } = {}): Promise<number> {
+    const conditions = [lt(runs.createdAt, new Date(cutoffIso)), ne(runs.status, 'deleted')];
+    if (options.projectId) conditions.push(eq(runs.projectId, options.projectId));
+    const rows = await this.db.update(runs).set({ status: 'deleted', finishedAt: new Date() }).where(and(...conditions)).returning({ id: runs.id });
     return rows.length;
   }
 
@@ -206,8 +223,17 @@ export class PgStore implements Store {
   }
 }
 
-function rowToProject(row: { id: string; name: string; description?: string | null; status: string; createdAt: Date | string; updatedAt: Date | string }): Project {
-  return { id: row.id, name: row.name, description: row.description ?? undefined, status: row.status as Project['status'], createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
+function rowToProject(row: { id: string; name: string; description?: string | null; retentionDays?: number | null; cleanupArtifacts?: boolean | null; status: string; createdAt: Date | string; updatedAt: Date | string }): Project {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    retentionDays: row.retentionDays ?? undefined,
+    cleanupArtifacts: row.cleanupArtifacts ?? undefined,
+    status: row.status as Project['status'],
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
 }
 
 function rowToEnvironmentSafe(row: { id: string; projectId: string; name: string; baseUrl: string; status: string; variables?: Record<string, string> | null; createdAt: Date | string; updatedAt: Date | string }): Environment {

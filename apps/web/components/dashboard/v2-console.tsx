@@ -5,6 +5,7 @@ import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Database, FileCode2, FolderKanban, Loader2, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
+import YAML from 'yaml';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-type Project = { id: string; name: string; description?: string };
+type Project = { id: string; name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean };
 type Environment = { id: string; projectId: string; name: string; baseUrl: string; variables?: Record<string, string> };
 type Suite = { id: string; projectId: string; name: string; type: 'api' | 'web'; specPath?: string };
 type AiConnection = { id: string; name: string; provider: 'openrouter' | 'openai' | 'anthropic'; apiKey?: string; model: string; baseUrl?: string; enabled: boolean };
@@ -75,6 +76,7 @@ type WizardDraft = {
   suiteType: Suite['type'];
   specContent: string;
 };
+type OpenApiDraft = { name: string; spec: string; baseUrl: string; authTemplate: 'none' | 'bearer' | 'apiKey'; headers: string; tags: string; selectedOperations: string; includeBodyExamples: boolean };
 
 const apiBase = process.env.NEXT_PUBLIC_TESTHUB_API_URL ?? 'http://localhost:4321';
 const controlClass = 'h-10 border-[#d7d2c4] bg-white text-[#1f241f] shadow-none placeholder:text-[#8a877c] focus-visible:ring-[#426b4d]';
@@ -110,8 +112,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [notice, setNotice] = useState('');
 
   const [openSheet, setOpenSheet] = useState<MenuSheet>(null);
-  const [projectDraft, setProjectDraft] = useState({ id: '', name: '', description: '' });
-  const [openApiDraft, setOpenApiDraft] = useState({ name: 'openapi-import', spec: '' });
+  const [projectDraft, setProjectDraft] = useState({ id: '', name: '', description: '', retentionDays: '30', cleanupArtifacts: false });
+  const [openApiDraft, setOpenApiDraft] = useState<OpenApiDraft>({ name: 'openapi-import', spec: '', baseUrl: '', authTemplate: 'none', headers: '', tags: '', selectedOperations: '', includeBodyExamples: true });
   const [suiteDraft, setSuiteDraft] = useState({ id: '', name: '', type: 'api' as 'api' | 'web', specContent: defaultSpec });
   const [envDraft, setEnvDraft] = useState({ id: '', name: '', baseUrl: '', variables: '' });
   const [aiDraft, setAiDraft] = useState({ id: '', name: 'OpenRouter', provider: 'openrouter' as AiConnection['provider'], apiKey: '', model: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1', enabled: true });
@@ -119,6 +121,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [cleanupDays, setCleanupDays] = useState('30');
   const [cleanupResult, setCleanupResult] = useState('');
   const [validation, setValidation] = useState<ValidationResult | null>(null);
+  const [approvedAiPatch, setApprovedAiPatch] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardDraft, setWizardDraft] = useState({
@@ -139,11 +142,15 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const projectRuns = useMemo(() => runs.filter((run) => run.projectId === projectId), [runs, projectId]);
   const selectedSuite = projectSuites.find((suite) => suite.id === suiteId);
   const selectedEnv = projectEnvs.find((env) => env.id === environmentId);
+  const selectedProject = projects.find((project) => project.id === projectId);
   const scopedRuns = useMemo(
     () => projectRuns.filter((run) => run.suiteId === suiteId && run.environmentId === environmentId),
     [projectRuns, suiteId, environmentId],
   );
   const selectedRun = scopedRuns.find((run) => run.id === selectedRunId) ?? scopedRuns[0];
+  const role = (security?.auth.rbacRole ?? 'admin') as 'admin' | 'editor' | 'viewer';
+  const canWrite = role === 'admin' || role === 'editor';
+  const canAdmin = role === 'admin';
   const stats = summarize(scopedRuns);
   const artifacts = collectArtifacts(report);
   const videos = artifacts.filter((artifact) => artifact.type === 'video');
@@ -189,8 +196,14 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
 
   useEffect(() => {
     const current = projects.find((project) => project.id === projectId);
-    setProjectDraft({ id: current?.id ?? '', name: current?.name ?? '', description: current?.description ?? '' });
-  }, [projectId, projects]);
+    setProjectDraft({
+      id: current?.id ?? '',
+      name: current?.name ?? '',
+      description: current?.description ?? '',
+      retentionDays: String(current?.retentionDays ?? security?.retention.days ?? 30),
+      cleanupArtifacts: Boolean(current?.cleanupArtifacts),
+    });
+  }, [projectId, projects, security?.retention.days]);
 
   useEffect(() => {
     if (security?.retention.days) setCleanupDays(String(security.retention.days));
@@ -326,7 +339,10 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     if (!valid) return;
     const payload = { name: suiteDraft.name, type: suiteDraft.type, specContent: suiteDraft.specContent };
     await mutate(async () => {
-      if (suiteDraft.id) {
+      if (suiteDraft.id && approvedAiPatch) {
+        await api('/api/ai/apply-test-fix', { method: 'POST', body: JSON.stringify({ suiteId: suiteDraft.id, approved: true, reason: 'Aprovado na UI', ...payload }) });
+        setApprovedAiPatch(false);
+      } else if (suiteDraft.id) {
         await api(`/api/suites/${suiteDraft.id}`, { method: 'PUT', body: JSON.stringify(payload) });
       } else {
         const suite = await api<Suite>('/api/suites', { method: 'POST', body: JSON.stringify({ projectId, ...payload }) });
@@ -377,7 +393,12 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   }
 
   async function saveProject() {
-    const payload = { name: projectDraft.name.trim(), description: projectDraft.description.trim() || undefined };
+    const payload = {
+      name: projectDraft.name.trim(),
+      description: projectDraft.description.trim() || undefined,
+      retentionDays: Number(projectDraft.retentionDays) || undefined,
+      cleanupArtifacts: projectDraft.cleanupArtifacts,
+    };
     if (!payload.name) return;
     await mutate(async () => {
       if (projectDraft.id) {
@@ -404,7 +425,20 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     if (!projectId || !openApiDraft.spec.trim()) return;
     await mutate(async () => {
       const parsed = JSON.parse(openApiDraft.spec);
-      const suite = await api<Suite>('/api/import/openapi', { method: 'POST', body: JSON.stringify({ projectId, name: openApiDraft.name || 'openapi-import', spec: parsed }) });
+      const suite = await api<Suite>('/api/import/openapi', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId,
+          name: openApiDraft.name || 'openapi-import',
+          spec: parsed,
+          baseUrl: openApiDraft.baseUrl || undefined,
+          authTemplate: openApiDraft.authTemplate,
+          headers: parseVars(openApiDraft.headers),
+          tags: splitList(openApiDraft.tags),
+          selectedOperations: splitList(openApiDraft.selectedOperations),
+          includeBodyExamples: openApiDraft.includeBodyExamples,
+        }),
+      });
       setSuiteId(suite.id);
       setSelectedRunId('');
     }, 'OpenAPI importado.');
@@ -438,22 +472,26 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   }
 
   async function explainFailure(run?: Run) {
+    await runAi('explain-failure', run, 'Analise IA gerada.');
+  }
+
+  async function runAi(kind: 'explain-failure' | 'suggest-test-fix' | 'suggest-test-cases', run?: Run, success = 'IA gerada.') {
     if (!run) return;
     setAiOutput('');
     await mutate(async () => {
-      const result = await api<{ output?: string }>('/api/ai/explain-failure', {
+      const result = await api<{ output?: string }>(`/api/ai/${kind}`, {
         method: 'POST',
         body: JSON.stringify({ context: { run, report, suite: selectedSuite, environment: selectedEnv } }),
       });
       setAiOutput(result.output ?? JSON.stringify(result, null, 2));
-    }, 'Analise IA gerada.');
+    }, success);
   }
 
   async function cleanupRuns() {
     await mutate(async () => {
       const result = await api<{ cutoffIso: string; archivedRuns: number; retainedArtifacts: boolean }>('/api/cleanup', {
         method: 'POST',
-        body: JSON.stringify({ days: Number(cleanupDays) }),
+        body: JSON.stringify({ projectId: projectId || undefined, days: Number(cleanupDays), cleanupArtifacts: selectedProject?.cleanupArtifacts ?? false }),
       });
       setCleanupResult(`${result.archivedRuns} runs arquivadas antes de ${formatDate(result.cutoffIso)}.`);
     }, 'Cleanup executado.');
@@ -591,7 +629,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
 
           <div className="grid min-h-0 content-start gap-4 p-4 md:p-5">
             {view === 'run' ? (
-              <CockpitColumn
+              <RunWorkspace
                 selectedSuite={selectedSuite}
                 selectedEnv={selectedEnv}
                 selectedRun={selectedRun}
@@ -600,7 +638,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 latestRuns={projectRuns}
                 selectedRunId={selectedRun?.id}
                 busy={busy}
-                canRun={Boolean(projectId && environmentId && suiteId)}
+                canRun={Boolean(projectId && environmentId && suiteId && canWrite)}
                 onRun={runSuite}
                 onSelectRun={(run) => {
                   setSuiteId(run.suiteId);
@@ -622,6 +660,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 projectDraft={projectDraft}
                 envDraft={envDraft}
                 busy={busy}
+                canWrite={canWrite}
+                canAdmin={canAdmin}
                 onSelectProject={(id) => {
                   setProjectId(id);
                   setEnvironmentId('');
@@ -630,7 +670,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 }}
                 onProjectDraftChange={setProjectDraft}
                 onSaveProject={saveProject}
-                onNewProject={() => setProjectDraft({ id: '', name: '', description: '' })}
+                onNewProject={() => setProjectDraft({ id: '', name: '', description: '', retentionDays: String(security?.retention.days ?? 30), cleanupArtifacts: false })}
                 onArchiveProject={archiveProject}
                 onEnvDraftChange={setEnvDraft}
                 onEditEnv={editEnvironment}
@@ -644,14 +684,17 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 draft={suiteDraft}
                 validation={validation}
                 busy={busy}
+                canWrite={canWrite}
                 projectId={projectId}
                 openApiDraft={openApiDraft}
+                approvedAiPatch={approvedAiPatch}
                 onDraftChange={setSuiteDraft}
                 onLoadSuite={loadSuite}
                 onNewSuite={newSuiteDraft}
                 onValidate={() => validateSpec(true)}
                 onSave={saveSuite}
                 onOpenApiDraftChange={setOpenApiDraft}
+                onApprovedAiPatchChange={setApprovedAiPatch}
                 onImportOpenApi={importOpenApi}
               />
             ) : (
@@ -663,6 +706,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 cleanupDays={cleanupDays}
                 cleanupResult={cleanupResult}
                 busy={busy}
+                canWrite={canWrite}
+                canAdmin={canAdmin}
                 onAiDraftChange={setAiDraft}
                 onEditAiConnection={editAiConnection}
                 onSaveAiConnection={saveAiConnection}
@@ -697,6 +742,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 }}
                 onCancel={cancelRun}
                 onExplain={explainFailure}
+                onSuggestFix={(run) => runAi('suggest-test-fix', run, 'Sugestao de correcao gerada.')}
+                onSuggestCases={(run) => runAi('suggest-test-cases', run, 'Sugestao de casos gerada.')}
                 aiOutput={aiOutput}
               />
             </SheetContent>
@@ -717,7 +764,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   );
 }
 
-function CockpitColumn(props: {
+function RunWorkspace(props: {
   selectedSuite?: Suite;
   selectedEnv?: Environment;
   selectedRun?: Run;
@@ -910,11 +957,13 @@ function ProjectsWorkspace(props: {
   suites: Suite[];
   runs: Run[];
   selectedProjectId: string;
-  projectDraft: { id: string; name: string; description: string };
+  projectDraft: { id: string; name: string; description: string; retentionDays: string; cleanupArtifacts: boolean };
   envDraft: { id: string; name: string; baseUrl: string; variables: string };
   busy: boolean;
+  canWrite: boolean;
+  canAdmin: boolean;
   onSelectProject: (id: string) => void;
-  onProjectDraftChange: (draft: { id: string; name: string; description: string }) => void;
+  onProjectDraftChange: (draft: { id: string; name: string; description: string; retentionDays: string; cleanupArtifacts: boolean }) => void;
   onSaveProject: () => void;
   onNewProject: () => void;
   onArchiveProject: (project: Project) => void;
@@ -934,7 +983,7 @@ function ProjectsWorkspace(props: {
               <CardTitle>Projetos</CardTitle>
               <CardDescription>{props.projects.length} ativos</CardDescription>
             </div>
-            <Button size="sm" onClick={props.onNewProject}>Novo</Button>
+            <Button size="sm" onClick={props.onNewProject} disabled={!props.canWrite}>Novo</Button>
           </div>
         </CardHeader>
         <CardContent className="grid gap-2">
@@ -961,13 +1010,18 @@ function ProjectsWorkspace(props: {
                 <CardTitle>{props.projectDraft.id ? 'Editar projeto' : 'Criar projeto'}</CardTitle>
                 <CardDescription>{selectedProject ? `${props.envs.length} ambientes · ${props.suites.length} suites · ${props.runs.length} runs` : 'Selecione ou crie um projeto.'}</CardDescription>
               </div>
-              {selectedProject ? <Button variant="destructive" size="sm" onClick={() => props.onArchiveProject(selectedProject)}><Trash2 data-icon="inline-start" />Arquivar</Button> : null}
+              {selectedProject && props.canAdmin ? <Button variant="destructive" size="sm" onClick={() => props.onArchiveProject(selectedProject)}><Trash2 data-icon="inline-start" />Arquivar</Button> : null}
             </div>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+          <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_120px_auto] md:items-end">
             <Field label="Nome"><Input value={props.projectDraft.name} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, name: event.target.value })} /></Field>
             <Field label="Descricao"><Input value={props.projectDraft.description} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, description: event.target.value })} /></Field>
-            <Button onClick={props.onSaveProject} disabled={props.busy || !props.projectDraft.name.trim()}>Salvar projeto</Button>
+            <Field label="Retention"><Input type="number" min={1} value={props.projectDraft.retentionDays} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, retentionDays: event.target.value })} /></Field>
+            <label className="flex h-10 items-center gap-2 rounded-md border border-[#d7d2c4] bg-white px-3 text-sm">
+              <input type="checkbox" checked={props.projectDraft.cleanupArtifacts} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, cleanupArtifacts: event.target.checked })} />
+              Artifacts
+            </label>
+            <Button onClick={props.onSaveProject} disabled={props.busy || !props.canWrite || !props.projectDraft.name.trim()}>Salvar projeto</Button>
           </CardContent>
         </Card>
 
@@ -988,8 +1042,8 @@ function ProjectsWorkspace(props: {
                     <Badge variant="outline">{Object.keys(env.variables ?? {}).length} vars</Badge>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" onClick={() => props.onEditEnv(env)}>Editar</Button>
-                    <Button variant="destructive" size="sm" onClick={() => props.onArchiveEnv(env)}>Arquivar</Button>
+                    <Button variant="outline" size="sm" onClick={() => props.onEditEnv(env)} disabled={!props.canWrite}>Editar</Button>
+                    <Button variant="destructive" size="sm" onClick={() => props.onArchiveEnv(env)} disabled={!props.canAdmin}>Arquivar</Button>
                   </div>
                 </div>
               ))}
@@ -1004,14 +1058,14 @@ function ProjectsWorkspace(props: {
                   <CardTitle>{props.envDraft.id ? 'Editar ambiente' : 'Novo ambiente'}</CardTitle>
                   <CardDescription>{props.envDraft.id ? shortId(props.envDraft.id) : 'Target do projeto.'}</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" onClick={props.onNewEnv}>Novo</Button>
+                <Button variant="outline" size="sm" onClick={props.onNewEnv} disabled={!props.canWrite}>Novo</Button>
               </div>
             </CardHeader>
             <CardContent className="grid gap-3">
               <Field label="Nome"><Input value={props.envDraft.name} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, name: event.target.value })} placeholder="hml" /></Field>
               <Field label="Base URL"><Input value={props.envDraft.baseUrl} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, baseUrl: event.target.value })} placeholder="https://app.local" /></Field>
               <Field label="Variaveis"><Textarea className="min-h-36 font-mono text-xs" value={props.envDraft.variables} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, variables: event.target.value })} placeholder="TOKEN=abc" /></Field>
-              <Button onClick={props.onSaveEnv} disabled={props.busy || !props.selectedProjectId || !props.envDraft.name.trim() || !props.envDraft.baseUrl.trim()}>Salvar ambiente</Button>
+              <Button onClick={props.onSaveEnv} disabled={props.busy || !props.canWrite || !props.selectedProjectId || !props.envDraft.name.trim() || !props.envDraft.baseUrl.trim()}>Salvar ambiente</Button>
             </CardContent>
           </Card>
         </div>
@@ -1049,14 +1103,17 @@ function SuitesWorkspace(props: {
   draft: { id: string; name: string; type: 'api' | 'web'; specContent: string };
   validation: ValidationResult | null;
   busy: boolean;
+  canWrite: boolean;
   projectId: string;
-  openApiDraft: { name: string; spec: string };
+  openApiDraft: OpenApiDraft;
+  approvedAiPatch: boolean;
   onDraftChange: (draft: { id: string; name: string; type: 'api' | 'web'; specContent: string }) => void;
   onLoadSuite: (suite: Suite) => void;
   onNewSuite: () => void;
   onValidate: () => void;
   onSave: () => void;
-  onOpenApiDraftChange: (draft: { name: string; spec: string }) => void;
+  onOpenApiDraftChange: (draft: OpenApiDraft) => void;
+  onApprovedAiPatchChange: (value: boolean) => void;
   onImportOpenApi: () => void;
 }) {
   return (
@@ -1070,8 +1127,23 @@ function SuitesWorkspace(props: {
           </CardHeader>
           <CardContent className="grid gap-3">
             <Field label="Nome"><Input value={props.openApiDraft.name} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, name: event.target.value })} /></Field>
+            <Field label="Base URL"><Input value={props.openApiDraft.baseUrl} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, baseUrl: event.target.value })} placeholder="https://api.local" /></Field>
+            <Field label="Auth">
+              <Select value={props.openApiDraft.authTemplate} onValueChange={(value) => props.onOpenApiDraftChange({ ...props.openApiDraft, authTemplate: value as OpenApiDraft['authTemplate'] })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem auth</SelectItem>
+                  <SelectItem value="bearer">Bearer API_TOKEN</SelectItem>
+                  <SelectItem value="apiKey">x-api-key</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Headers"><Textarea className="min-h-20 font-mono text-xs" value={props.openApiDraft.headers} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, headers: event.target.value })} placeholder="x-tenant=demo" /></Field>
+            <Field label="Tags"><Input value={props.openApiDraft.tags} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, tags: event.target.value })} placeholder="billing, smoke" /></Field>
+            <Field label="Endpoints"><Textarea className="min-h-20 font-mono text-xs" value={props.openApiDraft.selectedOperations} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, selectedOperations: event.target.value })} placeholder="GET /health&#10;createUser" /></Field>
             <Field label="OpenAPI JSON"><Textarea className="min-h-52 font-mono text-xs" value={props.openApiDraft.spec} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, spec: event.target.value })} placeholder='{"openapi":"3.0.0","paths":{}}' /></Field>
-            <Button onClick={props.onImportOpenApi} disabled={props.busy || !props.projectId || !props.openApiDraft.spec.trim()}><Upload data-icon="inline-start" />Importar</Button>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.openApiDraft.includeBodyExamples} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, includeBodyExamples: event.target.checked })} /> Incluir body examples</label>
+            <Button onClick={props.onImportOpenApi} disabled={props.busy || !props.canWrite || !props.projectId || !props.openApiDraft.spec.trim()}><Upload data-icon="inline-start" />Importar</Button>
           </CardContent>
         </Card>
       </div>
@@ -1087,6 +1159,8 @@ function SettingsWorkspace(props: {
   cleanupDays: string;
   cleanupResult: string;
   busy: boolean;
+  canWrite: boolean;
+  canAdmin: boolean;
   onAiDraftChange: (draft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean }) => void;
   onEditAiConnection: (connection: AiConnection) => void;
   onSaveAiConnection: () => void;
@@ -1109,8 +1183,18 @@ function SettingsWorkspace(props: {
         </Card>
 
         <Card>
+          <CardHeader className="pb-3"><CardTitle>Sessao local</CardTitle><CardDescription>Token bearer/OIDC usado pela UI quando auth estiver ligada.</CardDescription></CardHeader>
+          <CardContent><ApiTokenControl /></CardContent>
+        </Card>
+
+        <Card>
           <CardHeader className="pb-3"><CardTitle>Audit log</CardTitle><CardDescription>Mutacoes recentes na API.</CardDescription></CardHeader>
           <CardContent className="grid gap-2">
+            <div className="flex justify-end">
+              <Button asChild variant="outline" size="sm">
+                <a href={`${apiBase}/api/audit/export`} target="_blank">Export CSV</a>
+              </Button>
+            </div>
             {props.audit.map((entry) => (
               <div key={entry.id} className="grid gap-1 rounded-lg border border-[#e1ddd1] bg-white p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1160,7 +1244,7 @@ function SettingsWorkspace(props: {
             <Field label="Base URL"><Input value={props.aiDraft.baseUrl} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, baseUrl: event.target.value })} /></Field>
             <Field label="API key"><Input type="password" value={props.aiDraft.apiKey} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, apiKey: event.target.value })} placeholder={props.aiDraft.id ? '[REDACTED]' : 'sk-...'} /></Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.aiDraft.enabled} onChange={(event) => props.onAiDraftChange({ ...props.aiDraft, enabled: event.target.checked })} /> Ativa</label>
-            <Button onClick={props.onSaveAiConnection} disabled={props.busy || !props.aiDraft.name || !props.aiDraft.model}>Salvar AI</Button>
+            <Button onClick={props.onSaveAiConnection} disabled={props.busy || !props.canAdmin || !props.aiDraft.name || !props.aiDraft.model}>Salvar AI</Button>
           </CardContent>
         </Card>
 
@@ -1168,11 +1252,25 @@ function SettingsWorkspace(props: {
           <CardHeader className="pb-3"><CardTitle>Cleanup</CardTitle><CardDescription>Aplica politica de retention.</CardDescription></CardHeader>
           <CardContent className="grid gap-3">
             <Field label="Dias"><Input type="number" min={1} value={props.cleanupDays} onChange={(event) => props.onCleanupDaysChange(event.target.value)} /></Field>
-            <Button variant="destructive" onClick={props.onCleanup} disabled={props.busy || Number(props.cleanupDays) < 1}>Executar cleanup</Button>
+            <Button variant="destructive" onClick={props.onCleanup} disabled={props.busy || !props.canAdmin || Number(props.cleanupDays) < 1}>Executar cleanup</Button>
             {props.cleanupResult ? <Signal tone="good" text={props.cleanupResult} /> : null}
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function ApiTokenControl() {
+  const [token, setToken] = useState('');
+  useEffect(() => {
+    setToken(window.localStorage.getItem('testhub.token') ?? '');
+  }, []);
+  return (
+    <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+      <Input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Bearer token / OIDC access token" />
+      <Button onClick={() => window.localStorage.setItem('testhub.token', token)}>Salvar token</Button>
+      <Button variant="outline" onClick={() => { window.localStorage.removeItem('testhub.token'); setToken(''); }}>Limpar</Button>
     </div>
   );
 }
@@ -1381,11 +1479,14 @@ function SuiteMenu(props: {
   draft: { id: string; name: string; type: 'api' | 'web'; specContent: string };
   validation: ValidationResult | null;
   busy: boolean;
+  canWrite?: boolean;
+  approvedAiPatch?: boolean;
   onDraftChange: (draft: { id: string; name: string; type: 'api' | 'web'; specContent: string }) => void;
   onLoadSuite: (suite: Suite) => void;
   onNewSuite: () => void;
   onValidate: () => void;
   onSave: () => void;
+  onApprovedAiPatchChange?: (value: boolean) => void;
 }) {
   return (
     <div className="grid min-h-0 flex-1 gap-4 px-5 pb-5 md:grid-cols-[340px_minmax(0,1fr)]">
@@ -1397,7 +1498,7 @@ function SuiteMenu(props: {
         <CardContent className="min-h-0">
           <ScrollArea className="h-[calc(100vh-220px)] pr-3">
             <div className="grid gap-2">
-              <Button variant="outline" onClick={props.onNewSuite}>Nova suite</Button>
+              <Button variant="outline" onClick={props.onNewSuite} disabled={!props.canWrite}>Nova suite</Button>
               {props.suites.map((suite) => (
                 <button
                   key={suite.id}
@@ -1450,9 +1551,15 @@ function SuiteMenu(props: {
             <YamlEditor value={props.draft.specContent} onChange={(value) => props.onDraftChange({ ...props.draft, specContent: value })} />
           </div>
           {props.validation && !props.validation.valid ? <Signal tone="bad" text={props.validation.error} /> : null}
+          {props.draft.id ? (
+            <label className="flex items-center gap-2 rounded-md border border-[#e1ddd1] bg-white px-3 py-2 text-sm">
+              <input type="checkbox" checked={Boolean(props.approvedAiPatch)} onChange={(event) => props.onApprovedAiPatchChange?.(event.target.checked)} />
+              Aplicar como patch aprovado por humano
+            </label>
+          ) : null}
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" onClick={props.onValidate} disabled={props.busy}>Validar</Button>
-            <Button onClick={props.onSave} disabled={props.busy || !props.draft.name.trim() || !props.draft.specContent.trim()}>
+            <Button onClick={props.onSave} disabled={props.busy || !props.canWrite || !props.draft.name.trim() || !props.draft.specContent.trim()}>
               {props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
               Salvar
             </Button>
@@ -1594,24 +1701,48 @@ function YamlEditor({ value, onChange }: { value: string; onChange: (value: stri
 }
 
 function yamlDiagnostics(source: string, monaco: any) {
-  const markers = [];
+  const markers: Array<ReturnType<typeof marker>> = [];
   const lines = source.split('\n');
-  if (!/^version:\s*1\b/m.test(source)) markers.push(marker(monaco, 1, 'version: 1 obrigatorio.'));
-  if (!/^type:\s*(api|web)\b/m.test(source)) markers.push(marker(monaco, Math.max(1, findLine(lines, 'type')), 'type deve ser api ou web.'));
-  if (!/^name:\s*\S+/m.test(source)) markers.push(marker(monaco, Math.max(1, findLine(lines, 'name')), 'name obrigatorio.'));
-  if (!/^tests:\s*$/m.test(source)) markers.push(marker(monaco, Math.max(1, findLine(lines, 'tests')), 'tests obrigatorio.'));
+  let parsed: any = null;
+  try {
+    const doc = YAML.parseDocument(source);
+    for (const error of doc.errors) {
+      const line = lineFromOffset(source, error.pos?.[0] ?? 0);
+      markers.push(marker(monaco, line, error.message, monaco.MarkerSeverity.Error));
+    }
+    parsed = doc.toJSON();
+  } catch (error) {
+    markers.push(marker(monaco, 1, messageOf(error), monaco.MarkerSeverity.Error));
+  }
+  if (!parsed || typeof parsed !== 'object') return markers;
+  if (parsed.version !== 1) markers.push(marker(monaco, Math.max(1, findLine(lines, 'version')), 'version: 1 obrigatorio.', monaco.MarkerSeverity.Error));
+  if (parsed.type !== 'api' && parsed.type !== 'web') markers.push(marker(monaco, Math.max(1, findLine(lines, 'type')), 'type deve ser api ou web/frontend.', monaco.MarkerSeverity.Error));
+  if (!parsed.name) markers.push(marker(monaco, Math.max(1, findLine(lines, 'name')), 'name obrigatorio.'));
+  if (!Array.isArray(parsed.tests) || parsed.tests.length === 0) markers.push(marker(monaco, Math.max(1, findLine(lines, 'tests')), 'tests deve ter pelo menos 1 item.', monaco.MarkerSeverity.Error));
+  if (Array.isArray(parsed.tests)) {
+    parsed.tests.forEach((test: any, index: number) => {
+      const line = findLine(lines, `- name: ${test?.name ?? ''}`) || findLine(lines, 'tests');
+      if (!test?.name) markers.push(marker(monaco, line, `tests[${index}].name obrigatorio.`));
+      if (parsed.type === 'api' && !test?.request) markers.push(marker(monaco, line, `tests[${index}].request obrigatorio para API.`));
+      if (parsed.type === 'web' && (!Array.isArray(test?.steps) || test.steps.length === 0)) markers.push(marker(monaco, line, `tests[${index}].steps obrigatorio para Frontend.`));
+    });
+  }
   return markers;
 }
 
-function marker(monaco: any, line: number, message: string) {
+function marker(monaco: any, line: number, message: string, severity = monaco.MarkerSeverity.Warning) {
   return {
-    severity: monaco.MarkerSeverity.Warning,
+    severity,
     message,
     startLineNumber: line,
     startColumn: 1,
     endLineNumber: line,
     endColumn: 120,
   };
+}
+
+function lineFromOffset(source: string, offset: number): number {
+  return source.slice(0, offset).split('\n').length;
 }
 
 function findLine(lines: string[], token: string): number {
@@ -1634,6 +1765,8 @@ function EvidenceColumn(props: {
   onSelectRun: (run: Run) => void;
   onCancel: (run: Run) => Promise<void>;
   onExplain: (run?: Run) => Promise<void>;
+  onSuggestFix: (run?: Run) => Promise<void>;
+  onSuggestCases: (run?: Run) => Promise<void>;
   aiOutput: string;
 }) {
   return (
@@ -1660,10 +1793,20 @@ function EvidenceColumn(props: {
               </Button>
             ) : null}
             {props.selectedRun && ['failed', 'error'].includes(props.selectedRun.status) ? (
-              <Button variant="outline" size="sm" onClick={() => props.onExplain(props.selectedRun)}>
-                <Bot data-icon="inline-start" />
-                Explicar falha
-              </Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => props.onExplain(props.selectedRun)}>
+                  <Bot data-icon="inline-start" />
+                  Explicar
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => props.onSuggestFix(props.selectedRun)}>
+                  <WandSparkles data-icon="inline-start" />
+                  Corrigir teste
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => props.onSuggestCases(props.selectedRun)}>
+                  <FileCode2 data-icon="inline-start" />
+                  Novos casos
+                </Button>
+              </div>
             ) : null}
           </div>
         </CardHeader>
@@ -2106,8 +2249,10 @@ function groupHttpArtifacts(artifacts: Artifact[]): Array<{ request?: Artifact; 
 }
 
 async function api<T>(apiPath: string, options: RequestInit = {}): Promise<T> {
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem('testhub.token') : process.env.NEXT_PUBLIC_TESTHUB_TOKEN;
   const headers = {
     ...(options.body ? { 'content-type': 'application/json' } : {}),
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
     ...(options.headers ?? {}),
   };
   const response = await fetch(`${apiBase}${apiPath}`, { ...options, headers });
@@ -2149,6 +2294,10 @@ function parseVars(input: string): Record<string, string> {
     if (index === -1) return [line.trim(), ''];
     return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
   }));
+}
+
+function splitList(input: string): string[] {
+  return input.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
 }
 
 function messageOf(error: unknown): string {

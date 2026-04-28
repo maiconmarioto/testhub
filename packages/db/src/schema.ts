@@ -1,9 +1,11 @@
-import { jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { boolean, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 
 export const projects = pgTable('projects', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
+  retentionDays: integer('retention_days'),
+  cleanupArtifacts: boolean('cleanup_artifacts'),
   status: text('status').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),

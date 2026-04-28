@@ -8,14 +8,14 @@ import Fastify from 'fastify';
 import { z, ZodError } from 'zod';
 import { buildFailurePrompt, buildFixPrompt, buildTestSuggestionPrompt, callAi } from '../../../packages/ai/src/ai.js';
 import { cleanupOldRuns } from '../../../packages/db/src/cleanup.js';
-import { readAudit, writeAudit } from '../../../packages/db/src/audit.js';
+import { auditCsv, readAudit, writeAudit } from '../../../packages/db/src/audit.js';
 import { createRunQueue } from '../../../packages/shared/src/jobs.js';
 import { openApiToSuite } from '../../../packages/spec/src/openapi-import.js';
 import { parseSpecContent, SpecValidationError } from '../../../packages/spec/src/spec.js';
 import { redactDeep } from '../../../packages/shared/src/redact.js';
 import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
-import { isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus } from '../../../packages/db/src/security.js';
+import { actorFromAuthorization, actorLabel, hasPermission, isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus, type AuthActor, type Permission } from '../../../packages/db/src/security.js';
 import { createStore } from '../../../packages/db/src/store-factory.js';
 
 const openApiDocument = {
@@ -112,21 +112,33 @@ export function createApp() {
   });
 
   app.addHook('preHandler', async (req, reply) => {
-    const token = process.env.TESTHUB_TOKEN;
-    if (!token) return;
     if (req.url === '/' || req.url.startsWith('/api/health') || req.url.startsWith('/docs') || req.url.startsWith('/openapi.json')) return;
-    if (req.headers.authorization === `Bearer ${token}`) return;
-    return reply.code(401).send({ error: 'Unauthorized' });
+    const actor = await actorFromAuthorization(req.headers.authorization);
+    if (!actor) return reply.code(401).send({ error: 'Unauthorized' });
+    req.actor = actor;
+    const permission = permissionFor(req.method, req.url);
+    if (permission && !hasPermission(actor.role, permission)) {
+      writeAudit({
+        action: `rbac.denied ${req.method} ${req.url.split('?')[0]}`,
+        actor: actorLabel(actor),
+        actorRole: actor.role,
+        status: 'blocked',
+        detail: { permission },
+      }, store.rootDir);
+      return reply.code(403).send({ error: `Papel ${actor.role} nao permite ${permission}` });
+    }
   });
 
   app.addHook('onResponse', async (req, reply) => {
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return;
     if (req.url.startsWith('/docs') || req.url.startsWith('/api/health')) return;
+    const actor = req.actor ?? null;
     writeAudit({
       action: `${req.method} ${req.url.split('?')[0]}`,
-      actor: req.headers.authorization ? 'api-token' : 'anonymous',
+      actor: actorLabel(actor),
+      actorRole: actor?.role,
       status: reply.statusCode >= 400 ? 'error' : 'ok',
-      detail: { statusCode: reply.statusCode },
+      detail: { statusCode: reply.statusCode, payload: redactDeep(req.body) },
     }, store.rootDir);
   });
 
@@ -161,13 +173,35 @@ export function createApp() {
   app.get('/api/system/security', { schema: { tags: ['system'], summary: 'Security status' } }, async () => systemSecurityStatus());
 
   app.get('/api/audit', { schema: { tags: ['system'], summary: 'Audit log' } }, async (req) => {
-    const query = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query);
-    return readAudit(query.limit, store.rootDir);
+    const query = z.object({
+      limit: z.coerce.number().int().min(1).max(500).default(50),
+      actor: z.string().optional(),
+      action: z.string().optional(),
+      status: z.enum(['ok', 'blocked', 'error']).optional(),
+    }).parse(req.query);
+    return readAudit(query, store.rootDir);
+  });
+
+  app.get('/api/audit/export', { schema: { tags: ['system'], summary: 'Audit CSV export' } }, async (req, reply) => {
+    const query = z.object({
+      limit: z.coerce.number().int().min(1).max(5000).default(1000),
+      actor: z.string().optional(),
+      action: z.string().optional(),
+      status: z.enum(['ok', 'blocked', 'error']).optional(),
+    }).parse(req.query);
+    reply.header('content-type', 'text/csv; charset=utf-8');
+    reply.header('content-disposition', 'attachment; filename="testhub-audit.csv"');
+    return auditCsv(readAudit(query, store.rootDir));
   });
 
   app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async () => (await store.read()).projects.filter((project) => project.status !== 'inactive'));
   app.post('/api/projects', { schema: { tags: ['projects'], summary: 'Create project' } }, async (req, reply) => {
-    const input = z.object({ name: z.string().min(1), description: z.string().optional() }).parse(req.body);
+    const input = z.object({
+      name: z.string().min(1),
+      description: z.string().optional(),
+      retentionDays: z.number().int().min(1).optional(),
+      cleanupArtifacts: z.boolean().optional(),
+    }).parse(req.body);
     return reply.code(201).send(await store.createProject(input));
   });
   app.get('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Get project' } }, async (req, reply) => {
@@ -178,7 +212,12 @@ export function createApp() {
   });
   app.put('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Update project' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
-    const input = z.object({ name: z.string().min(1), description: z.string().optional() }).parse(req.body);
+    const input = z.object({
+      name: z.string().min(1),
+      description: z.string().optional(),
+      retentionDays: z.number().int().min(1).optional(),
+      cleanupArtifacts: z.boolean().optional(),
+    }).parse(req.body);
     const project = await store.updateProject(params.id, input);
     if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
     return project;
@@ -289,9 +328,15 @@ export function createApp() {
       projectId: z.string(),
       name: z.string().min(1).default('openapi-import'),
       spec: z.unknown(),
+      baseUrl: z.string().optional(),
+      headers: z.record(z.string()).optional(),
+      authTemplate: z.enum(['none', 'bearer', 'apiKey']).optional(),
+      selectedOperations: z.array(z.string()).optional(),
+      tags: z.array(z.string()).optional(),
+      includeBodyExamples: z.boolean().optional(),
     }).parse(req.body);
     try {
-      const specContent = openApiToSuite(input.spec, input.name);
+      const specContent = openApiToSuite(input.spec, input.name, input);
       return reply.code(201).send(await store.createSuite({ projectId: input.projectId, name: input.name, type: 'api', specContent }));
     } catch (error) {
       return reply.code(400).send({ error: messageOf(error) });
@@ -317,7 +362,8 @@ export function createApp() {
     if (!isHostAllowed(environment.baseUrl)) {
       writeAudit({
         action: 'run.blocked.host_allowlist',
-        actor: req.headers.authorization ? 'api-token' : 'anonymous',
+        actor: actorLabel(req.actor ?? null),
+        actorRole: req.actor?.role,
         target: environment.baseUrl,
         status: 'blocked',
       }, store.rootDir);
@@ -348,8 +394,15 @@ export function createApp() {
   });
 
   app.post('/api/cleanup', { schema: { tags: ['system'], summary: 'Delete old runs and local artifacts' } }, async (req, reply) => {
-    const input = z.object({ days: z.number().int().min(1).default(retentionDays()) }).parse(req.body ?? {});
-    return reply.send(await cleanupOldRuns(store, input.days));
+    const input = z.object({
+      projectId: z.string().optional(),
+      days: z.number().int().min(1).optional(),
+      cleanupArtifacts: z.boolean().optional(),
+    }).parse(req.body ?? {});
+    const project = input.projectId ? await store.getProject(input.projectId) : undefined;
+    const days = input.days ?? project?.retentionDays ?? retentionDays();
+    const cleanupArtifacts = input.cleanupArtifacts ?? project?.cleanupArtifacts ?? false;
+    return reply.send(await cleanupOldRuns(store, days, { projectId: input.projectId, cleanupArtifacts }));
   });
 
   app.get('/artifacts', { schema: { tags: ['artifacts'], summary: 'Stream local artifact' } }, async (req, reply) => {
@@ -392,10 +445,58 @@ export function createApp() {
       : params.kind === 'suggest-test-fix'
         ? buildFixPrompt(context)
         : buildTestSuggestionPrompt(context);
-    return callAi(connection, prompt);
+    const result = await callAi(connection, prompt);
+    writeAudit({
+      action: `ai.${params.kind}`,
+      actor: actorLabel(req.actor ?? null),
+      actorRole: req.actor?.role,
+      status: 'ok',
+      detail: { provider: result.provider, model: result.model, prompt: redactDeep(prompt), output: redactDeep(result.output) },
+    }, store.rootDir);
+    return result;
+  });
+
+  app.post('/api/ai/apply-test-fix', { schema: { tags: ['ai'], summary: 'Apply approved AI test fix' } }, async (req, reply) => {
+    const input = z.object({
+      suiteId: z.string(),
+      name: z.string().min(1),
+      type: z.enum(['web', 'api']),
+      specContent: z.string().min(1),
+      approved: z.boolean(),
+      reason: z.string().optional(),
+    }).parse(req.body);
+    if (!input.approved) return reply.code(400).send({ error: 'Aprovacao humana obrigatoria.' });
+    const suite = await store.updateSuite(input.suiteId, { name: input.name, type: input.type, specContent: input.specContent });
+    if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    writeAudit({
+      action: 'ai.apply-test-fix',
+      actor: actorLabel(req.actor ?? null),
+      actorRole: req.actor?.role,
+      target: input.suiteId,
+      status: 'ok',
+      detail: { reason: input.reason },
+    }, store.rootDir);
+    return suite;
   });
 
   return app;
+}
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    actor?: AuthActor;
+  }
+}
+
+function permissionFor(method: string, url: string): Permission | null {
+  if (method === 'GET') return url.startsWith('/api/audit') ? 'audit:read' : null;
+  if (url.startsWith('/api/projects')) return 'project:write';
+  if (url.startsWith('/api/environments')) return 'environment:write';
+  if (url.startsWith('/api/suites') || url.startsWith('/api/import/openapi') || url.startsWith('/api/spec/validate')) return 'suite:write';
+  if (url.startsWith('/api/runs')) return 'run:write';
+  if (url.startsWith('/api/ai/connections') || url.startsWith('/api/cleanup')) return 'settings:write';
+  if (url.startsWith('/api/ai/')) return 'ai:write';
+  return null;
 }
 
 function messageOf(error: unknown): string {

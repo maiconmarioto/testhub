@@ -1,10 +1,10 @@
-# TestHub Runner CLI
+# TestHub
 
-Runner local para specs `web` e `api`.
+Runner + API + UI oficial para specs `frontend` e `api`.
 
 ## Estrutura
 
-- `apps/web`: unica UI oficial, dashboard Next.js.
+- `apps/web`: UI oficial Next.js. `/v2`, `/projects`, `/suites`, `/settings`.
 - `apps/api`: Fastify REST, health/status, artifacts e Swagger/OpenAPI.
 - `apps/worker`: worker BullMQ, apenas executa runs.
 - `apps/cli`: CLI para validar, executar, servir API e limpeza.
@@ -132,7 +132,7 @@ http://localhost:4321/docs
 http://localhost:4321/openapi.json
 ```
 
-## Next.js Dashboard
+## UI oficial
 
 Frontend real em `apps/web`.
 
@@ -145,6 +145,19 @@ Abrir:
 ```text
 http://localhost:3333
 ```
+
+Rotas principais:
+
+- `/v2`: overview/run workspace. Query params compartilhaveis: `project`, `environment`, `suite`, `run`.
+- `/projects`: criar/editar projetos e ambientes. Retention por projeto fica aqui.
+- `/suites`: criar/editar suites YAML, Monaco editor, validação inline e import OpenAPI.
+- `/settings`: AI connections, segurança, audit e cleanup.
+
+Wizard:
+
+- Botao `Wizard` no topo da home.
+- Cria projeto, ambiente e primeira suite em passos.
+- Modal nao fecha com `Esc` nem clique fora; fecha apenas em `Fechar`/`X`.
 
 Build:
 
@@ -192,14 +205,37 @@ TESTHUB_TOKEN=secret node dist/apps/cli/src/cli.js server
 curl -H "authorization: Bearer secret" http://localhost:4321/api/projects
 ```
 
+Auth/RBAC:
+
+```text
+TESTHUB_AUTH_MODE=off|token|oidc
+TESTHUB_TOKEN=secret
+TESTHUB_ROLE=admin|editor|viewer
+AUTH_OIDC_ISSUER=https://issuer.example.com
+AUTH_OIDC_CLIENT_ID=testhub
+TESTHUB_ADMIN_GROUPS=platform-admins
+TESTHUB_EDITOR_GROUPS=qa,developers
+TESTHUB_VIEWER_GROUPS=readers
+```
+
+Permissões:
+
+- `admin`: tudo, incluindo settings, audit e cleanup.
+- `editor`: projetos/ambientes/suites/runs/import/AI assistant.
+- `viewer`: leitura.
+
+Na UI, salve bearer token/OIDC access token em `/settings` -> `Sessao local` quando auth estiver ligada.
+
 Operacoes uteis:
 
 ```bash
 curl -X POST http://localhost:4321/api/runs/<run-id>/cancel
 curl -X POST http://localhost:4321/api/cleanup -H 'content-type: application/json' -d '{"days":30}'
+curl http://localhost:4321/api/audit?limit=100
+curl http://localhost:4321/api/audit/export
 ```
 
-Delete de entidades e cleanup usam soft delete/archive. Registros e artifacts sao preservados; a UI/API apenas ocultam itens arquivados.
+Delete de entidades e cleanup usam soft delete/archive. Por padrao artifacts sao preservados. Projeto pode habilitar `cleanupArtifacts` para remover artifacts locais no cleanup.
 
 Timeout e concorrencia:
 
@@ -216,6 +252,24 @@ curl -X POST http://localhost:4321/api/import/openapi \\
   -d '{"projectId":"...","name":"catalog-api","spec":{"openapi":"3.0.0","paths":{"/health":{"get":{"responses":{"200":{"description":"ok"}}}}}}}'
 ```
 
+Import OpenAPI avancado:
+
+```bash
+curl -X POST http://localhost:4321/api/import/openapi \\
+  -H 'content-type: application/json' \\
+  -d '{
+    "projectId":"...",
+    "name":"catalog-api",
+    "baseUrl":"https://api.local",
+    "authTemplate":"bearer",
+    "headers":{"x-tenant":"demo"},
+    "tags":["catalog"],
+    "selectedOperations":["GET /health","createUser"],
+    "includeBodyExamples":true,
+    "spec":{"openapi":"3.0.0","paths":{}}
+  }'
+```
+
 CLI cleanup:
 
 ```bash
@@ -224,7 +278,7 @@ npx tsx apps/cli/src/cli.ts cleanup --days 30
 
 ## AI Connections
 
-AI e opcional. Sem connection, runner/API/dashboard seguem funcionando.
+AI e opcional. Sem connection, runner/API/UI seguem funcionando. AI nunca decide pass/fail. Patch sugerido só é aplicado quando usuario marca aprovação humana na tela de suites.
 
 Providers suportados no adapter:
 

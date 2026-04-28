@@ -11,6 +11,8 @@ export interface Project {
   id: string;
   name: string;
   description?: string;
+  retentionDays?: number;
+  cleanupArtifacts?: boolean;
   status: EntityStatus;
   createdAt: string;
   updatedAt: string;
@@ -79,8 +81,8 @@ export interface Store {
   runsDir: string;
   read(): Promise<Database> | Database;
   getProject(id: string): Promise<Project | undefined> | Project | undefined;
-  createProject(input: { name: string; description?: string }): Promise<Project> | Project;
-  updateProject(id: string, input: { name: string; description?: string }): Promise<Project | undefined> | Project | undefined;
+  createProject(input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project> | Project;
+  updateProject(id: string, input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project | undefined> | Project | undefined;
   archiveProject(id: string): Promise<boolean> | boolean;
   createEnvironment(input: { projectId: string; name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment> | Environment;
   updateEnvironment(id: string, input: { name: string; baseUrl: string; variables?: Record<string, string> }): Promise<Environment | undefined> | Environment | undefined;
@@ -90,7 +92,7 @@ export interface Store {
   updateSuite(id: string, input: { name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite | undefined> | Suite | undefined;
   createRun(input: { projectId: string; environmentId: string; suiteId: string }): Promise<RunRecord> | RunRecord;
   updateRun(id: string, patch: Partial<RunRecord>): Promise<RunRecord> | RunRecord;
-  archiveRunsBefore?(cutoffIso: string): Promise<number> | number;
+  archiveRunsBefore?(cutoffIso: string, options?: { projectId?: string; cleanupArtifacts?: boolean; runsDir?: string }): Promise<number> | number;
   upsertAiConnection(input: Omit<AiConnection, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<AiConnection> | AiConnection;
   getEnvironmentVariables(environmentId: string): Promise<Record<string, string>> | Record<string, string>;
   getAiConnection(connectionId?: string): Promise<AiConnection | undefined> | AiConnection | undefined;
@@ -137,13 +139,15 @@ export class JsonStore {
     return this.read().projects.find((project) => project.id === id && project.status !== 'inactive');
   }
 
-  createProject(input: { name: string; description?: string }): Project {
+  createProject(input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Project {
     const db = this.read();
     const now = nowIso();
     const project: Project = {
       id: randomUUID(),
       name: input.name,
       description: input.description,
+      retentionDays: input.retentionDays,
+      cleanupArtifacts: input.cleanupArtifacts,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -153,7 +157,7 @@ export class JsonStore {
     return project;
   }
 
-  updateProject(id: string, input: { name: string; description?: string }): Project | undefined {
+  updateProject(id: string, input: { name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Project | undefined {
     const db = this.read();
     const index = db.projects.findIndex((project) => project.id === id && project.status !== 'inactive');
     if (index === -1) return undefined;
@@ -161,6 +165,8 @@ export class JsonStore {
       ...db.projects[index],
       name: input.name,
       description: input.description,
+      retentionDays: input.retentionDays,
+      cleanupArtifacts: input.cleanupArtifacts,
       updatedAt: nowIso(),
     };
     db.projects[index] = project;
@@ -295,12 +301,14 @@ export class JsonStore {
     return db.runs[index];
   }
 
-  archiveRunsBefore(cutoffIso: string): number {
+  archiveRunsBefore(cutoffIso: string, options: { projectId?: string; cleanupArtifacts?: boolean; runsDir?: string } = {}): number {
     const db = this.read();
     let archived = 0;
     db.runs = db.runs.map((run) => {
       if (run.createdAt >= cutoffIso || run.status === 'deleted') return run;
+      if (options.projectId && run.projectId !== options.projectId) return run;
       archived += 1;
+      if (options.cleanupArtifacts) cleanupRunArtifacts(options.runsDir ?? this.runsDir, run.reportPath, run.reportHtmlPath);
       return { ...run, status: 'deleted', finishedAt: run.finishedAt ?? nowIso() };
     });
     this.write(db);
@@ -344,4 +352,16 @@ export class JsonStore {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function cleanupRunArtifacts(allowedRoot: string, ...paths: Array<string | undefined>): void {
+  const root = path.resolve(allowedRoot);
+  for (const item of paths.filter(Boolean)) {
+    const target = path.resolve(item!);
+    if (!target.startsWith(root)) continue;
+    if (!fs.existsSync(target)) continue;
+    const dir = fs.statSync(target).isDirectory() ? target : path.dirname(target);
+    if (dir === root) continue;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
