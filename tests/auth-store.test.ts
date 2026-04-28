@@ -86,6 +86,8 @@ describe('auth helpers', () => {
     expect(hash).not.toContain('correct horse');
     await expect(verifyPassword('correct horse battery staple', hash)).resolves.toBe(true);
     await expect(verifyPassword('wrong', hash)).resolves.toBe(false);
+    await expect(verifyPassword('correct horse battery staple', `${hash}:extra`)).resolves.toBe(false);
+    await expect(verifyPassword('correct horse battery staple', 'scrypt:salt:not-hex')).resolves.toBe(false);
   });
 
   it('hashes opaque tokens before persistence', () => {
