@@ -19,7 +19,7 @@ import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
 import { actorFromAuthorization, actorLabel, authMode, hasPermission, isDefaultSecretKey, isHostAllowed, retentionDays, systemSecurityStatus, type AuthActor, type Permission } from '../../../packages/db/src/security.js';
 import { createStore } from '../../../packages/db/src/store-factory.js';
-import type { Database, Environment, Project, RunRecord, Suite, User } from '../../../packages/db/src/store.js';
+import type { Database, Environment, MembershipRole, Project, RunRecord, Suite, User } from '../../../packages/db/src/store.js';
 
 const sessionCookieName = 'testhub_session';
 const passwordSchema = z.string().min(8).max(200);
@@ -87,6 +87,10 @@ const openApiDocument = {
     '/api/cleanup': { post: { tags: ['system'], summary: 'Delete old runs and local artifacts', responses: { '200': { description: 'OK' } } } },
     '/api/system/security': { get: { tags: ['system'], summary: 'Security status', responses: { '200': { description: 'OK' } } } },
     '/api/audit': { get: { tags: ['system'], summary: 'Audit log', responses: { '200': { description: 'OK' } } } },
+    '/api/organizations/current/members': {
+      get: { tags: ['system'], summary: 'List current organization members', responses: { '200': { description: 'OK' } } },
+      post: { tags: ['system'], summary: 'Create current organization member', responses: { '201': { description: 'Created' } } },
+    },
   },
 };
 
@@ -303,6 +307,49 @@ export function createApp() {
     const membership = await store.findMembership(actor.userId, actor.organizationId);
     if (!user || !organization || !membership) return reply.code(401).send({ error: 'Unauthorized' });
     return { user: publicUser(user), organization, membership, organizations };
+  });
+
+  app.get('/api/organizations/current/members', { schema: { tags: ['system'], summary: 'List current organization members' } }, async (req) => {
+    const organizationId = requireOrganization(req.actor);
+    const memberships = await store.listMembershipsForOrganization(organizationId);
+    const members = await Promise.all(memberships.map(async (membership) => {
+      const user = await store.findUserById(membership.userId);
+      return user ? { user: publicUser(user), membership } : undefined;
+    }));
+    return members.filter((member): member is NonNullable<typeof member> => Boolean(member));
+  });
+
+  app.post('/api/organizations/current/members', { schema: { tags: ['system'], summary: 'Create current organization member' } }, async (req, reply) => {
+    const input = z.object({
+      email: z.string().email(),
+      name: z.string().min(1).max(200).optional(),
+      role: z.enum(['admin', 'editor', 'viewer']),
+      temporaryPassword: passwordSchema.optional(),
+    }).parse(req.body);
+    const organizationId = requireOrganization(req.actor);
+    let user = await store.findUserByEmail(input.email);
+    let generatedTemporaryPassword: string | undefined;
+    if (!user) {
+      const temporaryPassword = input.temporaryPassword ?? createResetToken();
+      passwordSchema.parse(temporaryPassword);
+      if (!input.temporaryPassword) generatedTemporaryPassword = temporaryPassword;
+      user = await store.createUser({
+        email: input.email,
+        name: input.name,
+        passwordHash: await hashPassword(temporaryPassword),
+      });
+    }
+    const existingMembership = await store.findMembership(user.id, organizationId);
+    const membership = existingMembership ?? await store.createMembership({
+      userId: user.id,
+      organizationId,
+      role: input.role as MembershipRole,
+    });
+    return reply.code(201).send({
+      user: publicUser(user),
+      membership,
+      ...(generatedTemporaryPassword ? { temporaryPassword: generatedTemporaryPassword } : {}),
+    });
   });
 
   app.post('/api/auth/logout', { schema: { tags: ['system'], summary: 'Logout local account' } }, async (req, reply) => {
@@ -761,6 +808,7 @@ function permissionFor(method: string, url: string): Permission | null {
   if (url.startsWith('/api/environments')) return 'environment:write';
   if (url.startsWith('/api/suites') || url.startsWith('/api/import/openapi') || url.startsWith('/api/spec/validate')) return 'suite:write';
   if (url.startsWith('/api/runs')) return 'run:write';
+  if (url.startsWith('/api/organizations/current/members')) return 'settings:write';
   if (url.startsWith('/api/ai/connections') || url.startsWith('/api/cleanup')) return 'settings:write';
   if (url.startsWith('/api/ai/')) return 'ai:write';
   return null;

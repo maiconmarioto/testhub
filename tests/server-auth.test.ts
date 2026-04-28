@@ -161,6 +161,173 @@ describe('server local auth', () => {
     expect(response.json()).toEqual({});
   });
 
+  it('lets an admin create an editor member with a temporary password', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-members-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const register = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'admin@example.com',
+        password: 'correct-horse',
+        organizationName: 'Member Team',
+      },
+    });
+    expect(register.statusCode).toBe(201);
+    const admin = register.json() as { token: string; organization: { id: string } };
+
+    const createMember = await app.inject({
+      method: 'POST',
+      url: '/api/organizations/current/members',
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: {
+        email: 'Editor@Example.com',
+        name: 'Editor',
+        role: 'editor',
+        temporaryPassword: 'temporary-password',
+      },
+    });
+    expect(createMember.statusCode).toBe(201);
+    const member = createMember.json() as {
+      user: { id: string; email: string; passwordHash?: string };
+      membership: { organizationId: string; role: string };
+      temporaryPassword?: string;
+    };
+    expect(member.user).toMatchObject({ email: 'editor@example.com' });
+    expect(member.user.passwordHash).toBeUndefined();
+    expect(member.membership).toMatchObject({ organizationId: admin.organization.id, role: 'editor' });
+    expect(member.temporaryPassword).toBeUndefined();
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'editor@example.com', password: 'temporary-password' },
+    });
+    expect(login.statusCode).toBe(200);
+    expect(login.json()).toMatchObject({
+      user: { id: member.user.id, email: 'editor@example.com' },
+      membership: { organizationId: admin.organization.id, role: 'editor' },
+    });
+    expect((login.json() as { user: { passwordHash?: string } }).user.passwordHash).toBeUndefined();
+  });
+
+  it('forbids a viewer from creating organization members', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-members-viewer-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const register = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'viewer-admin@example.com',
+        password: 'correct-horse',
+        organizationName: 'Viewer Team',
+      },
+    });
+    expect(register.statusCode).toBe(201);
+    const admin = register.json() as { token: string };
+
+    const createViewer = await app.inject({
+      method: 'POST',
+      url: '/api/organizations/current/members',
+      headers: { authorization: `Bearer ${admin.token}` },
+      payload: {
+        email: 'viewer@example.com',
+        role: 'viewer',
+        temporaryPassword: 'viewer-password',
+      },
+    });
+    expect(createViewer.statusCode).toBe(201);
+
+    const loginViewer = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { email: 'viewer@example.com', password: 'viewer-password' },
+    });
+    expect(loginViewer.statusCode).toBe(200);
+    const viewer = loginViewer.json() as { token: string };
+
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/organizations/current/members',
+      headers: { authorization: `Bearer ${viewer.token}` },
+      payload: {
+        email: 'blocked@example.com',
+        role: 'editor',
+        temporaryPassword: 'blocked-password',
+      },
+    });
+    expect(blocked.statusCode).toBe(403);
+  });
+
+  it('lists only members in the current organization', async () => {
+    process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-members-list-'));
+    process.env.TESTHUB_AUTH_MODE = 'local';
+    process.env.NODE_ENV = 'test';
+    process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP = 'true';
+    const app = createApp();
+    apps.push(app);
+    await app.ready();
+
+    const registerA = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'org-a-admin@example.com',
+        password: 'correct-horse',
+        organizationName: 'Org A',
+      },
+    });
+    expect(registerA.statusCode).toBe(201);
+    const orgA = registerA.json() as { token: string };
+
+    const registerB = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'org-b-admin@example.com',
+        password: 'correct-horse',
+        organizationName: 'Org B',
+      },
+    });
+    expect(registerB.statusCode).toBe(201);
+
+    const createMember = await app.inject({
+      method: 'POST',
+      url: '/api/organizations/current/members',
+      headers: { authorization: `Bearer ${orgA.token}` },
+      payload: {
+        email: 'org-a-editor@example.com',
+        role: 'editor',
+      },
+    });
+    expect(createMember.statusCode).toBe(201);
+    const created = createMember.json() as { temporaryPassword?: string; user: { passwordHash?: string } };
+    expect(created.temporaryPassword).toEqual(expect.any(String));
+    expect(created.temporaryPassword?.length).toBeGreaterThanOrEqual(8);
+    expect(created.user.passwordHash).toBeUndefined();
+
+    const members = await app.inject({
+      method: 'GET',
+      url: '/api/organizations/current/members',
+      headers: { authorization: `Bearer ${orgA.token}` },
+    });
+    expect(members.statusCode).toBe(200);
+    const emails = (members.json() as Array<{ user: { email: string; passwordHash?: string } }>).map((member) => member.user.email).sort();
+    expect(emails).toEqual(['org-a-admin@example.com', 'org-a-editor@example.com']);
+    expect(emails).not.toContain('org-b-admin@example.com');
+    expect((members.json() as Array<{ user: { passwordHash?: string } }>).every((member) => member.user.passwordHash === undefined)).toBe(true);
+  });
+
   it('does not treat auth route prefixes as public', async () => {
     process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-prefix-'));
     process.env.TESTHUB_AUTH_MODE = 'local';
