@@ -812,7 +812,7 @@ git commit -m "feat: add local auth api"
 - Modify: `tests/server-auth.test.ts`
 - Modify: `tests/server-e2e.test.ts`
 
-- [ ] **Step 1: Add failing org isolation test**
+- [x] **Step 1: Add failing org isolation test**
 
 Append to `tests/server-auth.test.ts`:
 
@@ -853,7 +853,7 @@ async function registerAndToken(app: ReturnType<typeof createApp>, email: string
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -863,7 +863,7 @@ npm test -- tests/server-auth.test.ts
 
 Expected: FAIL because project list is global or project create does not set `organizationId`.
 
-- [ ] **Step 3: Add API resource guards**
+- [x] **Step 3: Add API resource guards**
 
 In `apps/api/src/server.ts`, create helpers:
 
@@ -904,7 +904,7 @@ if (environment.projectId !== input.projectId || suite.projectId !== input.proje
 }
 ```
 
-- [ ] **Step 4: Update existing server e2e tests to authenticate**
+- [x] **Step 4: Update existing server e2e tests to authenticate**
 
 In `tests/server-e2e.test.ts`, add:
 
@@ -929,7 +929,7 @@ function auth() {
 
 Add `headers: auth()` to every protected `app.inject` call.
 
-- [ ] **Step 5: Run server tests**
+- [x] **Step 5: Run server tests**
 
 Run:
 
@@ -939,7 +939,7 @@ npm test -- tests/server-auth.test.ts tests/server-e2e.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/api/src/server.ts tests/server-auth.test.ts tests/server-e2e.test.ts
