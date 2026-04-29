@@ -2942,6 +2942,7 @@ function SuitePreviewDialog({ open, suite, projectId, onOpenChange }: { open: bo
 function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, height = 'calc(100vh - 410px)' }: { value: string; onChange: (value: string) => void; readOnly?: boolean; validateSpec?: boolean; height?: string }) {
   const monacoRef = useRef<any>(null);
   const editorRef = useRef<any>(null);
+  const modelPathRef = useRef(`testhub-${Math.random().toString(36).slice(2)}.yaml`);
   useEffect(() => {
     const monaco = monacoRef.current;
     const editor = editorRef.current;
@@ -2955,6 +2956,7 @@ function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, he
       <MonacoEditor
         height={height}
         defaultLanguage="yaml"
+        path={modelPathRef.current}
         value={value}
         onChange={(nextValue) => onChange(nextValue ?? '')}
         beforeMount={(monaco) => {
@@ -2991,6 +2993,7 @@ function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, he
           glyphMargin: true,
           quickSuggestions: true,
           readOnly,
+          domReadOnly: readOnly,
           renderValidationDecorations: readOnly ? 'off' : 'on',
         }}
         theme="vs-dark"
@@ -3426,7 +3429,7 @@ function WizardDialog(props: {
                 onClick={() => props.onStepChange(index)}
                 className={cn('rounded-lg border px-3 py-2 text-left text-sm font-semibold', props.step === index ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1] bg-white')}
               >
-                <span className="font-mono text-[10px] text-[#66705f]">Passó {index + 1}</span>
+                <span className="font-mono text-[10px] text-[#66705f]">Passo {index + 1}</span>
                 <span className="block">{label}</span>
               </button>
             ))}
@@ -3461,7 +3464,15 @@ function WizardDialog(props: {
                   </Select>
                 </Field>
               </div>
-              <Field label="YAML"><YamlEditor value={props.draft.specContent} onChange={(value) => props.onDraftChange({ ...props.draft, specContent: value })} /></Field>
+              <div className="grid gap-1">
+                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">YAML</span>
+                <YamlEditor
+                  value={props.draft.specContent}
+                  onChange={(value) => props.onDraftChange({ ...props.draft, specContent: value })}
+                  readOnly={false}
+                  height="360px"
+                />
+              </div>
             </div>
           ) : null}
 
