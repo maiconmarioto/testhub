@@ -23,6 +23,10 @@ test('v2 keeps shared query params and navigates real management pages', async (
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
   await expect(page.getByRole('button', { name: 'Wizard' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Suites do projeto' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: fixture.suiteName, level: 3 })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Saúde' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Falhas' })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`project=${fixture.project.id}`));
   await expect(page).toHaveURL(new RegExp(`environment=${fixture.environment.id}`));
   await expect(page).toHaveURL(new RegExp(`suite=${fixture.suite.id}`));
@@ -41,6 +45,7 @@ test('v2 keeps shared query params and navigates real management pages', async (
   await page.getByLabel('Sistema').click();
   await expect(page).toHaveURL(/\/settings/);
   await expect(page.getByRole('heading', { name: 'Sistema' })).toBeVisible();
+  await page.getByRole('tab', { name: /Segurança/ }).click();
   await expect(page.getByRole('heading', { name: 'Segurança empresa' })).toBeVisible();
 });
 
@@ -145,12 +150,34 @@ test('v2 run flow creates evidence', async ({ page }) => {
   const fixture = await seedWorkspace(token, 'run-flow');
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
-  await page.getByRole('button', { name: 'Run suite' }).click();
-  await expect(page.getByText(/Run enviada/)).toBeVisible();
-  await expect(page.getByText(/Run enviada/)).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Executar suite' }).first().click();
+  await expect(page.getByText(/Execução enviada/)).toBeVisible();
+  await expect(page.getByText(/Execução enviada/)).toBeVisible({ timeout: 20_000 });
 
-  await page.locator('header').getByRole('button', { name: 'Evidence' }).click();
-  await expect(page.getByRole('heading', { name: 'Evidence' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Linha do tempo' })).toBeVisible();
+  await page.getByRole('button', { name: 'Evidências brutas' }).click();
+  await expect(page.getByRole('heading', { name: 'Evidências' })).toBeVisible();
+});
+
+test('v2 removes a run from executions for the current selection', async ({ page }) => {
+  const token = await login(page);
+  const fixture = await seedWorkspace(token, 'delete-run-flow');
+  const run = await post<{ id: string }>('/api/runs', {
+    projectId: fixture.project.id,
+    environmentId: fixture.environment.id,
+    suiteId: fixture.suite.id,
+  }, token);
+
+  await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
+  await page.getByRole('tab', { name: 'Histórico' }).click();
+  await expect(page.getByRole('heading', { name: 'Histórico da suite' })).toBeVisible();
+  await expect(page.getByText(new RegExp(run.id.slice(0, 8)))).toBeVisible();
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByLabel(new RegExp(`Excluir run ${run.id.slice(0, 8)}`)).click();
+
+  await expect(page.getByText('Run excluída.')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(new RegExp(run.id.slice(0, 8)))).toHaveCount(0);
 });
 
 async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
@@ -161,7 +188,19 @@ async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Nome').fill('Web E2E');
   await page.getByLabel('Senha').fill(userPassword);
-  await page.getByLabel('Organização').fill(organizationName);
+  if (await page.getByLabel('Organização').count()) {
+    await page.getByLabel('Organização').fill(organizationName);
+  } else {
+    await createApiUser(email, userPassword, organizationName);
+    await page.goto('/login');
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Senha').fill(userPassword);
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(/\/v2/);
+    const token = await page.evaluate(() => window.localStorage.getItem('testhub.token'));
+    if (!token) throw new Error('Login did not persist testhub.token');
+    return token;
+  }
   await page.getByRole('button', { name: 'Criar conta' }).click();
 
   const result = await Promise.race([

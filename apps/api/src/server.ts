@@ -981,6 +981,17 @@ export function createApp() {
     }
     return store.updateRun(params.id, { status: 'canceled', finishedAt: new Date().toISOString() });
   });
+  app.delete('/api/runs/:id', { schema: { tags: ['runs'], summary: 'Soft delete run' } }, async (req, reply) => {
+    const params = z.object({ id: z.string() }).parse(req.params);
+    const run = await getRunInActorOrg(params.id, req.actor);
+    if (!run) return reply.code(404).send({ error: 'Run não encontrada' });
+    if (runQueue && ['queued', 'running'].includes(run.status)) {
+      const jobs = await runQueue.getJobs(['waiting', 'delayed', 'prioritized']);
+      await Promise.all(jobs.filter((job) => job.data.runId === params.id).map((job) => job.remove()));
+    }
+    await store.updateRun(params.id, { status: 'deleted', finishedAt: run.finishedAt ?? new Date().toISOString() });
+    return reply.code(204).send();
+  });
   app.get('/api/runs/:id/report', { schema: { tags: ['runs'], summary: 'Get run JSON report' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const run = await getRunInActorOrg(params.id, req.actor);

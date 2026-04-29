@@ -66,6 +66,8 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
       heartbeatAt: finishedAt,
     });
   } catch (error) {
+    const latest = (await store.read()).runs.find((item) => item.id === runId);
+    if (latest?.status === 'canceled' || latest?.status === 'deleted') return;
     const finishedAt = new Date().toISOString();
     await store.updateRun(runId, {
       status: 'error',

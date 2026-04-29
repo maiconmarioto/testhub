@@ -92,6 +92,46 @@ describe('server e2e', () => {
     await target.close();
   });
 
+  it('soft deletes runs from the selected project history', async () => {
+    const target = await createTargetServer();
+    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Run Delete' } });
+    expect(projectResponse.statusCode).toBe(201);
+    const project = projectResponse.json() as { id: string };
+
+    const envResponse = await app.inject({ method: 'POST', url: '/api/environments', headers: auth(), payload: { projectId: project.id, name: 'local', baseUrl: target.baseUrl } });
+    expect(envResponse.statusCode).toBe(201);
+    const environment = envResponse.json() as { id: string };
+
+    const suiteResponse = await app.inject({
+      method: 'POST',
+      url: '/api/suites',
+      headers: auth(),
+      payload: {
+        projectId: project.id,
+        name: 'delete-run',
+        type: 'api',
+        specContent: 'version: 1\ntype: api\nname: delete-run\ntests:\n  - name: ok\n    request:\n      method: GET\n      path: /health\n    expect:\n      status: 200\n',
+      },
+    });
+    expect(suiteResponse.statusCode).toBe(201);
+    const suite = suiteResponse.json() as { id: string };
+
+    const runResponse = await app.inject({ method: 'POST', url: '/api/runs', headers: auth(), payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id } });
+    expect(runResponse.statusCode).toBe(202);
+    const run = runResponse.json() as { id: string };
+
+    const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/runs/${run.id}`, headers: auth() });
+    expect(deleteResponse.statusCode).toBe(204);
+
+    const getResponse = await app.inject({ method: 'GET', url: `/api/runs/${run.id}`, headers: auth() });
+    expect(getResponse.statusCode).toBe(404);
+
+    const listResponse = await app.inject({ method: 'GET', url: `/api/runs?projectId=${project.id}`, headers: auth() });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toEqual([]);
+    await target.close();
+  });
+
   it('blocks run when environment health check fails', async () => {
     const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Health Block' } });
     const project = projectResponse.json() as { id: string };

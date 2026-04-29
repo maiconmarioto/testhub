@@ -1096,6 +1096,8 @@ describe('server local auth', () => {
     expect(bCreateRun.statusCode).toBe(404);
     const bGetRun = await app.inject({ method: 'GET', url: `/api/runs/${run.id}`, headers: authB });
     expect(bGetRun.statusCode).toBe(404);
+    const bDeleteRun = await app.inject({ method: 'DELETE', url: `/api/runs/${run.id}`, headers: authB });
+    expect(bDeleteRun.statusCode).toBe(404);
 
     const aiA = await app.inject({
       method: 'POST',

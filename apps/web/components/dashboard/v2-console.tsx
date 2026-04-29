@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -187,6 +187,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   const [environmentId, setEnvironmentId] = useState('');
   const [suiteId, setSuiteId] = useState('');
   const [selectedRunId, setSelectedRunId] = useState('');
+  const [suiteSearch, setSuiteSearch] = useState('');
+  const [suiteTypeFilter, setSuiteTypeFilter] = useState<'all' | Suite['type']>('all');
   const [report, setReport] = useState<RunReport | null>(null);
   const [tab, setTab] = useState<EvidenceTab>('overview');
   const [busy, setBusy] = useState(false);
@@ -420,18 +422,40 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       setError('Projeto, ambiente e suite obrigatórios.');
       return;
     }
+    await runSuiteFor({ projectId, environmentId, suiteId });
+  }
+
+  async function runSuiteFor(input: { projectId: string; environmentId: string; suiteId: string }) {
     await mutate(async () => {
       const run = await api<Run>('/api/runs', {
         method: 'POST',
-        body: JSON.stringify({ projectId, environmentId, suiteId }),
+        body: JSON.stringify(input),
       });
+      setSuiteId(run.suiteId);
+      setEnvironmentId(run.environmentId);
       setSelectedRunId(run.id);
       setTab('overview');
     }, 'Execução enviada.');
   }
 
+  function selectSuite(suite: Suite, nextEnvironmentId = environmentId) {
+    setSuiteId(suite.id);
+    if (nextEnvironmentId) setEnvironmentId(nextEnvironmentId);
+    const run = latestRun(projectRuns, { suiteId: suite.id, environmentId: nextEnvironmentId || undefined });
+    setSelectedRunId(run?.id ?? '');
+    setTab('overview');
+  }
+
   async function cancelRun(run: Run) {
     await mutate(() => api(`/api/runs/${run.id}/cancel`, { method: 'POST', body: '{}' }), 'Execução cancelada.');
+  }
+
+  async function deleteRun(run: Run) {
+    if (!window.confirm(`Excluir run ${shortId(run.id)}? Esta ação oculta a execução desta seleção.`)) return;
+    await mutate(async () => {
+      await api(`/api/runs/${run.id}`, { method: 'DELETE' });
+      setSelectedRunId((current) => current === run.id ? '' : current);
+    }, 'Run excluída.');
   }
 
   async function loadSuite(suite: Suite) {
@@ -900,16 +924,6 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                     <SelectContent>{projectEnvs.map((env) => <SelectItem key={env.id} value={env.id}>{env.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
-                <Field label="Suite">
-                  <Select value={suiteId} onValueChange={(value) => {
-                    setSuiteId(value);
-                    setSelectedRunId('');
-                    setTab('overview');
-                  }}>
-                    <SelectTrigger className={darkSelectClass}><SelectValue placeholder="Suite" /></SelectTrigger>
-                    <SelectContent>{projectSuites.map((suite) => <SelectItem key={suite.id} value={suite.id}>{suite.name} ({suiteTypeLabel(suite.type)})</SelectItem>)}</SelectContent>
-                  </Select>
-                </Field>
                 <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={() => setOpenSheet('evidence')}>
                   <ClipboardCheck className="h-4 w-4" />
                   Evidências
@@ -946,15 +960,27 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 runs={scopedRuns}
                 latestRuns={projectRuns}
                 selectedRunId={selectedRun?.id}
+                projectId={projectId}
+                projectName={selectedProject?.name}
+                suiteSearch={suiteSearch}
+                suiteTypeFilter={suiteTypeFilter}
                 busy={busy}
                 canRun={Boolean(projectId && environmentId && suiteId && canWrite)}
+                canManageRuns={canWrite}
+                report={report}
+                onSuiteSearchChange={setSuiteSearch}
+                onSuiteTypeFilterChange={setSuiteTypeFilter}
                 onRun={runSuite}
+                onRunSuite={(suite, env) => runSuiteFor({ projectId, suiteId: suite.id, environmentId: env?.id ?? environmentId })}
+                onSelectSuite={selectSuite}
                 onSelectRun={(run) => {
                   setSuiteId(run.suiteId);
                   setEnvironmentId(run.environmentId);
                   setSelectedRunId(run.id);
                   setTab('overview');
                 }}
+                onDeleteRun={deleteRun}
+                onCancelRun={cancelRun}
                 onOpenSuites={openSuitePreview}
                 onOpenEnvironments={() => window.location.assign(projectId ? `/projects?project=${projectId}` : '/projects')}
                 onOpenEvidence={() => setOpenSheet('evidence')}
@@ -1116,6 +1142,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
 }
 
 function RunWorkspace(props: {
+  projectId: string;
+  projectName?: string;
   selectedSuite?: Suite;
   selectedEnv?: Environment;
   suites: Suite[];
@@ -1125,72 +1153,428 @@ function RunWorkspace(props: {
   runs: Run[];
   latestRuns: Run[];
   selectedRunId?: string;
+  suiteSearch: string;
+  suiteTypeFilter: 'all' | Suite['type'];
   busy: boolean;
   canRun: boolean;
+  canManageRuns: boolean;
+  report: RunReport | null;
+  onSuiteSearchChange: (value: string) => void;
+  onSuiteTypeFilterChange: (value: 'all' | Suite['type']) => void;
   onRun: () => Promise<void>;
+  onRunSuite: (suite: Suite, env?: Environment) => Promise<void>;
+  onSelectSuite: (suite: Suite, environmentId?: string) => void;
   onSelectRun: (run: Run) => void;
+  onDeleteRun: (run: Run) => Promise<void>;
+  onCancelRun: (run: Run) => Promise<void>;
   onOpenSuites: () => void;
   onOpenEnvironments: () => void;
   onOpenEvidence: () => void;
 }) {
+  const filteredSuites = props.suites.filter((suite) => {
+    const matchesType = props.suiteTypeFilter === 'all' || suite.type === props.suiteTypeFilter;
+    const query = props.suiteSearch.trim().toLowerCase();
+    const matchesSearch = !query || suite.name.toLowerCase().includes(query);
+    return matchesType && matchesSearch;
+  });
+  const projectStats = summarize(props.latestRuns);
+  const selectedSuiteRuns = props.selectedSuite ? props.latestRuns.filter((run) => run.suiteId === props.selectedSuite!.id) : [];
+  const selectedEnvRuns = props.selectedSuite ? selectedSuiteRuns.filter((run) => run.environmentId === props.selectedEnv?.id) : [];
+  const failureRuns = props.latestRuns.filter((run) => run.status === 'failed' || run.status === 'error').slice(0, 8);
   return (
     <div className="grid min-h-0 content-start gap-4">
-      <section className="self-start overflow-hidden rounded-xl border border-[#d8d3c5] bg-[#fbfaf6] shadow-sm">
-        <div className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-stretch">
-          <div className="grid gap-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-[#66705f]">Suite em execução</p>
-                <h2 className="mt-1 text-xl font-extrabold tracking-normal md:text-2xl">{props.selectedSuite?.name ?? 'Selecione uma suite'}</h2>
-                <p className="mt-1 text-sm text-[#66705f]">{props.selectedEnv ? `${props.selectedEnv.name} · ${props.selectedEnv.baseUrl}` : 'Escolha ambiente e suite no topo para começar.'}</p>
-              </div>
-              {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 uppercase">Sem execução</Badge>}
-            </div>
-
-            <div className="grid gap-2 md:grid-cols-3">
-              <RunFact label="Suite selecionada" value={props.selectedSuite ? `${props.selectedSuite.name} (${suiteTypeLabel(props.selectedSuite.type)})` : '-'} />
-              <RunFact label="Ambiente" value={props.selectedEnv?.name ?? '-'} />
-              <RunFact label="Última execução" value={props.selectedRun ? runSummary(props.selectedRun) : 'Sem histórico para esta combinação'} />
-            </div>
-            {props.selectedRun && ['queued', 'running'].includes(props.selectedRun.status) ? <LiveProgress run={props.selectedRun} /> : null}
+      <section className="rounded-xl border border-[#d8d3c5] bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-[#66705f]">Execuções</p>
+            <h1 className="mt-1 truncate text-2xl font-black tracking-normal">{props.projectName ?? 'Projeto'}</h1>
           </div>
-
-          <div className="grid gap-2 rounded-lg border border-[#d8d3c5] bg-white p-3">
-            <div className="grid grid-cols-4 overflow-hidden rounded-md border border-[#e1ddd1] bg-[#fbfaf6]">
-              <Score label="Ok" value={props.stats.passed} tone="good" />
-              <Score label="Falhas" value={props.stats.failed} tone="bad" />
-              <Score label="Erros" value={props.stats.error} tone="bad" />
-              <Score label="Rodando" value={props.stats.active} tone="warn" />
-            </div>
-            <Button onClick={props.onRun} disabled={props.busy || !props.canRun} className="h-10 rounded-md text-sm font-bold">
-              {props.busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-              Executar suite
-            </Button>
-            <div className="grid grid-cols-3 gap-2">
-              <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenSuites}>
-                <FileCode2 className="h-4 w-4" />
-                Suites
-              </Button>
-              <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenEnvironments}>
-                <Database className="h-4 w-4" />
-                Ambientes
-              </Button>
-              <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenEvidence}>
-                <ClipboardCheck className="h-4 w-4" />
-                Evidências
-              </Button>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            <MetricPill label="Ok" value={projectStats.passed} tone="good" />
+            <MetricPill label="Falhas" value={projectStats.failed + projectStats.error} tone="bad" />
+            <MetricPill label="Rodando" value={projectStats.active} tone="warn" />
           </div>
         </div>
       </section>
 
-      <RecentRunsOverview runs={props.runs} suites={props.suites} envs={props.envs} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenSuites={props.onOpenSuites} onOpenEnvironments={props.onOpenEnvironments} onOpenEvidence={props.onOpenEvidence} />
-      <LatestRunsOverview runs={props.latestRuns} suites={props.suites} envs={props.envs} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenEvidence={props.onOpenEvidence} />
+      <div className="grid gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
+        <SuiteBoard
+          suites={filteredSuites}
+          allSuites={props.suites}
+          env={props.selectedEnv}
+          runs={props.latestRuns}
+          selectedSuiteId={props.selectedSuite?.id}
+          search={props.suiteSearch}
+          typeFilter={props.suiteTypeFilter}
+          busy={props.busy}
+          canRun={Boolean(props.projectId && props.selectedEnv && props.canManageRuns)}
+          onSearchChange={props.onSuiteSearchChange}
+          onTypeFilterChange={props.onSuiteTypeFilterChange}
+          onSelectSuite={props.onSelectSuite}
+          onRunSuite={props.onRunSuite}
+        />
+
+        <SuiteDetailPanel
+          suite={props.selectedSuite}
+          env={props.selectedEnv}
+          suites={props.suites}
+          envs={props.envs}
+          runs={selectedEnvRuns}
+          projectRuns={props.latestRuns}
+          failureRuns={failureRuns}
+          allSuiteRuns={selectedSuiteRuns}
+          selectedRun={props.selectedRun}
+          selectedRunId={props.selectedRunId}
+          report={props.report}
+          busy={props.busy}
+          canRun={props.canRun}
+          canManageRuns={props.canManageRuns}
+          onRun={props.onRun}
+          onSelectRun={props.onSelectRun}
+          onDeleteRun={props.onDeleteRun}
+          onCancelRun={props.onCancelRun}
+          onOpenSuites={props.onOpenSuites}
+          onOpenEnvironments={props.onOpenEnvironments}
+          onOpenEvidence={props.onOpenEvidence}
+          onSelectMatrixCell={(suite, env, run) => {
+            props.onSelectSuite(suite, env.id);
+            if (run) props.onSelectRun(run);
+          }}
+        />
+      </div>
     </div>
   );
 }
 
-function RecentRunsOverview({ runs, suites, envs, selectedRunId, onSelectRun, onOpenSuites, onOpenEnvironments, onOpenEvidence }: { runs: Run[]; suites: Suite[]; envs: Environment[]; selectedRunId?: string; onSelectRun: (run: Run) => void; onOpenSuites: () => void; onOpenEnvironments: () => void; onOpenEvidence: () => void }) {
+function SuiteBoard(props: {
+  suites: Suite[];
+  allSuites: Suite[];
+  env?: Environment;
+  runs: Run[];
+  selectedSuiteId?: string;
+  search: string;
+  typeFilter: 'all' | Suite['type'];
+  busy: boolean;
+  canRun: boolean;
+  onSearchChange: (value: string) => void;
+  onTypeFilterChange: (value: 'all' | Suite['type']) => void;
+  onSelectSuite: (suite: Suite) => void;
+  onRunSuite: (suite: Suite, env?: Environment) => Promise<void>;
+}) {
+  return (
+    <Card className="overflow-hidden xl:sticky xl:top-4 xl:max-h-[calc(100vh-9rem)]">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>Suites do projeto</CardTitle>
+            <CardDescription>{props.allSuites.length} suites · {props.env?.name ?? 'sem ambiente'}</CardDescription>
+          </div>
+          <Badge variant="outline">{props.suites.length} visíveis</Badge>
+        </div>
+        <div className="grid gap-2 pt-2 sm:grid-cols-[minmax(0,1fr)_160px]">
+          <Input value={props.search} onChange={(event) => props.onSearchChange(event.target.value)} placeholder="Buscar suite" className={controlClass} />
+          <Select value={props.typeFilter} onValueChange={(value) => props.onTypeFilterChange(value as 'all' | Suite['type'])}>
+            <SelectTrigger className={controlClass}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas</SelectItem>
+              <SelectItem value="api">API</SelectItem>
+              <SelectItem value="web">Frontend</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </CardHeader>
+      <CardContent className="max-h-[calc(100vh-17rem)] overflow-auto pr-3">
+        <div className="grid gap-2">
+          {props.suites.map((suite) => (
+            <SuiteCard
+              key={suite.id}
+              suite={suite}
+              latestRun={latestRun(props.runs, { suiteId: suite.id, environmentId: props.env?.id })}
+              selected={suite.id === props.selectedSuiteId}
+              busy={props.busy}
+              canRun={props.canRun}
+              onSelect={() => props.onSelectSuite(suite)}
+              onRun={() => props.onRunSuite(suite, props.env)}
+            />
+          ))}
+          {props.suites.length === 0 ? <DarkEmpty text="Nenhuma suite encontrada para este filtro." /> : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SuiteCard({ suite, latestRun, selected, busy, canRun, onSelect, onRun }: { suite: Suite; latestRun?: Run; selected: boolean; busy: boolean; canRun: boolean; onSelect: () => void; onRun: () => void }) {
+  const owner = inferredOwner(suite);
+  const criticality = inferredCriticality(suite);
+  return (
+    <article className={cn('grid gap-2 rounded-lg border bg-white p-3 transition', selected ? 'border-[#151915] shadow-[inset_4px_0_0_#c7d957]' : 'border-[#e1ddd1] hover:border-[#9fb25a]')}>
+      <div className="flex items-start justify-between gap-3">
+        <button type="button" className="grid min-w-0 gap-1 text-left" onClick={onSelect}>
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-extrabold" title={suite.name}>{suite.name}</h2>
+            <p className="truncate font-mono text-xs text-[#66705f]">{suiteTypeLabel(suite.type)} · {owner} · {criticality}</p>
+          </div>
+        </button>
+        <StatusDot status={latestRun?.status} />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs text-[#66705f]">{latestRun ? runSummary(latestRun) : 'Sem execução recente'}</p>
+        <Button size="icon" aria-label={`Executar ${suite.name}`} onClick={onRun} disabled={busy || !canRun} className="h-8 w-8 shrink-0">
+          {busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Play data-icon="inline-start" />}
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+function SuiteDetailPanel(props: {
+  suite?: Suite;
+  env?: Environment;
+  suites: Suite[];
+  envs: Environment[];
+  runs: Run[];
+  projectRuns: Run[];
+  failureRuns: Run[];
+  allSuiteRuns: Run[];
+  selectedRun?: Run;
+  selectedRunId?: string;
+  report: RunReport | null;
+  busy: boolean;
+  canRun: boolean;
+  canManageRuns: boolean;
+  onRun: () => Promise<void>;
+  onSelectRun: (run: Run) => void;
+  onDeleteRun: (run: Run) => Promise<void>;
+  onCancelRun: (run: Run) => Promise<void>;
+  onOpenSuites: () => void;
+  onOpenEnvironments: () => void;
+  onOpenEvidence: () => void;
+  onSelectMatrixCell: (suite: Suite, env: Environment, run?: Run) => void;
+}) {
+  if (!props.suite) {
+    return <Card className="min-h-[520px]"><CardContent className="p-6"><DarkEmpty text="Selecione uma suite no painel para abrir detalhes." /></CardContent></Card>;
+  }
+  const stats = summarize(props.runs);
+  const selectedRun = props.selectedRun ?? props.runs[0];
+  return (
+    <section className="min-w-0">
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b bg-white">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-[#66705f]">Detalhe da suite</p>
+              <CardTitle className="mt-1 truncate text-2xl font-black md:text-3xl" title={props.suite.name}>{props.suite.name}</CardTitle>
+              <CardDescription>{suiteTypeLabel(props.suite.type)} · {props.env ? `${props.env.name} · ${props.env.baseUrl}` : 'ambiente ausente'}</CardDescription>
+            </div>
+            {selectedRun ? <Status status={selectedRun.status} /> : <Badge variant="muted">Sem execução</Badge>}
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-4 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-[#fbfaf6] p-3">
+            <div className="flex flex-wrap gap-2">
+              <MetricPill label="Ok" value={stats.passed} tone="good" />
+              <MetricPill label="Falhas" value={stats.failed + stats.error} tone="bad" />
+              <MetricPill label="Runs" value={props.runs.length} tone="neutral" />
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="outline">Dono: {inferredOwner(props.suite)}</Badge>
+              <Badge variant={inferredCriticality(props.suite) === 'bloqueante' ? 'destructive' : inferredCriticality(props.suite) === 'alta' ? 'warning' : 'muted'}>{inferredCriticality(props.suite)}</Badge>
+            </div>
+          </div>
+          {selectedRun && ['queued', 'running'].includes(selectedRun.status) ? <LiveProgress run={selectedRun} /> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={props.onRun} disabled={props.busy || !props.canRun}>
+              {props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Play data-icon="inline-start" />}
+              Executar suite
+            </Button>
+            <Button variant="outline" onClick={props.onOpenSuites}><FileCode2 data-icon="inline-start" />Ver YAML</Button>
+            <Button variant="outline" onClick={props.onOpenEnvironments}><Database data-icon="inline-start" />Ambientes</Button>
+            <Button variant="outline" onClick={props.onOpenEvidence} disabled={!selectedRun}><ClipboardCheck data-icon="inline-start" />Evidências brutas</Button>
+            {selectedRun && ['queued', 'running'].includes(selectedRun.status) ? <Button variant="destructive" onClick={() => props.onCancelRun(selectedRun)}><Square data-icon="inline-start" />Cancelar</Button> : null}
+          </div>
+          <Tabs defaultValue="timeline" className="grid gap-4">
+            <TabsList className="grid h-auto grid-cols-2 lg:grid-cols-5">
+              <TabsTrigger value="timeline">Timeline</TabsTrigger>
+              <TabsTrigger value="history">Histórico</TabsTrigger>
+              <TabsTrigger value="health">Saúde</TabsTrigger>
+              <TabsTrigger value="failures">Falhas</TabsTrigger>
+              <TabsTrigger value="report">Relatório</TabsTrigger>
+            </TabsList>
+            <TabsContent value="timeline" className="m-0"><RunTimelinePanel run={selectedRun} report={props.report} /></TabsContent>
+            <TabsContent value="history" className="m-0"><SuiteRunHistory runs={props.runs} suite={props.suite} env={props.env} selectedRunId={props.selectedRunId} canManageRuns={props.canManageRuns} busy={props.busy} onSelectRun={props.onSelectRun} onDeleteRun={props.onDeleteRun} /></TabsContent>
+            <TabsContent value="health" className="m-0"><HealthMatrix suites={props.suites} envs={props.envs} runs={props.projectRuns} selectedSuiteId={props.suite.id} selectedEnvId={props.env?.id} onSelectCell={props.onSelectMatrixCell} /></TabsContent>
+            <TabsContent value="failures" className="m-0"><FailureInbox runs={props.failureRuns} suites={props.suites} envs={props.envs} onSelectRun={props.onSelectRun} /></TabsContent>
+            <TabsContent value="report" className="m-0"><MarkdownReportBlock suite={props.suite} env={props.env} run={selectedRun} report={props.report} /></TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function RunTimelinePanel({ run, report }: { run?: Run; report: RunReport | null }) {
+  const steps = timelineRows(report, run);
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Linha do tempo</CardTitle>
+        <CardDescription>{run ? `${shortId(run.id)} · ${runSummary(run)}` : 'Sem run selecionada.'}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {steps.length > 0 ? (
+          <ol className="grid gap-3">
+            {steps.map((step, index) => (
+              <li key={`${step.name}-${index}`} className="grid grid-cols-[28px_minmax(0,1fr)] gap-3">
+                <span className={cn('mt-1 h-7 w-7 rounded-full border text-center font-mono text-xs leading-7', step.status === 'passed' ? 'border-[#1f7a50] bg-[#e8f5da] text-[#1f7a50]' : step.status === 'failed' || step.status === 'error' ? 'border-[#b43c2e] bg-[#fff0ed] text-[#b43c2e]' : 'border-[#d7d2c4] bg-white text-[#66705f]')}>{index + 1}</span>
+                <div className="rounded-lg border border-[#e1ddd1] bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold">{step.name}</p>
+                    <div className="flex gap-2">
+                      <Status status={step.status} />
+                      {step.durationMs !== undefined ? <Badge variant="outline">{step.durationMs}ms</Badge> : null}
+                    </div>
+                  </div>
+                  {step.error ? <p className="mt-2 text-sm text-[#9f1f16]">{step.error}</p> : null}
+                  {step.artifacts.length > 0 ? <div className="mt-2 grid gap-2 md:grid-cols-2">{step.artifacts.slice(0, 4).map((artifact) => <ArtifactLink key={`${artifact.type}-${artifact.path}`} label={artifact.label ?? shortPath(artifact.path)} path={artifact.path} type={artifact.type} compact />)}</div> : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <DarkEmpty text={run ? 'Timeline indisponível enquanto o relatório final não existe.' : 'Selecione uma run para ver o passo a passo.'} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MarkdownReportBlock({ suite, env, run, report }: { suite: Suite; env?: Environment; run?: Run; report: RunReport | null }) {
+  const [copied, setCopied] = useState(false);
+  const markdown = buildRunMarkdown({ suite, env, run, report });
+  async function copyMarkdown() {
+    await navigator.clipboard.writeText(markdown);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  }
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>Relatório markdown</CardTitle>
+            <CardDescription>Resumo auditável da execução selecionada.</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={copyMarkdown} disabled={!run}><Copy data-icon="inline-start" />{copied ? 'Copiado' : 'Copiar MD'}</Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Textarea value={markdown} readOnly className="min-h-52 font-mono text-xs" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function SuiteRunHistory(props: { runs: Run[]; suite: Suite; env?: Environment; selectedRunId?: string; canManageRuns: boolean; busy: boolean; onSelectRun: (run: Run) => void; onDeleteRun: (run: Run) => Promise<void> }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Histórico da suite</CardTitle>
+        <CardDescription>{props.env ? `Runs de ${props.suite.name} em ${props.env.name}` : 'Selecione ambiente para filtrar.'}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-2 md:grid-cols-2">
+          {props.runs.slice(0, 8).map((run) => (
+            <RunHistoryCard key={run.id} run={run} suite={props.suite} env={props.env} selected={props.selectedRunId === run.id} busy={props.busy} canDelete={props.canManageRuns} onClick={() => props.onSelectRun(run)} onDelete={() => props.onDeleteRun(run)} />
+          ))}
+          {props.runs.length === 0 ? <DarkEmpty text="Nenhuma run para esta suite neste ambiente." /> : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AllEnvironmentRuns({ runs, selectedRunId, onSelectRun }: { runs: Run[]; selectedRunId?: string; onSelectRun: (run: Run) => void }) {
+  const otherRuns = runs.filter((run) => run.id !== selectedRunId).slice(0, 6);
+  if (otherRuns.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Outros ambientes</CardTitle>
+        <CardDescription>Últimas execuções desta suite fora do filtro atual.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-2 md:grid-cols-2">
+        {otherRuns.map((run) => (
+          <button key={run.id} type="button" onClick={() => onSelectRun(run)} className="rounded-lg border border-[#e1ddd1] bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]">
+            <div className="flex items-center justify-between gap-3"><Status status={run.status} /><span className="font-mono text-xs text-[#66705f]">{formatDate(run.createdAt)}</span></div>
+            <p className="mt-2 truncate font-mono text-xs text-[#66705f]">{shortId(run.id)} · {runSummary(run)}</p>
+          </button>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function HealthMatrix({ suites, envs, runs, selectedSuiteId, selectedEnvId, onSelectCell }: { suites: Suite[]; envs: Environment[]; runs: Run[]; selectedSuiteId?: string; selectedEnvId?: string; onSelectCell: (suite: Suite, env: Environment, run?: Run) => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Matriz de saúde</CardTitle>
+        <CardDescription>Último status por suite e ambiente.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {suites.length > 0 && envs.length > 0 ? (
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[520px] gap-1" style={{ gridTemplateColumns: `minmax(180px,1fr) repeat(${envs.length}, minmax(96px, 0.55fr))` }}>
+              <div className="p-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[#66705f]">Suite</div>
+              {envs.map((env) => <div key={env.id} className="truncate p-2 text-center font-mono text-[10px] uppercase tracking-[0.18em] text-[#66705f]" title={env.name}>{env.name}</div>)}
+              {suites.slice(0, 10).map((suite) => (
+                <Fragment key={suite.id}>
+                  <button type="button" onClick={() => onSelectCell(suite, envs[0], latestRun(runs, { suiteId: suite.id, environmentId: envs[0]?.id }))} className={cn('truncate rounded-md border p-2 text-left text-xs font-semibold', selectedSuiteId === suite.id ? 'border-[#151915] bg-[#f2f6d8]' : 'border-[#e1ddd1] bg-white')} title={suite.name}>{suite.name}</button>
+                  {envs.map((env) => {
+                    const run = latestRun(runs, { suiteId: suite.id, environmentId: env.id });
+                    return (
+                      <button key={env.id} type="button" onClick={() => onSelectCell(suite, env, run)} className={cn('rounded-md border p-2 text-center text-xs transition hover:border-[#9fb25a]', selectedSuiteId === suite.id && selectedEnvId === env.id ? 'border-[#151915] bg-[#f2f6d8]' : 'border-[#e1ddd1] bg-white')}>
+                        {run ? <span className={cn('inline-block h-2.5 w-2.5 rounded-full', statusDotClass(run.status))} /> : <span className="text-[#8a877c]">-</span>}
+                      </button>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        ) : <DarkEmpty text="Crie suites e ambientes para formar a matriz." />}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FailureInbox({ runs, suites, envs, onSelectRun }: { runs: Run[]; suites: Suite[]; envs: Environment[]; onSelectRun: (run: Run) => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Failure inbox</CardTitle>
+        <CardDescription>Falhas abertas, agrupadas para investigação rápida.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-2">
+        {runs.map((run) => {
+          const suite = suites.find((item) => item.id === run.suiteId);
+          const env = envs.find((item) => item.id === run.environmentId);
+          return (
+            <button key={run.id} type="button" onClick={() => onSelectRun(run)} className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 text-left transition hover:border-[#b43c2e] hover:bg-[#fff8f6]">
+              <div className="flex items-center justify-between gap-2"><Status status={run.status} /><span className="font-mono text-xs text-[#66705f]">{formatDate(run.createdAt)}</span></div>
+              <p className="truncate text-sm font-bold">{suite?.name ?? 'Suite removida'}</p>
+              <p className="truncate text-xs text-[#66705f]">{env?.name ?? 'Ambiente removido'} · {run.error ?? runSummary(run)}</p>
+            </button>
+          );
+        })}
+        {runs.length === 0 ? <DarkEmpty text="Nenhuma falha aberta no projeto." /> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecentRunsOverview({ runs, suites, envs, selectedRunId, busy, canManageRuns, onSelectRun, onDeleteRun, onOpenSuites, onOpenEnvironments, onOpenEvidence }: { runs: Run[]; suites: Suite[]; envs: Environment[]; selectedRunId?: string; busy: boolean; canManageRuns: boolean; onSelectRun: (run: Run) => void; onDeleteRun: (run: Run) => Promise<void>; onOpenSuites: () => void; onOpenEnvironments: () => void; onOpenEvidence: () => void }) {
   const recentRuns = runs.slice(0, 6);
   return (
     <RunsSection title="Execuções desta seleção" description="Histórico da suite e ambiente escolhidos no topo." count={recentRuns.length}>
@@ -1204,10 +1588,13 @@ function RecentRunsOverview({ runs, suites, envs, selectedRunId, onSelectRun, on
                 suite={suites.find((suite) => suite.id === run.suiteId)}
                 env={envs.find((env) => env.id === run.environmentId)}
                 selected={selectedRunId === run.id}
+                busy={busy}
+                canDelete={canManageRuns}
                 onClick={() => {
                   onSelectRun(run);
                   onOpenEvidence();
                 }}
+                onDelete={() => onDeleteRun(run)}
               />
             ))}
           </div>
@@ -1257,28 +1644,46 @@ function LatestRunsOverview({ runs, suites, envs, selectedRunId, onSelectRun, on
   );
 }
 
-function RunHistoryCard({ run, suite, env, selected, onClick }: { run: Run; suite?: Suite; env?: Environment; selected: boolean; onClick: () => void }) {
+function RunHistoryCard({ run, suite, env, selected, busy = false, canDelete = false, onClick, onDelete }: { run: Run; suite?: Suite; env?: Environment; selected: boolean; busy?: boolean; canDelete?: boolean; onClick: () => void; onDelete?: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn('grid cursor-pointer gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', selected ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
-    >
+    <div className={cn('grid gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', selected ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}>
       <div className="flex items-center justify-between gap-3">
-        <Status status={run.status} />
-        <span className="text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
+        <button type="button" onClick={onClick} className="min-w-0 text-left">
+          <Status status={run.status} />
+        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
+          {canDelete && onDelete ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Excluir run ${shortId(run.id)}`}
+                  className="h-8 w-8 rounded-md text-[#8a3a32] hover:bg-[#f8e7e4] hover:text-[#8a2f27]"
+                  disabled={busy}
+                  onClick={onDelete}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Excluir run</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
       </div>
-      <div className="min-w-0">
+      <button type="button" onClick={onClick} className="min-w-0 text-left">
         <p className="truncate text-sm font-bold" title={suite?.name ?? run.suiteId}>{suite?.name ?? 'Suite removida'}</p>
         <p className="truncate text-xs text-[#66705f]" title={env?.name ?? run.environmentId}>{env?.name ?? 'Ambiente removido'}</p>
-      </div>
-      <div className="grid grid-cols-3 gap-2 rounded-md bg-[#fbfaf6] p-2 text-center text-xs">
+      </button>
+      <button type="button" onClick={onClick} className="grid grid-cols-3 gap-2 rounded-md bg-[#fbfaf6] p-2 text-center text-xs">
         <RunMiniStat label="Ok" value={run.summary?.passed ?? 0} tone="good" />
         <RunMiniStat label="Falhas" value={run.summary?.failed ?? 0} tone="bad" />
         <RunMiniStat label="Erros" value={run.summary?.error ?? 0} tone="bad" />
-      </div>
-      <p className="truncate text-xs text-[#66705f]" title={run.error ?? `Execução ${run.id}`}>{run.error ? run.error : `ID ${shortId(run.id)}`}</p>
-    </button>
+      </button>
+      <button type="button" onClick={onClick} className="truncate text-left text-xs text-[#66705f]" title={run.error ?? `Execução ${run.id}`}>{run.error ? run.error : `ID ${shortId(run.id)}`}</button>
+    </div>
   );
 }
 
@@ -3562,6 +3967,23 @@ function Score({ label, value, tone }: { label: string; value: number; tone: 'go
   );
 }
 
+function MetricPill({ label, value, tone }: { label: string; value: number; tone: 'good' | 'bad' | 'warn' | 'neutral' }) {
+  return (
+    <div className="min-w-[92px] rounded-lg border border-[#e1ddd1] bg-[#fbfaf6] px-3 py-2">
+      <p className="font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-[#66705f]">{label}</p>
+      <p className={cn('mt-1 text-lg font-black', tone === 'good' && 'text-[#1f7a50]', tone === 'bad' && 'text-[#b43c2e]', tone === 'warn' && 'text-[#8a6417]', tone === 'neutral' && 'text-[#1f241f]')}>{value}</p>
+    </div>
+  );
+}
+
+function StatusDot({ status }: { status?: RunStatus }) {
+  return (
+    <span className="mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#e1ddd1] bg-[#fbfaf6]" aria-label={status ? statusLabel(status) : 'Sem run'}>
+      <span className={cn('h-2.5 w-2.5 rounded-full', status ? statusDotClass(status) : 'bg-[#c8c2b4]')} />
+    </span>
+  );
+}
+
 function Signal({ tone, text }: { tone: 'good' | 'bad'; text: string }) {
   return <div className={cn('rounded-lg border px-3 py-2 font-mono text-xs', tone === 'good' ? 'border-[#1d4f3a]/50 bg-[#e9f4d0] text-[#1d4f3a]' : 'border-[#b42318]/50 bg-[#fff0ed] text-[#9f1f16]')}>{text}</div>;
 }
@@ -3667,6 +4089,116 @@ function summarize(runs: Run[]) {
     error: runs.filter((run) => run.status === 'error').length,
     active: runs.filter((run) => run.status === 'queued' || run.status === 'running').length,
   };
+}
+
+function latestRun(runs: Run[], filter: { suiteId?: string; environmentId?: string } = {}): Run | undefined {
+  return runs
+    .filter((run) => (!filter.suiteId || run.suiteId === filter.suiteId) && (!filter.environmentId || run.environmentId === filter.environmentId))
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())[0];
+}
+
+function inferredOwner(suite: Suite): string {
+  const name = suite.name.toLowerCase();
+  if (name.includes('auth') || name.includes('login') || name.includes('security')) return 'Segurança';
+  if (name.includes('checkout') || name.includes('payment') || name.includes('billing')) return 'Receita';
+  if (name.includes('api') || name.includes('health') || suite.type === 'api') return 'Plataforma';
+  if (suite.type === 'web') return 'Produto';
+  return 'Qualidade';
+}
+
+function inferredCriticality(suite: Suite): 'baixa' | 'média' | 'alta' | 'bloqueante' {
+  const name = suite.name.toLowerCase();
+  if (name.includes('checkout') || name.includes('payment') || name.includes('billing') || name.includes('auth') || name.includes('login')) return 'bloqueante';
+  if (name.includes('api') || name.includes('health') || name.includes('smoke')) return 'alta';
+  if (suite.type === 'web') return 'média';
+  return 'baixa';
+}
+
+function statusDotClass(status: RunStatus): string {
+  if (status === 'passed') return 'bg-[#1f7a50]';
+  if (status === 'failed' || status === 'error') return 'bg-[#b43c2e]';
+  if (status === 'queued' || status === 'running') return 'bg-[#c39420]';
+  return 'bg-[#9da596]';
+}
+
+type TimelineRow = { name: string; status: RunStatus; durationMs?: number; error?: string; artifacts: Artifact[] };
+
+function timelineRows(report: RunReport | null, run?: Run): TimelineRow[] {
+  const rows = (report?.results ?? []).flatMap((result) => {
+    const resultSteps = result.steps ?? [];
+    if (resultSteps.length === 0) {
+      return [{
+        name: result.name,
+        status: result.status,
+        durationMs: result.durationMs,
+        error: result.error,
+        artifacts: result.artifacts ?? [],
+      }];
+    }
+    return resultSteps.map((step) => ({
+      name: `${result.name} / ${step.name}`,
+      status: step.status,
+      durationMs: step.durationMs,
+      error: step.error,
+      artifacts: step.artifacts ?? result.artifacts ?? [],
+    }));
+  });
+  if (rows.length > 0) return rows;
+  if (!run) return [];
+  if (run.progress) {
+    return [{
+      name: run.progress.currentTest ?? run.progress.phase,
+      status: run.status,
+      error: run.error ?? undefined,
+      artifacts: [],
+    }];
+  }
+  return [{
+    name: 'Execução criada',
+    status: run.status,
+    error: run.error ?? undefined,
+    artifacts: [],
+  }];
+}
+
+function buildRunMarkdown({ suite, env, run, report }: { suite: Suite; env?: Environment; run?: Run; report: RunReport | null }): string {
+  const lines = [
+    `# Relatório de execução - ${suite.name}`,
+    '',
+    `- Suite: ${suite.name}`,
+    `- Tipo: ${suiteTypeLabel(suite.type)}`,
+    `- Dono: ${inferredOwner(suite)}`,
+    `- Criticidade: ${inferredCriticality(suite)}`,
+    `- Ambiente: ${env ? `${env.name} (${env.baseUrl})` : 'não selecionado'}`,
+    `- Run: ${run ? run.id : 'sem run'}`,
+    `- Status: ${run ? statusLabel(run.status) : 'sem execução'}`,
+    `- Criada em: ${run ? formatDate(run.createdAt) : '-'}`,
+    `- Finalizada em: ${run ? formatDate(run.finishedAt) : '-'}`,
+    '',
+    '## Resumo',
+    '',
+    run ? `- ${runSummary(run)}` : '- Sem execução selecionada.',
+    '',
+    '## Passos',
+    '',
+  ];
+  const rows = timelineRows(report, run);
+  if (rows.length === 0) {
+    lines.push('- Timeline indisponível.');
+  } else {
+    rows.forEach((row, index) => {
+      lines.push(`${index + 1}. ${row.name}`);
+      lines.push(`   - Status: ${statusLabel(row.status)}`);
+      if (row.durationMs !== undefined) lines.push(`   - Duração: ${row.durationMs}ms`);
+      if (row.error) lines.push(`   - Erro: ${row.error}`);
+      if (row.artifacts.length > 0) lines.push(`   - Evidências: ${row.artifacts.map((artifact) => artifact.label ?? shortPath(artifact.path)).join(', ')}`);
+    });
+  }
+  lines.push('', '## Artefatos', '');
+  const artifacts = collectArtifacts(report);
+  if (artifacts.length === 0) lines.push('- Nenhum artefato disponível.');
+  else artifacts.forEach((artifact) => lines.push(`- ${artifact.type}: ${artifact.label ?? shortPath(artifact.path)} (${artifact.path})`));
+  return lines.join('\n');
 }
 
 function collectArtifacts(report: RunReport | null): Artifact[] {
