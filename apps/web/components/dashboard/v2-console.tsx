@@ -427,11 +427,11 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       });
       setSelectedRunId(run.id);
       setTab('overview');
-    }, 'Run enviada.');
+    }, 'Execução enviada.');
   }
 
   async function cancelRun(run: Run) {
-    await mutate(() => api(`/api/runs/${run.id}/cancel`, { method: 'POST', body: '{}' }), 'Run cancelada.');
+    await mutate(() => api(`/api/runs/${run.id}/cancel`, { method: 'POST', body: '{}' }), 'Execução cancelada.');
   }
 
   async function loadSuite(suite: Suite) {
@@ -738,7 +738,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     await mutate(async () => {
       const params = flowDraft.params.trim() ? YAML.parse(flowDraft.params) : undefined;
       const steps = YAML.parse(flowDraft.steps);
-      if (!Array.isArray(steps)) throw new Error('Steps deve ser uma lista YAML.');
+      if (!Array.isArray(steps)) throw new Error('Passos deve ser uma lista YAML.');
       const payload = {
         namespace,
         name,
@@ -831,7 +831,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
         ? 'Sistema'
         : view === 'docs'
           ? 'Documentação'
-          : 'Run workspace';
+          : 'Execuções';
 
   return (
     <main className="min-h-screen bg-[#f4f2eb] text-[#1f241f]">
@@ -842,7 +842,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               <div className="grid h-11 w-11 place-items-center rounded-lg bg-[#d7e35f] text-[#111611]">
                 <TerminalSquare className="h-6 w-6" />
               </div>
-              <RailLink icon={Play} active={view === 'run'} label="Run" href="/v2" />
+              <RailLink icon={Play} active={view === 'run'} label="Execuções" href="/v2" />
               <RailLink icon={FolderKanban} active={view === 'projects'} label="Projetos" href={projectId ? `/projects?project=${projectId}` : '/projects'} />
               <RailLink icon={FileCode2} active={view === 'suites'} label="Suites" href={projectId ? `/suites?project=${projectId}` : '/suites'} />
               <RailLink icon={GitBranch} active={view === 'flows'} label="Flows" href="/flows" />
@@ -850,7 +850,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               <RailLink icon={Settings2} active={view === 'settings'} label="Sistema" href="/settings" />
             </div>
             <Button asChild variant="outline" size="icon" className="rounded-lg border-white/15 bg-transparent text-[#f7f6f0] hover:bg-white/10">
-              <Link href="/v2" aria-label="Ir para Run workspace">
+              <Link href="/v2" aria-label="Ir para Execuções">
                 <ChevronRight className="h-4 w-4 rotate-180" />
               </Link>
             </Button>
@@ -912,7 +912,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 </Field>
                 <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={() => setOpenSheet('evidence')}>
                   <ClipboardCheck className="h-4 w-4" />
-                  Evidence
+                  Evidências
                 </Button>
                 <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={logout} disabled={busy}>
                   <LogOut className="h-4 w-4" />
@@ -939,6 +939,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               <RunWorkspace
                 selectedSuite={selectedSuite}
                 selectedEnv={selectedEnv}
+                suites={projectSuites}
+                envs={projectEnvs}
                 selectedRun={selectedRun}
                 stats={stats}
                 runs={scopedRuns}
@@ -1062,8 +1064,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
           <Sheet open={openSheet === 'evidence'} onOpenChange={(open) => setOpenSheet(open ? 'evidence' : null)}>
             <SheetContent className="w-full overflow-hidden p-0 sm:max-w-2xl md:max-w-3xl lg:max-w-5xl">
               <SheetHeader className="border-b px-5 py-4 pr-12">
-                <SheetTitle className="text-lg">Evidence</SheetTitle>
-                <SheetDescription>{selectedRun ? `${shortId(selectedRun.id)} · ${runSummary(selectedRun)}` : 'Selecione uma run para ver evidências.'}</SheetDescription>
+                <SheetTitle className="text-lg">Evidências</SheetTitle>
+                <SheetDescription>{selectedRun ? `${shortId(selectedRun.id)} · ${runSummary(selectedRun)}` : 'Selecione uma execução para ver evidências.'}</SheetDescription>
               </SheetHeader>
               <EvidenceColumn
                 runs={scopedRuns}
@@ -1116,6 +1118,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
 function RunWorkspace(props: {
   selectedSuite?: Suite;
   selectedEnv?: Environment;
+  suites: Suite[];
+  envs: Environment[];
   selectedRun?: Run;
   stats: ReturnType<typeof summarize>;
   runs: Run[];
@@ -1136,31 +1140,31 @@ function RunWorkspace(props: {
           <div className="grid gap-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-[#66705f]">Suite atual</p>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-[#66705f]">Suite em execução</p>
                 <h2 className="mt-1 text-xl font-extrabold tracking-normal md:text-2xl">{props.selectedSuite?.name ?? 'Selecione uma suite'}</h2>
-                <p className="mt-1 break-all font-mono text-xs text-[#66705f]">{props.selectedEnv?.baseUrl ?? 'Nenhum target selecionado'}</p>
+                <p className="mt-1 text-sm text-[#66705f]">{props.selectedEnv ? `${props.selectedEnv.name} · ${props.selectedEnv.baseUrl}` : 'Escolha ambiente e suite no topo para começar.'}</p>
               </div>
-              {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 font-mono uppercase">Sem run</Badge>}
+              {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 uppercase">Sem execução</Badge>}
             </div>
 
             <div className="grid gap-2 md:grid-cols-3">
-              <RunFact label="Suite selecionada" value={props.selectedSuite ? `${suiteTypeLabel(props.selectedSuite.type)} · ${shortId(props.selectedSuite.id)}` : '-'} />
-              <RunFact label="Target" value={props.selectedEnv?.name ?? '-'} />
-              <RunFact label="Última run nesta seleção" value={props.selectedRun ? `${shortId(props.selectedRun.id)} · ${runSummary(props.selectedRun)}` : 'Sem histórico para esta suite/target'} />
+              <RunFact label="Suite selecionada" value={props.selectedSuite ? `${props.selectedSuite.name} (${suiteTypeLabel(props.selectedSuite.type)})` : '-'} />
+              <RunFact label="Ambiente" value={props.selectedEnv?.name ?? '-'} />
+              <RunFact label="Última execução" value={props.selectedRun ? runSummary(props.selectedRun) : 'Sem histórico para esta combinação'} />
             </div>
             {props.selectedRun && ['queued', 'running'].includes(props.selectedRun.status) ? <LiveProgress run={props.selectedRun} /> : null}
           </div>
 
           <div className="grid gap-2 rounded-lg border border-[#d8d3c5] bg-white p-3">
             <div className="grid grid-cols-4 overflow-hidden rounded-md border border-[#e1ddd1] bg-[#fbfaf6]">
-              <Score label="Pass" value={props.stats.passed} tone="good" />
-              <Score label="Fail" value={props.stats.failed} tone="bad" />
-              <Score label="Error" value={props.stats.error} tone="bad" />
-              <Score label="Live" value={props.stats.active} tone="warn" />
+              <Score label="Ok" value={props.stats.passed} tone="good" />
+              <Score label="Falhas" value={props.stats.failed} tone="bad" />
+              <Score label="Erros" value={props.stats.error} tone="bad" />
+              <Score label="Rodando" value={props.stats.active} tone="warn" />
             </div>
             <Button onClick={props.onRun} disabled={props.busy || !props.canRun} className="h-10 rounded-md text-sm font-bold">
               {props.busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-              Run suite
+              Executar suite
             </Button>
             <div className="grid grid-cols-3 gap-2">
               <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenSuites}>
@@ -1173,42 +1177,38 @@ function RunWorkspace(props: {
               </Button>
               <Button variant="outline" className="rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={props.onOpenEvidence}>
                 <ClipboardCheck className="h-4 w-4" />
-                Evidence
+                Evidências
               </Button>
             </div>
           </div>
         </div>
       </section>
 
-      <RecentRunsOverview runs={props.runs} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenSuites={props.onOpenSuites} onOpenEnvironments={props.onOpenEnvironments} onOpenEvidence={props.onOpenEvidence} />
-      <LatestRunsOverview runs={props.latestRuns} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenEvidence={props.onOpenEvidence} />
+      <RecentRunsOverview runs={props.runs} suites={props.suites} envs={props.envs} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenSuites={props.onOpenSuites} onOpenEnvironments={props.onOpenEnvironments} onOpenEvidence={props.onOpenEvidence} />
+      <LatestRunsOverview runs={props.latestRuns} suites={props.suites} envs={props.envs} selectedRunId={props.selectedRunId} onSelectRun={props.onSelectRun} onOpenEvidence={props.onOpenEvidence} />
     </div>
   );
 }
 
-function RecentRunsOverview({ runs, selectedRunId, onSelectRun, onOpenSuites, onOpenEnvironments, onOpenEvidence }: { runs: Run[]; selectedRunId?: string; onSelectRun: (run: Run) => void; onOpenSuites: () => void; onOpenEnvironments: () => void; onOpenEvidence: () => void }) {
+function RecentRunsOverview({ runs, suites, envs, selectedRunId, onSelectRun, onOpenSuites, onOpenEnvironments, onOpenEvidence }: { runs: Run[]; suites: Suite[]; envs: Environment[]; selectedRunId?: string; onSelectRun: (run: Run) => void; onOpenSuites: () => void; onOpenEnvironments: () => void; onOpenEvidence: () => void }) {
   const recentRuns = runs.slice(0, 6);
   return (
-    <RunsSection title="Runs desta seleção" description="Histórico filtrado pela suite e ambiente escolhidos no topo." count={recentRuns.length}>
+    <RunsSection title="Execuções desta seleção" description="Histórico da suite e ambiente escolhidos no topo." count={recentRuns.length}>
       <div className="grid gap-3">
         {recentRuns.length > 0 ? (
           <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-3">
             {recentRuns.map((run) => (
-              <button
+              <RunHistoryCard
                 key={run.id}
-                type="button"
+                run={run}
+                suite={suites.find((suite) => suite.id === run.suiteId)}
+                env={envs.find((env) => env.id === run.environmentId)}
+                selected={selectedRunId === run.id}
                 onClick={() => {
                   onSelectRun(run);
                   onOpenEvidence();
                 }}
-                className={cn('grid cursor-pointer gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', selectedRunId === run.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <Status status={run.status} />
-                  <span className="font-mono text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
-                </div>
-                <p className="font-mono text-xs text-[#66705f]">{shortId(run.id)} · {runSummary(run)}</p>
-              </button>
+              />
             ))}
           </div>
         ) : (
@@ -1230,34 +1230,64 @@ function RecentRunsOverview({ runs, selectedRunId, onSelectRun, onOpenSuites, on
   );
 }
 
-function LatestRunsOverview({ runs, selectedRunId, onSelectRun, onOpenEvidence }: { runs: Run[]; selectedRunId?: string; onSelectRun: (run: Run) => void; onOpenEvidence: () => void }) {
+function LatestRunsOverview({ runs, suites, envs, selectedRunId, onSelectRun, onOpenEvidence }: { runs: Run[]; suites: Suite[]; envs: Environment[]; selectedRunId?: string; onSelectRun: (run: Run) => void; onOpenEvidence: () => void }) {
   const latestRuns = runs.slice(0, 8);
   return (
-    <RunsSection title="Últimas runs do projeto" description="Histórico geral recente, independente da suite selecionada." count={latestRuns.length} defaultOpen={false}>
+    <RunsSection title="Últimas execuções do projeto" description="Histórico geral recente, independente da suite selecionada." count={latestRuns.length} defaultOpen={false}>
         {latestRuns.length > 0 ? (
           <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-4">
             {latestRuns.map((run) => (
-              <button
+              <RunHistoryCard
                 key={run.id}
-                type="button"
+                run={run}
+                suite={suites.find((suite) => suite.id === run.suiteId)}
+                env={envs.find((env) => env.id === run.environmentId)}
+                selected={selectedRunId === run.id}
                 onClick={() => {
                   onSelectRun(run);
                   onOpenEvidence();
                 }}
-                className={cn('grid cursor-pointer gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', selectedRunId === run.id ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <Status status={run.status} />
-                  <span className="font-mono text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
-                </div>
-                <p className="font-mono text-xs text-[#66705f]">{shortId(run.id)} · {runSummary(run)}</p>
-              </button>
+              />
             ))}
           </div>
         ) : (
           <DarkEmpty text="Nenhuma run no projeto." />
         )}
     </RunsSection>
+  );
+}
+
+function RunHistoryCard({ run, suite, env, selected, onClick }: { run: Run; suite?: Suite; env?: Environment; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn('grid cursor-pointer gap-3 rounded-lg border bg-white p-3 text-left transition hover:border-[#9fb25a] hover:bg-[#f5f4ee]', selected ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1]')}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <Status status={run.status} />
+        <span className="text-xs text-[#66705f]">{formatDate(run.createdAt)}</span>
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-bold" title={suite?.name ?? run.suiteId}>{suite?.name ?? 'Suite removida'}</p>
+        <p className="truncate text-xs text-[#66705f]" title={env?.name ?? run.environmentId}>{env?.name ?? 'Ambiente removido'}</p>
+      </div>
+      <div className="grid grid-cols-3 gap-2 rounded-md bg-[#fbfaf6] p-2 text-center text-xs">
+        <RunMiniStat label="Ok" value={run.summary?.passed ?? 0} tone="good" />
+        <RunMiniStat label="Falhas" value={run.summary?.failed ?? 0} tone="bad" />
+        <RunMiniStat label="Erros" value={run.summary?.error ?? 0} tone="bad" />
+      </div>
+      <p className="truncate text-xs text-[#66705f]" title={run.error ?? `Execução ${run.id}`}>{run.error ? run.error : `ID ${shortId(run.id)}`}</p>
+    </button>
+  );
+}
+
+function RunMiniStat({ label, value, tone }: { label: string; value: number; tone: 'good' | 'bad' }) {
+  return (
+    <span>
+      <strong className={cn('block text-sm', tone === 'good' ? 'text-[#1f7a50]' : 'text-[#b43c2e]')}>{value}</strong>
+      <span className="text-[#66705f]">{label}</span>
+    </span>
   );
 }
 
@@ -1306,7 +1336,7 @@ function LiveProgress({ run }: { run: Run }) {
   if (!progress) {
     return (
       <div className="rounded-lg border border-[#e1ddd1] bg-white p-3">
-        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Progressó live</p>
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Progresso ao vivo</p>
         <p className="mt-1 text-sm font-semibold">Aguardando worker...</p>
       </div>
     );
@@ -1316,7 +1346,7 @@ function LiveProgress({ run }: { run: Run }) {
     <div className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Progressó live</p>
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Progresso ao vivo</p>
           <p className="mt-1 truncate text-sm font-semibold" title={progress.currentTest ?? progress.phase}>{progress.currentTest ?? progress.phase}</p>
           <p className="truncate font-mono text-xs text-[#66705f]" title={progress.currentStep ?? 'sem step atual'}>{progress.currentStep ?? 'sem step atual'}</p>
         </div>
@@ -1325,7 +1355,7 @@ function LiveProgress({ run }: { run: Run }) {
       <div className="h-2 overflow-hidden rounded-full bg-[#e9e5d9]">
         <div className="h-full bg-[#c9df4f] transition-all" style={{ width: `${Math.min(100, percent)}%` }} />
       </div>
-      <p className="font-mono text-xs text-[#66705f]">pass {progress.passed} · fail {progress.failed} · error {progress.error} · heartbeat {formatDate(run.heartbeatAt ?? progress.updatedAt)}</p>
+      <p className="text-xs text-[#66705f]">{progress.passed} ok · {progress.failed} falha(s) · {progress.error} erro(s) · última atualização {formatDate(run.heartbeatAt ?? progress.updatedAt)}</p>
     </div>
   );
 }
@@ -1398,7 +1428,7 @@ function ProjectsWorkspace(props: {
             <Field label="Retention"><Input type="number" min={1} value={props.projectDraft.retentionDays} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, retentionDays: event.target.value })} /></Field>
             <label className="flex h-10 items-center gap-2 rounded-md border border-[#d7d2c4] bg-white px-3 text-sm">
               <input type="checkbox" checked={props.projectDraft.cleanupArtifacts} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, cleanupArtifacts: event.target.checked })} />
-              Artifacts
+              Artefatos
             </label>
             <Button onClick={props.onSaveProject} disabled={props.busy || !props.canWrite || !props.projectDraft.name.trim()}>Salvar projeto</Button>
           </CardContent>
@@ -1408,7 +1438,7 @@ function ProjectsWorkspace(props: {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle>Ambientes do projeto</CardTitle>
-              <CardDescription>Targets ficam aqui, dentro do projeto.</CardDescription>
+              <CardDescription>Ambientes e URLs ficam aqui, dentro do projeto.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2">
               {props.envs.map((env) => (
@@ -1418,7 +1448,7 @@ function ProjectsWorkspace(props: {
                       <p className="font-semibold">{env.name}</p>
                       <p className="break-all font-mono text-xs text-[#66705f]">{env.baseUrl}</p>
                     </div>
-                    <Badge variant="outline">{Object.keys(env.variables ?? {}).length} vars</Badge>
+                    <Badge variant="outline">{Object.keys(env.variables ?? {}).length} variáveis</Badge>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" onClick={() => props.onEditEnv(env)} disabled={!props.canWrite}>Editar</Button>
@@ -1435,7 +1465,7 @@ function ProjectsWorkspace(props: {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <CardTitle>{props.envDraft.id ? 'Editar ambiente' : 'Novo ambiente'}</CardTitle>
-                  <CardDescription>{props.envDraft.id ? shortId(props.envDraft.id) : 'Target do projeto.'}</CardDescription>
+                  <CardDescription>{props.envDraft.id ? shortId(props.envDraft.id) : 'Ambiente do projeto.'}</CardDescription>
                 </div>
                 <Button variant="outline" size="sm" onClick={props.onNewEnv} disabled={!props.canWrite}>Novo</Button>
               </div>
@@ -1554,7 +1584,7 @@ function FlowLibraryWorkspace(props: {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{flow.namespace}.{flow.name}</p>
-                  <p className="truncate text-xs text-[#66705f]">{flow.description || `${flow.steps.length} steps`}</p>
+                  <p className="truncate text-xs text-[#66705f]">{flow.description || `${flow.steps.length} passos`}</p>
                 </div>
                 <Badge variant="success">ativo</Badge>
               </div>
@@ -1588,7 +1618,7 @@ function FlowLibraryWorkspace(props: {
             <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} height="140px" />
           </Field>
           <Field label="Steps YAML">
-            <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, steps: value })} validateSpec={false} height="360px" />
+            <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft,  steps: value })} validateSpec={false} height="360px" />
           </Field>
           <div className="flex flex-wrap gap-2">
             <Button onClick={props.onSaveFlow} disabled={props.busy || !props.canWrite || !props.flowDraft.namespace.trim() || !props.flowDraft.name.trim() || !props.flowDraft.steps.trim()}>Salvar flow</Button>
@@ -1973,7 +2003,7 @@ function PersonalTokenControl(props: {
               <Button variant="outline" onClick={() => navigator.clipboard.writeText(token.token)}>Copiar</Button>
               <Button variant="destructive" onClick={() => props.onRevoke(token.id)} disabled={props.busy}>Revogar</Button>
             </div>
-            <p className="text-xs text-[#66705f]">Criado {formatDate(token.createdAt)}{token.lastUsedAt ? ` · último usó ${formatDate(token.lastUsedAt)}` : ''}</p>
+            <p className="text-xs text-[#66705f]">Criado {formatDate(token.createdAt)}{token.lastUsedAt ? ` · último uso ${formatDate(token.lastUsedAt)}` : ''}</p>
           </div>
         ))}
         {props.tokens.length === 0 ? <DarkEmpty text="Nenhum token pessoal." /> : null}
@@ -1988,7 +2018,7 @@ function DocumentationWorkspace() {
       id: 'quickstart',
       group: 'Comece',
       title: 'Quickstart',
-      description: 'Do zero até a primeira run com evidence.',
+      description: 'Do zero até a primeira execução com evidence.',
       tags: ['projeto', 'ambiente', 'suite', 'run'],
       content: (
         <div className="grid gap-5">
@@ -1997,7 +2027,7 @@ function DocumentationWorkspace() {
             <DocStep title="1. Projeto" text="Crie o workspace do produto ou squad." />
             <DocStep title="2. Ambiente" text="Cadastre baseUrl e variáveis seguras." />
             <DocStep title="3. Suite" text="Escreva YAML API ou Web e valide." />
-            <DocStep title="4. Run" text="Execute, revise timeline, artifacts e report." />
+            <DocStep title="4. Run" text="Execute, revise linha do tempo, artefatos e relatório." />
           </div>
           <DocPanel title="Primeira suite API">
             <CodeBlock code={`version: 1
@@ -2028,7 +2058,7 @@ tests:
               <InfoLine label="Projeto" value="Agrupa ambientes, suites e runs." />
               <InfoLine label="Ambiente" value="baseUrl + variables/secrets para execução." />
               <InfoLine label="Suite" value="YAML versionado via UI ou MCP." />
-              <InfoLine label="Run" value="Execução com status, timeline e artifacts." />
+              <InfoLine label="Execuções" value="Execução com status, linha do tempo e artefatos." />
               <InfoLine label="Flow Library" value="Flows web compartilhados pela organização." />
             </div>
           </DocPanel>
@@ -2050,7 +2080,7 @@ tests:
       tags: ['goto', 'click', 'fill', 'expect', 'extract'],
       content: (
         <div className="grid gap-4">
-          <DocPanel title="Steps web suportados">
+          <DocPanel title="Passos web suportados">
             <CodeBlock code={`steps:
   - goto: /login
   - fill:
@@ -2184,7 +2214,7 @@ type: web
 name: checkout
 tests:
   - name: checkout autenticado
-    steps:
+     steps:
       - use: auth.login
         with:
           email: qa@example.com
@@ -2256,8 +2286,8 @@ headers:
     {
       id: 'runs',
       group: 'Operação',
-      title: 'Runs e evidence',
-      description: 'Status, timeline e artifacts.',
+      title: 'Execuções e evidências',
+      description: 'Status, linha do tempo e artefatos.',
       tags: ['report', 'video', 'trace', 'screenshot'],
       content: (
         <div className="grid gap-4">
@@ -2273,11 +2303,11 @@ headers:
             <div className="grid gap-2 text-sm text-[#4b5348]">
               <p>Antes de enfileirar uma run, o TestHub valida se o `baseUrl` do ambiente responde HTTP dentro de `TESTHUB_ENV_HEALTH_TIMEOUT_MS`.</p>
               <p>Qualquer resposta HTTP conta como ambiente alcançável. DNS, conexão recusada, TLS e timeout bloqueiam a run com status `error`.</p>
-              <p>Durante a execução, Evidence mostra cenário atual, step atual, contadores e último heartbeat usando o polling da interface.</p>
+              <p>Durante a execução, Evidências mostra cenário atual, step atual, contadores e último heartbeat usando o polling da interface.</p>
             </div>
           </DocPanel>
           <DocPanel title="Checklist de debug">
-            <CodeBlock code={`1. Abra Evidence
+            <CodeBlock code={`1. Abra Evidências
 2. Veja erro principal e timeline
 3. API: request/response/payload
 4. Web: screenshot/video/trace
@@ -2312,7 +2342,7 @@ TESTHUB_ENV_HEALTH_TIMEOUT_MS=5000`} />
             <div className="grid gap-2 text-sm text-[#4b5348]">
               <p><strong>Banco</strong>: usar Postgres gerenciado, backup diário e restore testado.</p>
               <p><strong>Fila</strong>: usar Redis dedicado para worker assíncrono.</p>
-              <p><strong>Artifacts</strong>: usar S3/MinIO com lifecycle policy, versionamento conforme necessidade e backup se evidência for auditável.</p>
+              <p><strong>Artefatos</strong>: usar S3/MinIO com lifecycle policy, versionamento conforme necessidade e backup se evidência for auditável.</p>
               <p><strong>Networking</strong>: API e worker precisam resolver os hosts permitidos em `TESTHUB_ALLOWED_HOSTS`; em Docker, valide nomes internos e `host.docker.internal` quando usado.</p>
               <p><strong>PAT</strong>: criar tokens por usuário/organização, revogar tokens antigos e evitar tokens pessoais compartilhados.</p>
               <p><strong>Retention</strong>: combinar `TESTHUB_RETENTION_DAYS`, cleanup de projeto e política do bucket.</p>
@@ -2356,7 +2386,7 @@ TESTHUB_ENV_HEALTH_TIMEOUT_MS=5000`} />
 8. testhub_wait_run
 9. testhub_get_run_report`} />
           </DocPanel>
-          <DocCallout title="IA" text="A IA não executa testes. Ela usa report, timeline, artifacts e redaction para explicar falhas ou sugerir ajustes." />
+          <DocCallout title="IA" text="A IA não executa testes. Ela usa relatório, linha do tempo, artefatos e redaction para explicar falhas ou sugerir ajustes." />
           <DocCallout title="Escopo do MCP" text="O MCP não gerencia usuários, tokens, OpenAPI import, cleanup ou AI connections. Essas operações ficam na aplicação. O MCP fica focado em projetos, ambientes, Flow Library, suites YAML, runs e evidence." />
         </div>
       ),
@@ -2855,7 +2885,7 @@ function EnvironmentMenu(props: {
     <div className="grid min-h-0 flex-1 gap-4 px-5 pb-5 md:grid-cols-[minmax(0,1fr)_340px]">
       <Card className="min-h-0">
         <CardHeader className="pb-3">
-          <CardTitle>Targets</CardTitle>
+          <CardTitle>Ambientes</CardTitle>
           <CardDescription>{props.envs.length} ambientes ativos.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -2868,7 +2898,7 @@ function EnvironmentMenu(props: {
                       <p className="truncate font-semibold">{env.name}</p>
                       <p className="break-all font-mono text-xs text-[#66705f]">{env.baseUrl}</p>
                     </div>
-                    <Badge variant="outline">{Object.keys(env.variables ?? {}).length} vars</Badge>
+                    <Badge variant="outline">{Object.keys(env.variables ?? {}).length} variáveis</Badge>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" onClick={() => props.onEdit(env)}>Editar</Button>
@@ -2921,7 +2951,7 @@ function SuitePreviewDialog({ open, suite, projectId, onOpenChange }: { open: bo
       <DialogContent className="max-w-5xl">
         <DialogHeader>
           <DialogTitle>{suite?.name ?? 'Suite'}</DialogTitle>
-          <DialogDescription>{suite ? `${suiteTypeLabel(suite.type)} · ${shortId(suite.id)}` : 'YAML readonly da suite selecionada.'}</DialogDescription>
+          <DialogDescription>{suite ? `${suiteTypeLabel(suite.type)} · ${shortId(suite.id)}` : 'YAML somente leitura da suite selecionada.'}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <YamlEditor value={suite?.specContent ?? ''} onChange={() => undefined} readOnly height="520px" />
@@ -2968,8 +2998,8 @@ function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, he
                 { label: 'type api', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'type: api', range: undefined as never },
                 { label: 'type frontend', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'type: web', range: undefined as never },
                 { label: 'api test', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'tests:\\n  - name: ${1:health}\\n    request:\\n      method: GET\\n      path: /health\\n    expect:\\n      status: 200', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
-                { label: 'frontend test', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'tests:\\n  - name: ${1:login}\\n    steps:\\n      - goto: /\\n      - expectVisible: ${2:text}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
-                { label: 'web flow', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'flows:\\n  ${1:login}:\\n    params:\\n      ${2:email}: ${3:\\${USER_EMAIL}}\\n    steps:\\n      - goto: ${4:/login}\\n      - fill:\\n          by: label\\n          target: ${5:Email}\\n          value: \\${${2:email}}\\n\\ntests:\\n  - name: ${6:fluxo}\\n    steps:\\n      - use: ${1:login}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
+                { label: 'frontend test', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'tests:\\n  - name: ${1:login}\\n     steps:\\n      - goto: /\\n      - expectVisible: ${2:text}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
+                { label: 'web flow', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'flows:\\n  ${1:login}:\\n    params:\\n      ${2:email}: ${3:\\${USER_EMAIL}}\\n     steps:\\n      - goto: ${4:/login}\\n      - fill:\\n          by: label\\n          target: ${5:Email}\\n          value: \\${${2:email}}\\n\\ntests:\\n  - name: ${6:fluxo}\\n     steps:\\n      - use: ${1:login}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
                 { label: 'web extract', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '- extract:\\n    as: ${1:ORDER_ID}\\n    from:\\n      by: testId\\n      target: ${2:order-id}\\n    property: ${3:text}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: undefined as never },
               ],
             }),
@@ -3088,19 +3118,19 @@ function EvidenceColumn(props: {
   return (
     <div className="grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 px-5 pb-5">
       <div className="grid grid-cols-4 overflow-hidden rounded-lg border bg-card shadow-sm">
-        <Score label="Pass" value={props.stats.passed} tone="good" />
-        <Score label="Fail" value={props.stats.failed} tone="bad" />
-        <Score label="Error" value={props.stats.error} tone="bad" />
-        <Score label="Live" value={props.stats.active} tone="warn" />
+        <Score label="Ok" value={props.stats.passed} tone="good" />
+        <Score label="Falhas" value={props.stats.failed} tone="bad" />
+        <Score label="Erros" value={props.stats.error} tone="bad" />
+        <Score label="Rodando" value={props.stats.active} tone="warn" />
       </div>
 
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 font-mono uppercase">Sem run</Badge>}
-              <CardTitle className="mt-3 max-w-full truncate text-2xl font-extrabold" title={props.selectedSuite?.name ?? 'Sem run'}>
-                {props.selectedSuite?.name ?? 'Sem run'}
+              {props.selectedRun ? <Status status={props.selectedRun.status} /> : <Badge variant="muted" className="h-7 font-mono uppercase">Sem execução</Badge>}
+              <CardTitle className="mt-3 max-w-full truncate text-2xl font-extrabold" title={props.selectedSuite?.name ?? 'Sem execução'}>
+                {props.selectedSuite?.name ?? 'Sem execução'}
               </CardTitle>
               <CardDescription className="break-all font-mono">{props.selectedEnv?.baseUrl ?? 'target ausente'}</CardDescription>
             </div>
@@ -3134,7 +3164,7 @@ function EvidenceColumn(props: {
         <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-4">
           <TabsTrigger value="overview" className="min-w-0">Overview</TabsTrigger>
           <TabsTrigger value="timeline" className="min-w-0">Timeline</TabsTrigger>
-          <TabsTrigger value="artifacts" className="min-w-0">Artifacts</TabsTrigger>
+          <TabsTrigger value="artifacts" className="min-w-0">Artefatos</TabsTrigger>
           <TabsTrigger value="payload" className="min-w-0">Payload</TabsTrigger>
         </TabsList>
 
@@ -3210,30 +3240,30 @@ function OtherRuns({ runs, selectedRun, onSelectRun }: { runs: Run[]; selectedRu
 }
 
 function OverviewEvidence({ run, report }: { run?: Run; report: RunReport | null; videos: Artifact[] }) {
-  if (!run) return <DarkEmpty text="Selecione uma run." />;
+  if (!run) return <DarkEmpty text="Selecione uma execução." />;
   const results = report?.results ?? [];
   return (
     <div className="grid gap-4">
       <div className="rounded-lg border border-[#e1ddd1] bg-white p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#66705f]">Run</p>
+            <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#66705f]">Execução</p>
             <p className="mt-3 text-lg font-extrabold">{run.status.toUpperCase()}</p>
             <p className="mt-2 text-sm text-[#66705f]">{runSummary(run)}</p>
           </div>
           {results.length > 0 ? (
             <div className="grid grid-cols-4 overflow-hidden rounded-md border border-[#e1ddd1] bg-[#fbfaf6]">
               <Score label="Total" value={results.length} tone="warn" />
-              <Score label="Pass" value={results.filter((result) => result.status === 'passed').length} tone="good" />
-              <Score label="Fail" value={results.filter((result) => result.status === 'failed').length} tone="bad" />
-              <Score label="Error" value={results.filter((result) => result.status === 'error').length} tone="bad" />
+              <Score label="Ok" value={results.filter((result) => result.status === 'passed').length} tone="good" />
+              <Score label="Falhas" value={results.filter((result) => result.status === 'failed').length} tone="bad" />
+              <Score label="Erros" value={results.filter((result) => result.status === 'error').length} tone="bad" />
             </div>
           ) : null}
         </div>
         {run.error ? <pre className="mt-3 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{run.error}</pre> : null}
       </div>
       {['queued', 'running'].includes(run.status) ? <LiveProgress run={run} /> : null}
-      {results.length > 0 ? <TestEvidenceList results={results} /> : <DarkEmpty text="Cenarios ainda indisponíveis para esta run." />}
+      {results.length > 0 ? <TestEvidenceList results={results} /> : <DarkEmpty text="Cenários ainda indisponíveis para esta execução." />}
     </div>
   );
 }
@@ -3252,9 +3282,9 @@ function TestEvidenceList({ results }: { results: NonNullable<RunReport['results
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Cenario {index + 1}</p>
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Cenário {index + 1}</p>
                   <CardTitle className="mt-1 truncate text-lg" title={result.name}>{result.name}</CardTitle>
-                  <CardDescription>{result.durationMs ? `${result.durationMs}ms` : `${result.steps?.length ?? 0} steps`} · {artifacts.length} artifacts</CardDescription>
+                  <CardDescription>{result.durationMs ? `${result.durationMs}ms` : `${result.steps?.length ?? 0} passos`} · {artifacts.length} artefatos</CardDescription>
                 </div>
                 <Status status={result.status} />
               </div>
@@ -3265,7 +3295,7 @@ function TestEvidenceList({ results }: { results: NonNullable<RunReport['results
                 <div className="overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_12px_24px_rgba(0,0,0,0.18)]">
                   <video className="aspect-video w-full bg-black" src={artifactUrl(videos[0].path)} controls preload="metadata" />
                 </div>
-              ) : <DarkEmpty text="Video indisponivel para este cenário." />}
+              ) : <DarkEmpty text="Video indisponível para este cenário." />}
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {videos.slice(1).map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Video'} path={artifact.path} type={artifact.type} compact />)}
                 {screenshots.map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Screenshot'} path={artifact.path} type={artifact.type} compact />)}
@@ -3282,7 +3312,7 @@ function TestEvidenceList({ results }: { results: NonNullable<RunReport['results
 
 function TimelineEvidence({ report }: { report: RunReport | null }) {
   const results = report?.results ?? [];
-  if (results.length === 0) return <DarkEmpty text="Timeline indisponivel." />;
+  if (results.length === 0) return <DarkEmpty text="Timeline indisponível." />;
   return (
     <div className="grid gap-3">
       {results.map((result) => (
@@ -3312,7 +3342,7 @@ function ArtifactEvidence({ run, artifacts, report }: { run?: Run; artifacts: Ar
   const uniqueArtifacts = dedupeArtifacts(artifacts).filter((artifact) => artifact.path !== run?.reportHtmlPath);
   const payloadGroups = groupHttpArtifacts(uniqueArtifacts);
   const otherArtifacts = uniqueArtifacts.filter((artifact) => artifact.type !== 'request' && artifact.type !== 'response');
-  if (!run?.reportHtmlPath && uniqueArtifacts.length === 0) return <DarkEmpty text="Artifacts indisponíveis." />;
+  if (!run?.reportHtmlPath && uniqueArtifacts.length === 0) return <DarkEmpty text="Artefatos indisponíveis." />;
   return (
     <div className="grid gap-3">
       {run?.reportHtmlPath ? <ArtifactLink label="HTML report" path={run.reportHtmlPath} type="html" /> : null}
@@ -3356,7 +3386,7 @@ function HttpArtifactGroup({ group, index }: { group: { request?: Artifact; resp
 }
 
 function PayloadEvidence({ artifacts }: { artifacts: Artifact[] }) {
-  if (artifacts.length === 0) return <DarkEmpty text="Payload indisponivel para runs frontend." />;
+  if (artifacts.length === 0) return <DarkEmpty text="Payload indisponível para execuções frontend." />;
   return (
     <div className="grid gap-3">
       {artifacts.map((artifact) => <PayloadCard key={`${artifact.type}:${artifact.path}`} artifact={artifact} />)}
@@ -3385,7 +3415,7 @@ function PayloadCard({ artifact }: { artifact: Artifact }) {
         <Badge variant={artifact.type === 'response' ? 'secondary' : 'outline'}>{artifact.type}</Badge>
       </div>
       {error ? <p className="mt-3 text-sm text-[#ffb4a8]">{error}</p> : null}
-      <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs leading-5 text-[#f7f6f0]">{payload ? JSON.stringify(payload, null, 2) : 'loading...'}</pre>
+      <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs leading-5 text-[#f7f6f0]">{payload ? JSON.stringify(payload, null, 2) : 'Carregando...'}</pre>
     </div>
   );
 }
@@ -3516,9 +3546,9 @@ function Status({ status }: { status: RunStatus }) {
   const active = status === 'queued' || status === 'running';
   const variant = passed ? 'success' : failed ? 'destructive' : active ? 'warning' : 'muted';
   return (
-    <Badge variant={variant} className="h-7 gap-2 font-mono uppercase">
+    <Badge variant={variant} className="h-7 gap-2 uppercase">
       {passed ? <CheckCircle2 data-icon="inline-start" /> : failed ? <XCircle data-icon="inline-start" /> : active ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Square data-icon="inline-start" />}
-      {status}
+      {statusLabel(status)}
     </Badge>
   );
 }
@@ -3576,7 +3606,7 @@ function ArtifactLink({ label, path, type, compact }: { label: string; path: str
               <DialogDescription className="break-all font-mono text-xs">{shortPath(path)}</DialogDescription>
             </DialogHeader>
             {error ? <Signal tone="bad" text={error} /> : null}
-            <pre className="max-h-[70vh] overflow-auto rounded-lg bg-[#0b100c] p-4 font-mono text-xs leading-5 text-[#f7f6f0]">{loading ? 'loading...' : content || 'Sem logs.'}</pre>
+            <pre className="max-h-[70vh] overflow-auto rounded-lg bg-[#0b100c] p-4 font-mono text-xs leading-5 text-[#f7f6f0]">{loading ? 'Carregando...' : content || 'Sem logs.'}</pre>
           </DialogContent>
         </Dialog>
       </>
@@ -3683,8 +3713,21 @@ function groupHttpArtifacts(artifacts: Artifact[]): Array<{ request?: Artifact; 
 
 function runSummary(run: Run): string {
   if (run.error) return run.error;
-  if (!run.summary) return 'Sem report final.';
-  return `${run.summary.passed ?? 0}/${run.summary.total ?? 0} pass · ${run.summary.failed ?? 0} fail · ${run.summary.error ?? 0} error`;
+  if (!run.summary) return 'Sem relatório final.';
+  return `${run.summary.passed ?? 0}/${run.summary.total ?? 0} cenário(s) ok · ${run.summary.failed ?? 0} falha(s) · ${run.summary.error ?? 0} erro(s)`;
+}
+
+function statusLabel(status: RunStatus): string {
+  const labels: Record<RunStatus, string> = {
+    queued: 'Na fila',
+    running: 'Rodando',
+    passed: 'Aprovado',
+    failed: 'Falhou',
+    error: 'Erro',
+    canceled: 'Cancelado',
+    deleted: 'Arquivado',
+  };
+  return labels[status] ?? status;
 }
 
 function formatDate(value?: string | null): string {
