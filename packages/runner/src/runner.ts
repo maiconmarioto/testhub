@@ -6,6 +6,7 @@ import { loadEnvFile, MissingVariableError, parseSpecFile, resolveVariables, Spe
 import { runApiSpec } from './api-runner.js';
 import { runWebSpec } from './web-runner.js';
 import { createRunReport } from './reporter.js';
+import { ProgressTracker } from './progress.js';
 
 export async function runSpec(options: RunOptions): Promise<RunReport> {
   const startedAt = new Date();
@@ -25,14 +26,17 @@ export async function runSpec(options: RunOptions): Promise<RunReport> {
   const withOverride = applyBaseUrlOverride(parsed, options.baseUrl);
   const spec = resolveVariables(withOverride, env, { allowMissing: true });
   const filteredSpec = filterSpec(spec, options.tags);
+  const progress = new ProgressTracker(filteredSpec.tests.length, options.onProgress);
+  await progress.phase('starting');
 
   const results =
     filteredSpec.type === 'api'
-      ? await runApiSpec(filteredSpec, runDir)
-      : await runWebSpec(filteredSpec, runDir, { headed: options.headed, externalFlows });
+      ? await runApiSpec(filteredSpec, runDir, { progress })
+      : await runWebSpec(filteredSpec, runDir, { headed: options.headed, externalFlows, progress });
+  await progress.phase('artifacts');
 
   const finishedAt = new Date();
-  return createRunReport({
+  const report = createRunReport({
     id,
     specPath: path.resolve(options.specPath),
     spec: filteredSpec,
@@ -44,6 +48,8 @@ export async function runSpec(options: RunOptions): Promise<RunReport> {
     writeHtml: !options.noHtml,
     writeJunit: options.junit,
   });
+  await progress.phase('finished');
+  return report;
 }
 
 export function validateSpec(specPath: string): TestHubSpec {

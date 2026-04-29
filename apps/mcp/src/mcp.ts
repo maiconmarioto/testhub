@@ -110,7 +110,7 @@ tests:
 type: web
 name: extract-web
 tests:
-  - name: captura dados dinamicos
+  - name: captura dados dinâmicos
     steps:
       - goto: /orders/new
       - click:
@@ -156,7 +156,7 @@ Use TestHub as a test-management and execution platform. Do not guess state. Alw
 ## Golden path
 1. Call testhub_list_projects.
 2. Pick existing project by name, or create one with testhub_create_project.
-3. Call testhub_list_environments with projectId. Aliases also exist: list_environments and testhub_list_envs.
+3. Call testhub_list_environments with projectId. Aliases alsó exist: list_environments and testhub_list_envs.
 4. Pick/create/update environment. If unsure, call testhub_get_test_context with projectId to get projects, environments, suites, and recent runs with IDs in one response.
 5. Environment baseUrl is target app URL. Variables are secrets/config used by specs.
 6. Call testhub_list_suites with projectId.
@@ -239,7 +239,7 @@ server.registerPrompt('testhub_operator', {
   }],
 }));
 
-server.tool('testhub_help', 'Mostra guia operacional e catalogo de comandos do TestHub MCP', {
+server.tool('testhub_help', 'Mostra guia operacional e catálogo de comandos do TestHub MCP', {
   section: z.enum(['all', 'workflow', 'rules', 'examples', 'commands']).default('all'),
 }, ({ section }) => {
   const sections = {
@@ -269,7 +269,7 @@ server.tool('testhub_get_spec_examples', 'Retorna exemplos oficiais de YAML Test
       'Use flows + use + with para fluxos web extensos e reutilizaveis.',
       'Chame testhub_list_flows antes de criar suite web; use refs como auth.login quando houver flow compartilhado.',
       'Use extract web para capturar text, value, attribute ou url e reutilizar como ${VARIAVEL}.',
-      'Mantenha secrets em environments; use variables/params apenas para valores nao sensiveis ou placeholders.',
+      'Mantenha secrets em environments; use variables/params apenas para valores não sensiveis ou placeholders.',
     ],
     examples,
   });
@@ -279,7 +279,7 @@ server.tool('testhub_list_projects', 'Lista projetos do TestHub', {}, async () =
   return text(await api('/api/projects'));
 });
 
-server.tool('testhub_get_test_context', 'Retorna contexto para planejar execucao: projetos, environments, suites e runs recentes com IDs', {
+server.tool('testhub_get_test_context', 'Retorna contexto para planejar execução: projetos, environments, suites e runs recentes com IDs', {
   projectId: z.string().optional(),
 }, async ({ projectId }) => {
   const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
@@ -319,7 +319,7 @@ server.tool('testhub_get_project', 'Busca projeto ativo por ID', {
   return text(await getProjectContext(projectId));
 });
 
-server.tool('testhub_update_project', 'Atualiza nome/descricao de projeto ativo', {
+server.tool('testhub_update_project', 'Atualiza nome/descrição de projeto ativo', {
   projectId: z.string(),
   name: z.string(),
   description: z.string().optional(),
@@ -355,7 +355,7 @@ server.tool('testhub_get_environment', 'Busca environment/ambiente ativo por ID'
   return text(await getEnvironment(environmentId));
 });
 
-server.tool('testhub_update_environment', 'Atualiza ambiente ativo. Use para trocar baseUrl/variaveis sem recriar suite.', {
+server.tool('testhub_update_environment', 'Atualiza ambiente ativo. Use para trocar baseUrl/variáveis sem recriar suite.', {
   environmentId: z.string(),
   name: z.string(),
   baseUrl: z.string().url(),
@@ -443,19 +443,19 @@ server.tool('testhub_validate_spec', 'Valida YAML TestHub sem salvar suite', {
   return text(await api('/api/spec/validate', { method: 'POST', body: JSON.stringify(input) }));
 });
 
-server.tool('testhub_list_flows', 'Lista flows reutilizaveis da organizacao atual, opcionalmente por namespace', {
+server.tool('testhub_list_flows', 'Lista flows reutilizaveis da organização atual, opcionalmente por namespace', {
   namespace: z.string().optional(),
 }, async ({ namespace }) => {
   return text(await api(`/api/flows${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`));
 });
 
-server.tool('testhub_get_flow', 'Busca flow reutilizavel por ID', {
+server.tool('testhub_get_flow', 'Busca flow reutilizável por ID', {
   flowId: z.string(),
 }, async ({ flowId }) => {
   return text(await api(`/api/flows/${encodeURIComponent(flowId)}`));
 });
 
-server.tool('testhub_create_flow', 'Cria flow web reutilizavel da organizacao atual', {
+server.tool('testhub_create_flow', 'Cria flow web reutilizável da organização atual', {
   namespace: z.string(),
   name: z.string(),
   description: z.string().optional(),
@@ -465,7 +465,7 @@ server.tool('testhub_create_flow', 'Cria flow web reutilizavel da organizacao at
   return text(await api('/api/flows', { method: 'POST', body: JSON.stringify(input) }));
 });
 
-server.tool('testhub_update_flow', 'Atualiza flow web reutilizavel da organizacao atual', {
+server.tool('testhub_update_flow', 'Atualiza flow web reutilizável da organização atual', {
   flowId: z.string(),
   namespace: z.string(),
   name: z.string(),
@@ -476,7 +476,7 @@ server.tool('testhub_update_flow', 'Atualiza flow web reutilizavel da organizaca
   return text(await api(`/api/flows/${encodeURIComponent(flowId)}`, { method: 'PUT', body: JSON.stringify(input) }));
 });
 
-server.tool('testhub_archive_flow', 'Arquiva flow reutilizavel por soft delete', {
+server.tool('testhub_archive_flow', 'Arquiva flow reutilizável por soft delete', {
   flowId: z.string(),
 }, async ({ flowId }) => {
   await api(`/api/flows/${encodeURIComponent(flowId)}`, { method: 'DELETE' });
@@ -489,7 +489,7 @@ server.tool('testhub_list_runs', 'Lista runs, opcionalmente por projeto', {
   return text(await api(`/api/runs${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`));
 });
 
-server.tool('testhub_run_suite', 'Dispara execucao de suite', {
+server.tool('testhub_run_suite', 'Dispara execução de suite', {
   projectId: z.string(),
   environmentId: z.string().optional(),
   suiteId: z.string(),
@@ -516,7 +516,7 @@ server.tool('testhub_get_run_status', 'Consulta status de run', {
   return text(await api(`/api/runs/${encodeURIComponent(runId)}`));
 });
 
-server.tool('testhub_cancel_run', 'Cancela run em fila ou em execucao', {
+server.tool('testhub_cancel_run', 'Cancela run em fila ou em execução', {
   runId: z.string(),
 }, async ({ runId }) => {
   return text(await api(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', body: '{}' }));
@@ -570,7 +570,7 @@ async function getProjectContext(projectId: string): Promise<unknown> {
     environments,
     suites,
     runs,
-    nextStep: 'Use um environment.id como environmentId em testhub_run_suite. Se nao existir environment, crie com testhub_create_environment/create_environment ou passe baseUrl no testhub_run_suite.',
+    nextStep: 'Use um environment.id como environmentId em testhub_run_suite. Se não existir environment, crie com testhub_create_environment/create_environment ou passe baseUrl no testhub_run_suite.',
   };
 }
 

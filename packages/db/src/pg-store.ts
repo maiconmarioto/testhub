@@ -488,6 +488,8 @@ export class PgStore implements Store {
     if (patch.reportHtmlPath !== undefined) values.reportHtmlPath = patch.reportHtmlPath;
     if (patch.error !== undefined) values.error = patch.error;
     if (patch.summary !== undefined) values.summary = patch.summary;
+    if (patch.progress !== undefined) values.progress = patch.progress;
+    if (patch.heartbeatAt !== undefined) values.heartbeatAt = new Date(patch.heartbeatAt);
     if (patch.startedAt !== undefined) values.startedAt = new Date(patch.startedAt);
     if (patch.finishedAt !== undefined) values.finishedAt = new Date(patch.finishedAt);
     const [row] = await this.db.update(runs).set(values).where(eq(runs.id, id)).returning();
@@ -694,6 +696,8 @@ function rowToRun(row: Record<string, unknown>): RunRecord {
     startedAt: row.startedAt ? toIso(row.startedAt as Date | string) : undefined,
     finishedAt: row.finishedAt ? toIso(row.finishedAt as Date | string) : undefined,
     summary: row.summary,
+    progress: row.progress as RunRecord['progress'] | undefined,
+    heartbeatAt: row.heartbeatAt ? toIso(row.heartbeatAt as Date | string) : undefined,
   };
 }
 

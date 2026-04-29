@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureDir, writeJson } from '../../shared/src/fs-utils.js';
-import type { FlowLibraryItem, WebFlow } from '../../shared/src/types.js';
+import type { FlowLibraryItem, RunProgress, WebFlow } from '../../shared/src/types.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
 
 export type EntityStatus = 'active' | 'inactive';
@@ -119,6 +119,8 @@ export interface RunRecord {
   startedAt?: string;
   finishedAt?: string;
   summary?: unknown;
+  progress?: RunProgress;
+  heartbeatAt?: string;
 }
 
 export interface AiConnection {

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Store } from '../../../packages/db/src/store.js';
 import { runSpec } from '../../../packages/runner/src/runner.js';
 import { uploadRunArtifacts } from '../../../packages/artifacts/src/artifact-store.js';
+import type { RunProgress } from '../../../packages/shared/src/types.js';
 
 export async function executeRun(store: Store, runId: string): Promise<void> {
   const db = await store.read();
@@ -16,12 +17,13 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
     await store.updateRun(runId, { status: 'error', error: 'Environment ou suite nao encontrado', finishedAt: new Date().toISOString() });
     return;
   }
-  await store.updateRun(runId, { status: 'running', startedAt: new Date().toISOString() });
+  await store.updateRun(runId, { status: 'running', startedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() });
   const envFile = path.join(store.runsDir, `${runId}.env`);
   const variables = await store.getEnvironmentVariables(run.environmentId);
   const flowLibrary = project ? await store.listFlowsForOrganization(project.organizationId) : [];
   const externalFlows = Object.fromEntries(flowLibrary.map((flow) => [`${flow.namespace}.${flow.name}`, { params: flow.params, steps: flow.steps }]));
   fs.writeFileSync(envFile, Object.entries(variables).map(([key, value]) => `${key}=${value}`).join('\n'), 'utf8');
+  const persistProgress = createProgressPersister(store, runId);
   try {
     const report = await withRunTimeout(runSpec({
       specPath: suite.specPath,
@@ -30,25 +32,72 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
       envFile,
       externalFlows,
       junit: true,
+      onProgress: persistProgress,
     }));
     const latest = (await store.read()).runs.find((item) => item.id === runId);
     if (latest?.status === 'canceled' || latest?.status === 'deleted') return;
     const status = report.summary.error > 0 ? 'error' : report.summary.failed > 0 ? 'failed' : 'passed';
+    await persistProgress({
+      phase: 'artifacts',
+      totalTests: report.summary.total,
+      completedTests: report.summary.total,
+      passed: report.summary.passed,
+      failed: report.summary.failed,
+      error: report.summary.error,
+      updatedAt: new Date().toISOString(),
+    }, true);
     const uploadedArtifacts = await uploadRunArtifacts(path.join(store.runsDir, runId, report.id));
+    const finishedAt = new Date().toISOString();
     await store.updateRun(runId, {
       status,
-      finishedAt: new Date().toISOString(),
+      finishedAt,
       reportPath: path.join(store.runsDir, runId, report.id, 'report.json'),
       reportHtmlPath: path.join(store.runsDir, runId, report.id, 'report.html'),
       summary: { ...report.summary, uploadedArtifacts },
+      progress: {
+        phase: status === 'passed' ? 'finished' : status,
+        totalTests: report.summary.total,
+        completedTests: report.summary.total,
+        passed: report.summary.passed,
+        failed: report.summary.failed,
+        error: report.summary.error,
+        updatedAt: finishedAt,
+      },
+      heartbeatAt: finishedAt,
     });
   } catch (error) {
+    const finishedAt = new Date().toISOString();
     await store.updateRun(runId, {
       status: 'error',
       error: error instanceof Error ? error.message : String(error),
-      finishedAt: new Date().toISOString(),
+      finishedAt,
+      progress: {
+        phase: 'error',
+        totalTests: 0,
+        completedTests: 0,
+        passed: 0,
+        failed: 0,
+        error: 1,
+        updatedAt: finishedAt,
+      },
+      heartbeatAt: finishedAt,
     });
   }
+}
+
+function createProgressPersister(store: Store, runId: string) {
+  let lastWrite = 0;
+  let pending: Promise<unknown> = Promise.resolve();
+  return async (progress: RunProgress, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastWrite < 1000) return;
+    lastWrite = now;
+    pending = pending.catch(() => undefined).then(() => store.updateRun(runId, {
+      progress,
+      heartbeatAt: new Date().toISOString(),
+    }));
+    await pending;
+  };
 }
 
 async function withRunTimeout<T>(promise: Promise<T>): Promise<T> {

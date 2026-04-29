@@ -80,10 +80,10 @@ export default function RegisterPage() {
           <Input id="name" autoComplete="name" required value={name} onChange={(event) => setName(event.target.value)} />
         </AuthField>
         {organizations.length > 0 ? (
-          <AuthField id="organizations" label="Organizacoes">
+          <AuthField id="organizations" label="Organizações">
             <details className="group rounded-md border border-input bg-background">
               <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-sm">
-                <span className="truncate">{selectedOrganizationIds.length > 0 ? `${selectedOrganizationIds.length} selecionada(s)` : 'Selecionar organizacoes'}</span>
+                <span className="truncate">{selectedOrganizationIds.length > 0 ? `${selectedOrganizationIds.length} selecionada(s)` : 'Selecionar organizações'}</span>
                 <span className="text-xs text-muted-foreground group-open:rotate-180">v</span>
               </summary>
               <div className="grid max-h-52 gap-1 overflow-auto border-t p-2">
@@ -106,7 +106,7 @@ export default function RegisterPage() {
             </details>
           </AuthField>
         ) : (
-          <AuthField id="organizationName" label="Organizacao">
+          <AuthField id="organizationName" label="Organização">
             <Input id="organizationName" required value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} />
           </AuthField>
         )}
@@ -131,6 +131,6 @@ function AuthField({ id, label, children }: { id: string; label: string; childre
 
 function formatRegisterError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes('Cadastro publico')) return 'Cadastro publico desativado. Use usuario inicial/bootstrap ou habilite public signup.';
+  if (message.includes('Cadastro público')) return 'Cadastro público desativado. Use usuário inicial/bootstrap ou habilite public signup.';
   return message;
 }

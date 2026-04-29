@@ -41,7 +41,7 @@ test('v2 keeps shared query params and navigates real management pages', async (
   await page.getByLabel('Sistema').click();
   await expect(page).toHaveURL(/\/settings/);
   await expect(page.getByRole('heading', { name: 'Sistema' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Seguranca empresa' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Segurança empresa' })).toBeVisible();
 });
 
 test('project screen edits retention and environment, then suite edit link opens selected suite', async ({ page }) => {
@@ -124,9 +124,9 @@ test('wizard creates a full workspace and ignores Escape', async ({ page }) => {
   await login(page);
   await page.goto('/v2');
   await page.getByRole('button', { name: 'Wizard' }).click();
-  await expect(page.getByRole('heading', { name: 'Wizard de configuracao' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Wizard de configuração' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('heading', { name: 'Wizard de configuracao' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Wizard de configuração' })).toBeVisible();
 
   const suffix = `${Date.now()}`;
   await page.getByLabel('Nome do projeto').fill(`wizard-${suffix}`);
@@ -161,7 +161,7 @@ async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Nome').fill('Web E2E');
   await page.getByLabel('Senha').fill(userPassword);
-  await page.getByLabel('Organizacao').fill(organizationName);
+  await page.getByLabel('Organização').fill(organizationName);
   await page.getByRole('button', { name: 'Criar conta' }).click();
 
   const result = await Promise.race([
@@ -170,7 +170,7 @@ async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
   ]);
 
   if (result === 'error') {
-    await expect(formAlert).toContainText('Cadastro publico');
+    await expect(formAlert).toContainText('Cadastro público');
     await createApiUser(email, userPassword, organizationName);
     await page.goto('/login');
     await page.getByLabel('Email').fill(email);
@@ -259,7 +259,7 @@ async function createApiUser(email = uniqueEmail('api'), password = userPassword
   }
 
   const registerError = await register.text();
-  if (register.status !== 403 || !registerError.includes('Cadastro publico')) {
+  if (register.status !== 403 || !registerError.includes('Cadastro público')) {
     throw new Error(registerError);
   }
   if (!bootstrapUser) throw new Error('Public signup disabled before a bootstrap user was available');

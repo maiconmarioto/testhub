@@ -16,12 +16,12 @@
 - RBAC is role-only and global: `admin|editor|viewer`, with no user, no session, and no organization boundary.
 - UI stores a bearer/OIDC token manually in `localStorage` via `ApiTokenControl` in `apps/web/components/dashboard/v2-console.tsx`.
 - `Project`, `Environment`, `Suite`, and `RunRecord` have no `organizationId`; all users would see all data.
-- `PgStore` and `JsonStore` both exist, so every schema/store change must land in both implementations.
+- `PgStore` and `JsonStore` both exist, só every schema/store change must land in both implementations.
 - PRD Phase 5 says OIDC/Auth.js, simple RBAC, encrypted secrets, redaction, audit, and retention. Secrets, redaction, audit, and retention are partial; user/session/org auth is missing.
 
 ## Scope Decision
 
-This plan implements the security/platform slice, not every remaining PRD item across runner, MCP, AI, and storage. It covers the PRD security gaps and matures existing project/environment/suite/run sharing so teams can use the product with real accounts.
+This plan implements the security/platform slice, not every remaining PRD item across runner, MCP, AI, and storage. It covers the PRD security gaps and matures existing project/environment/suite/run sharing só teams can use the product with real accounts.
 
 ## File Structure
 
@@ -33,7 +33,7 @@ This plan implements the security/platform slice, not every remaining PRD item a
 - Modify `packages/db/src/security.ts`: keep env/token/OIDC helpers, extend actor shape with `organizationId`, and delegate local sessions to auth helpers.
 - Create `packages/db/src/auth.ts`: password hashing, session token hashing, reset token hashing, auth service helpers.
 - Modify `apps/api/src/server.ts`: add cookie support, auth routes, actor resolution, org-scoped authorization, resource access checks, OpenAPI paths.
-- Modify `apps/mcp/src/mcp.ts`: send `TESTHUB_TOKEN` as before; document that local session tokens can also be supplied.
+- Modify `apps/mcp/src/mcp.ts`: send `TESTHUB_TOKEN` as before; document that local session tokens can alsó be supplied.
 - Create `apps/web/lib/api.ts`: shared browser fetch wrapper with `credentials: 'include'`, auth redirect, and bearer fallback.
 - Create `apps/web/components/auth/auth-shell.tsx`: reusable auth form layout.
 - Create `apps/web/app/login/page.tsx`: login page.
@@ -120,7 +120,7 @@ export interface Project {
 }
 ```
 
-AI connections and audit entries should also be organization-scoped in this plan because settings and audit are shared by a team, not globally.
+AI connections and audit entries should alsó be organization-scoped in this plan because settings and audit are shared by a team, not globally.
 
 ## Auth Rules
 
@@ -234,7 +234,7 @@ In `packages/db/src/store.ts`, add the auth interfaces from the "Data Model" sec
   listProjectsForOrganization(organizationId: string): Promise<Project[]> | Project[];
 ```
 
-Also change `createProject` input to require `organizationId`:
+Alsó change `createProject` input to require `organizationId`:
 
 ```ts
   createProject(input: { organizationId: string; name: string; description?: string; retentionDays?: number; cleanupArtifacts?: boolean }): Promise<Project> | Project;
@@ -708,7 +708,7 @@ app.post('/api/auth/register', async (req, reply) => {
     organizationName: z.string().min(1),
   }).parse(req.body);
 
-  if (await store.findUserByEmail(input.email)) return reply.code(409).send({ error: 'Email ja cadastrado' });
+  if (await store.findUserByEmail(input.email)) return reply.code(409).send({ error: 'Email já cadastrado' });
 
   const user = await store.createUser({ email: input.email, name: input.name, passwordHash: await hashPassword(input.password) });
   const organization = await store.createOrganization({ name: input.organizationName });
@@ -726,7 +726,7 @@ app.post('/api/auth/login', async (req, reply) => {
   if (!user || !(await verifyPassword(input.password, user.passwordHash))) return reply.code(401).send({ error: 'Email ou senha invalidos' });
   const memberships = await store.listMembershipsForUser(user.id);
   const membership = memberships[0];
-  if (!membership) return reply.code(403).send({ error: 'Usuario sem organizacao' });
+  if (!membership) return reply.code(403).send({ error: 'Usuário sem organização' });
   const token = createSessionToken();
   const session = await store.createSession({ userId: user.id, organizationId: membership.organizationId, tokenHash: hashToken(token), expiresAt: sessionExpiresAt() });
   setSessionCookie(reply, token, session.expiresAt);
@@ -869,7 +869,7 @@ In `apps/api/src/server.ts`, create helpers:
 
 ```ts
 function requireOrganization(actor?: AuthActor): string {
-  if (!actor?.organizationId) throw new Error('Organizacao obrigatoria');
+  if (!actor?.organizationId) throw new Error('Organização obrigatória');
   return actor.organizationId;
 }
 
@@ -891,7 +891,7 @@ app.post('/api/projects', async (req, reply) => {
 app.get('/api/projects/:id', async (req, reply) => {
   const params = z.object({ id: z.string() }).parse(req.params);
   const project = await getProjectInActorOrg(params.id, req.actor);
-  if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+  if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
   return project;
 });
 ```
@@ -1202,15 +1202,15 @@ async function createMember() {
         temporaryPassword: memberDraft.temporaryPassword || undefined,
       }),
     });
-    if (response.temporaryPassword) setNotice(`Usuario criado. Senha temporaria: ${response.temporaryPassword}`);
+    if (response.temporaryPassword) setNotice(`Usuário criado. Senha temporária: ${response.temporaryPassword}`);
     setMemberDraft({ email: '', name: '', role: 'viewer', temporaryPassword: '' });
   }, 'Membro criado.');
 }
 ```
 
-- [x] **Step 3: Replace `Sessao local` card**
+- [x] **Step 3: Replace `Sessão local` card**
 
-In `SettingsWorkspace`, replace the manual token card with an `Organizacao` card listing:
+In `SettingsWorkspace`, replace the manual token card with an `Organização` card listing:
 
 - logged user email;
 - current organization/team name;
@@ -1300,7 +1300,7 @@ async function login(page, email = `web-${Date.now()}@example.com`) {
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Nome').fill('Web E2E');
   await page.getByLabel('Senha').fill('password-1234');
-  await page.getByLabel('Organizacao').fill(`Team ${Date.now()}`);
+  await page.getByLabel('Organização').fill(`Team ${Date.now()}`);
   await page.getByRole('button', { name: 'Criar conta' }).click();
   await expect(page).toHaveURL(/\/v2/);
 }

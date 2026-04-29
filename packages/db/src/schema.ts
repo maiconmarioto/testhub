@@ -1,4 +1,5 @@
 import { boolean, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import type { RunProgress } from '../../shared/src/types.js';
 
 export const projects = pgTable('projects', {
   id: text('id').primaryKey(),
@@ -109,6 +110,8 @@ export const runs = pgTable('runs', {
   startedAt: timestamp('started_at', { withTimezone: true }),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
   summary: jsonb('summary').$type<unknown>(),
+  progress: jsonb('progress').$type<RunProgress | null>(),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
 });
 
 export const aiConnections = pgTable('ai_connections', {

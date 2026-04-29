@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { BookOpen, Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Database, FileCode2, FolderKanban, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
+import { BookOpen, Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Database, FileCode2, FolderKanban, GitBranch, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
 import YAML from 'yaml';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -75,6 +75,17 @@ type FlowLibraryItem = {
 type FlowDraft = { id: string; namespace: string; name: string; description: string; params: string; steps: string };
 type AuditEntry = { id: string; action: string; actor: string; status: 'ok' | 'blocked' | 'error'; target?: string; createdAt: string; detail?: Record<string, unknown> };
 type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
+type RunProgress = {
+  phase: 'queued' | 'starting' | 'running' | 'test' | 'step' | 'artifacts' | 'finished' | 'failed' | 'skipped' | 'error';
+  totalTests: number;
+  completedTests: number;
+  currentTest?: string;
+  currentStep?: string;
+  passed: number;
+  failed: number;
+  error: number;
+  updatedAt: string;
+};
 type Run = {
   id: string;
   projectId: string;
@@ -88,6 +99,8 @@ type Run = {
   createdAt?: string;
   startedAt?: string | null;
   finishedAt?: string | null;
+  progress?: RunProgress | null;
+  heartbeatAt?: string | null;
 };
 type Artifact = { type: string; path: string; label?: string };
 type RunReport = {
@@ -103,7 +116,7 @@ type RunReport = {
 };
 type EvidenceTab = 'overview' | 'timeline' | 'artifacts' | 'payload';
 type MenuSheet = 'evidence' | null;
-type V2View = 'run' | 'projects' | 'suites' | 'settings' | 'docs';
+type V2View = 'run' | 'projects' | 'suites' | 'flows' | 'settings' | 'docs';
 type SuiteWithContent = Suite & { specContent: string };
 type ValidationResult = { valid: true; type: 'api' | 'web'; name: string; tests: number } | { valid: false; error: string };
 type WizardDraft = {
@@ -127,7 +140,7 @@ const defaultFlowDraft: FlowDraft = {
   id: '',
   namespace: 'auth',
   name: 'login',
-  description: 'Login padrao reutilizavel',
+  description: 'Login padrão reutilizável',
   params: 'email: ${USER_EMAIL}\npassword: ${USER_PASSWORD}',
   steps: [
     '- goto: /login',
@@ -404,7 +417,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
 
   async function runSuite() {
     if (!projectId || !environmentId || !suiteId) {
-      setError('Projeto, ambiente e suite obrigatorios.');
+      setError('Projeto, ambiente e suite obrigatórios.');
       return;
     }
     await mutate(async () => {
@@ -457,7 +470,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
 
   async function validateSpec(showNotice = true): Promise<boolean> {
     if (!suiteDraft.specContent.trim()) {
-      setValidation({ valid: false, error: 'YAML obrigatorio.' });
+      setValidation({ valid: false, error: 'YAML obrigatório.' });
       return false;
     }
     try {
@@ -620,7 +633,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
           temporaryPassword: memberDraft.temporaryPassword || undefined,
         }),
       });
-      if (response.temporaryPassword) setNotice(`Usuario criado. Senha temporaria: ${response.temporaryPassword}`);
+      if (response.temporaryPassword) setNotice(`Usuário criado. Senha temporária: ${response.temporaryPassword}`);
       setMemberDraft({ email: '', name: '', role: 'viewer', temporaryPassword: '' });
     }, 'Membro criado.');
   }
@@ -647,7 +660,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     await mutate(async () => {
       await api<Organization>('/api/organizations', { method: 'POST', body: JSON.stringify({ name }) });
       setOrgDraft({ name: '' });
-    }, 'Organizacao criada.');
+    }, 'Organização criada.');
   }
 
   async function switchOrganization(organizationId: string) {
@@ -658,7 +671,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       });
       if (result.token) window.localStorage.setItem('testhub.token', result.token);
       setMe({ user: result.user, organization: result.organization, membership: result.membership, organizations: result.organizations });
-    }, 'Organizacao alterada.');
+    }, 'Organização alterada.');
   }
 
   function setEditedMembership(userId: string, organizationId: string, roleValue: Role | '') {
@@ -812,10 +825,12 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     ? 'Projetos'
     : view === 'suites'
       ? 'Suites'
+      : view === 'flows'
+        ? 'Flow Library'
       : view === 'settings'
         ? 'Sistema'
         : view === 'docs'
-          ? 'Documentacao'
+          ? 'Documentação'
           : 'Run workspace';
 
   return (
@@ -830,6 +845,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               <RailLink icon={Play} active={view === 'run'} label="Run" href="/v2" />
               <RailLink icon={FolderKanban} active={view === 'projects'} label="Projetos" href={projectId ? `/projects?project=${projectId}` : '/projects'} />
               <RailLink icon={FileCode2} active={view === 'suites'} label="Suites" href={projectId ? `/suites?project=${projectId}` : '/suites'} />
+              <RailLink icon={GitBranch} active={view === 'flows'} label="Flows" href="/flows" />
               <RailLink icon={BookOpen} active={view === 'docs'} label="Docs" href="/docs" />
               <RailLink icon={Settings2} active={view === 'settings'} label="Sistema" href="/settings" />
             </div>
@@ -913,7 +929,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
             {security?.secrets.defaultKey ? (
               <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 <ShieldAlert className="h-4 w-4 shrink-0" />
-                <span>TESTHUB_SECRET_KEY default. Troque antes de producao; gravacao de secrets fica bloqueada em producao.</span>
+                <span>TESTHUB_SECRET_KEY default. Troque antes de produção; gravação de secrets fica bloqueada em produção.</span>
               </div>
             ) : null}
           </header>
@@ -1000,8 +1016,6 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 membershipEdit={membershipEdit}
                 personalTokens={personalTokens}
                 tokenDraft={tokenDraft}
-                flowLibrary={flowLibrary}
-                flowDraft={flowDraft}
                 aiConnections={aiConnections}
                 aiDraft={aiDraft}
                 security={security}
@@ -1023,16 +1037,23 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 onTokenDraftChange={setTokenDraft}
                 onCreatePersonalToken={createPersonalToken}
                 onRevokePersonalToken={revokePersonalToken}
-                onFlowDraftChange={setFlowDraft}
-                onNewFlow={() => setFlowDraft(defaultFlowDraft)}
-                onEditFlow={editFlow}
-                onSaveFlow={saveFlow}
-                onArchiveFlow={archiveFlow}
                 onAiDraftChange={setAiDraft}
                 onEditAiConnection={editAiConnection}
                 onSaveAiConnection={saveAiConnection}
                 onCleanupDaysChange={setCleanupDays}
                 onCleanup={cleanupRuns}
+              />
+            ) : view === 'flows' ? (
+              <FlowLibraryWorkspace
+                flowLibrary={flowLibrary}
+                flowDraft={flowDraft}
+                busy={busy}
+                canWrite={canWrite}
+                onFlowDraftChange={setFlowDraft}
+                onNewFlow={() => setFlowDraft(defaultFlowDraft)}
+                onEditFlow={editFlow}
+                onSaveFlow={saveFlow}
+                onArchiveFlow={archiveFlow}
               />
             ) : (
               <DocumentationWorkspace />
@@ -1064,8 +1085,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 }}
                 onCancel={cancelRun}
                 onExplain={explainFailure}
-                onSuggestFix={(run) => runAi('suggest-test-fix', run, 'Sugestao de correcao gerada.')}
-                onSuggestCases={(run) => runAi('suggest-test-cases', run, 'Sugestao de casos gerada.')}
+                onSuggestFix={(run) => runAi('suggest-test-fix', run, 'Sugestão de correção gerada.')}
+                onSuggestCases={(run) => runAi('suggest-test-cases', run, 'Sugestão de casos gerada.')}
                 aiOutput={aiOutput}
               />
             </SheetContent>
@@ -1127,6 +1148,7 @@ function RunWorkspace(props: {
               <RunFact label="Target" value={props.selectedEnv?.name ?? '-'} />
               <RunFact label="Última run nesta seleção" value={props.selectedRun ? `${shortId(props.selectedRun.id)} · ${runSummary(props.selectedRun)}` : 'Sem histórico para esta suite/target'} />
             </div>
+            {props.selectedRun && ['queued', 'running'].includes(props.selectedRun.status) ? <LiveProgress run={props.selectedRun} /> : null}
           </div>
 
           <div className="grid gap-2 rounded-lg border border-[#d8d3c5] bg-white p-3">
@@ -1279,6 +1301,35 @@ function RunFact({ label, value }: { label: string; value: string }) {
   );
 }
 
+function LiveProgress({ run }: { run: Run }) {
+  const progress = run.progress;
+  if (!progress) {
+    return (
+      <div className="rounded-lg border border-[#e1ddd1] bg-white p-3">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Progressó live</p>
+        <p className="mt-1 text-sm font-semibold">Aguardando worker...</p>
+      </div>
+    );
+  }
+  const percent = progress.totalTests > 0 ? Math.round((progress.completedTests / progress.totalTests) * 100) : 0;
+  return (
+    <div className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Progressó live</p>
+          <p className="mt-1 truncate text-sm font-semibold" title={progress.currentTest ?? progress.phase}>{progress.currentTest ?? progress.phase}</p>
+          <p className="truncate font-mono text-xs text-[#66705f]" title={progress.currentStep ?? 'sem step atual'}>{progress.currentStep ?? 'sem step atual'}</p>
+        </div>
+        <Badge variant="warning">{progress.completedTests}/{progress.totalTests}</Badge>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-[#e9e5d9]">
+        <div className="h-full bg-[#c9df4f] transition-all" style={{ width: `${Math.min(100, percent)}%` }} />
+      </div>
+      <p className="font-mono text-xs text-[#66705f]">pass {progress.passed} · fail {progress.failed} · error {progress.error} · heartbeat {formatDate(run.heartbeatAt ?? progress.updatedAt)}</p>
+    </div>
+  );
+}
+
 function ProjectsWorkspace(props: {
   projects: Project[];
   envs: Environment[];
@@ -1343,7 +1394,7 @@ function ProjectsWorkspace(props: {
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_120px_auto] md:items-end">
             <Field label="Nome"><Input value={props.projectDraft.name} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, name: event.target.value })} /></Field>
-            <Field label="Descricao"><Input value={props.projectDraft.description} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, description: event.target.value })} /></Field>
+            <Field label="Descrição"><Input value={props.projectDraft.description} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, description: event.target.value })} /></Field>
             <Field label="Retention"><Input type="number" min={1} value={props.projectDraft.retentionDays} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, retentionDays: event.target.value })} /></Field>
             <label className="flex h-10 items-center gap-2 rounded-md border border-[#d7d2c4] bg-white px-3 text-sm">
               <input type="checkbox" checked={props.projectDraft.cleanupArtifacts} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, cleanupArtifacts: event.target.checked })} />
@@ -1392,7 +1443,7 @@ function ProjectsWorkspace(props: {
             <CardContent className="grid gap-3">
               <Field label="Nome"><Input value={props.envDraft.name} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, name: event.target.value })} placeholder="hml" /></Field>
               <Field label="Base URL"><Input value={props.envDraft.baseUrl} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, baseUrl: event.target.value })} placeholder="https://app.local" /></Field>
-              <Field label="Variaveis"><Textarea className="min-h-36 font-mono text-xs" value={props.envDraft.variables} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, variables: event.target.value })} placeholder="TOKEN=abc" /></Field>
+              <Field label="Variáveis"><Textarea className="min-h-36 font-mono text-xs" value={props.envDraft.variables} onChange={(event) => props.onEnvDraftChange({ ...props.envDraft, variables: event.target.value })} placeholder="TOKEN=abc" /></Field>
               <Button onClick={props.onSaveEnv} disabled={props.busy || !props.canWrite || !props.selectedProjectId || !props.envDraft.name.trim() || !props.envDraft.baseUrl.trim()}>Salvar ambiente</Button>
             </CardContent>
           </Card>
@@ -1479,6 +1530,76 @@ function SuitesWorkspace(props: {
   );
 }
 
+function FlowLibraryWorkspace(props: {
+  flowLibrary: FlowLibraryItem[];
+  flowDraft: FlowDraft;
+  busy: boolean;
+  canWrite: boolean;
+  onFlowDraftChange: (draft: FlowDraft) => void;
+  onNewFlow: () => void;
+  onEditFlow: (flow: FlowLibraryItem) => void;
+  onSaveFlow: () => void;
+  onArchiveFlow: (flowId: string) => void;
+}) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_460px]">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>Flow Library</CardTitle>
+          <CardDescription>Flows web reutilizáveis da organização atual.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2">
+          {props.flowLibrary.map((flow) => (
+            <div key={flow.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{flow.namespace}.{flow.name}</p>
+                  <p className="truncate text-xs text-[#66705f]">{flow.description || `${flow.steps.length} steps`}</p>
+                </div>
+                <Badge variant="success">ativo</Badge>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => props.onEditFlow(flow)}>Editar</Button>
+                <Button variant="outline" size="sm" onClick={() => navigator.clipboard?.writeText(`use: ${flow.namespace}.${flow.name}`)}>
+                  <Copy data-icon="inline-start" />Copiar use
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => props.onArchiveFlow(flow.id)} disabled={props.busy || !props.canWrite}>
+                  <Trash2 data-icon="inline-start" />Arquivar
+                </Button>
+              </div>
+            </div>
+          ))}
+          {props.flowLibrary.length === 0 ? <DarkEmpty text="Nenhum flow cadastrado." /> : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>{props.flowDraft.id ? 'Editar flow' : 'Novo flow'}</CardTitle>
+          <CardDescription>{props.flowDraft.namespace && props.flowDraft.name ? `Referência: use: ${props.flowDraft.namespace}.${props.flowDraft.name}` : 'Namespace + nome viram a referência YAML.'}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="Namespace"><Input value={props.flowDraft.namespace} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, namespace: event.target.value })} placeholder="auth" /></Field>
+            <Field label="Nome"><Input value={props.flowDraft.name} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, name: event.target.value })} placeholder="login" /></Field>
+          </div>
+          <Field label="Descrição"><Input value={props.flowDraft.description} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, description: event.target.value })} placeholder="Opcional" /></Field>
+          <Field label="Params YAML">
+            <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} height="140px" />
+          </Field>
+          <Field label="Steps YAML">
+            <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, steps: value })} validateSpec={false} height="360px" />
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={props.onSaveFlow} disabled={props.busy || !props.canWrite || !props.flowDraft.namespace.trim() || !props.flowDraft.name.trim() || !props.flowDraft.steps.trim()}>Salvar flow</Button>
+            <Button variant="outline" onClick={props.onNewFlow}>Novo</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function SettingsWorkspace(props: {
   me: AuthMe | null;
   members: OrganizationMember[];
@@ -1490,8 +1611,6 @@ function SettingsWorkspace(props: {
   membershipEdit: MembershipEdit;
   personalTokens: PersonalAccessToken[];
   tokenDraft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] };
-  flowLibrary: FlowLibraryItem[];
-  flowDraft: FlowDraft;
   aiConnections: AiConnection[];
   aiDraft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean };
   security: SecurityStatus | null;
@@ -1513,11 +1632,6 @@ function SettingsWorkspace(props: {
   onTokenDraftChange: (draft: { name: string; scope: 'all' | 'selected'; organizationIds: string[] }) => void;
   onCreatePersonalToken: () => void;
   onRevokePersonalToken: (tokenId: string) => void;
-  onFlowDraftChange: (draft: FlowDraft) => void;
-  onNewFlow: () => void;
-  onEditFlow: (flow: FlowLibraryItem) => void;
-  onSaveFlow: () => void;
-  onArchiveFlow: (flowId: string) => void;
   onAiDraftChange: (draft: { id: string; name: string; provider: AiConnection['provider']; apiKey: string; model: string; baseUrl: string; enabled: boolean }) => void;
   onEditAiConnection: (connection: AiConnection) => void;
   onSaveAiConnection: () => void;
@@ -1526,12 +1640,11 @@ function SettingsWorkspace(props: {
 }) {
   return (
     <Tabs defaultValue="profile" className="grid gap-4">
-      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
+      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
         <TabsTrigger value="profile">Perfil</TabsTrigger>
-        <TabsTrigger value="organizations">Organizacoes</TabsTrigger>
-        <TabsTrigger value="users">Usuarios</TabsTrigger>
-        <TabsTrigger value="flows">Flows</TabsTrigger>
-        <TabsTrigger value="security">Seguranca</TabsTrigger>
+        <TabsTrigger value="organizations">Organizações</TabsTrigger>
+        <TabsTrigger value="users">Usuários</TabsTrigger>
+        <TabsTrigger value="security">Segurança /MCP</TabsTrigger>
         <TabsTrigger value="ai">AI</TabsTrigger>
         <TabsTrigger value="audit">Audit</TabsTrigger>
       </TabsList>
@@ -1540,18 +1653,18 @@ function SettingsWorkspace(props: {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle>Perfil</CardTitle>
-            <CardDescription>{props.me?.user.email ?? 'Sessao nao carregada'}</CardDescription>
+            <CardDescription>{props.me?.user.email ?? 'Sessão não carregada'}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-2 rounded-lg border border-[#e1ddd1] bg-white p-3 md:grid-cols-3">
-              <InfoLine label="Usuario" value={props.me?.user.email ?? 'sem sessao'} />
-              <InfoLine label="Organizacao" value={props.me?.organization.name ?? 'nao carregado'} />
+              <InfoLine label="Usuário" value={props.me?.user.email ?? 'sem sessão'} />
+              <InfoLine label="Organização" value={props.me?.organization.name ?? 'não carregado'} />
               <InfoLine label="Role" value={props.me?.membership.role ?? 'viewer'} />
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Nome"><Input value={props.profileDraft.name} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, name: event.target.value })} /></Field>
               <Field label="Email"><Input type="email" value={props.profileDraft.email} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, email: event.target.value })} /></Field>
-              <Field label="Senha atual"><Input type="password" value={props.profileDraft.currentPassword} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, currentPassword: event.target.value })} placeholder="Obrigatoria para trocar senha" /></Field>
+              <Field label="Senha atual"><Input type="password" value={props.profileDraft.currentPassword} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, currentPassword: event.target.value })} placeholder="Obrigatória para trocar senha" /></Field>
               <Field label="Nova senha"><Input type="password" value={props.profileDraft.newPassword} onChange={(event) => props.onProfileDraftChange({ ...props.profileDraft, newPassword: event.target.value })} /></Field>
             </div>
             <Button className="w-fit" onClick={props.onSaveProfile} disabled={props.busy || !props.profileDraft.email.trim() || Boolean(props.profileDraft.newPassword && !props.profileDraft.currentPassword)}>Salvar perfil</Button>
@@ -1564,8 +1677,8 @@ function SettingsWorkspace(props: {
           <div className="grid gap-4">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle>Organizacoes</CardTitle>
-                <CardDescription>{props.me?.organization.name ?? 'Organizacao atual'} · {props.organizations.length} disponiveis</CardDescription>
+                <CardTitle>Organizações</CardTitle>
+                <CardDescription>{props.me?.organization.name ?? 'Organização atual'} · {props.organizations.length} disponíveis</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-2 md:grid-cols-2">
                 {props.organizations.map((organization) => (
@@ -1580,12 +1693,12 @@ function SettingsWorkspace(props: {
                     <Button variant="outline" size="sm" onClick={() => props.onSwitchOrganization(organization.id)} disabled={props.busy || organization.id === props.me?.organization.id}>Usar</Button>
                   </div>
                 ))}
-                {props.organizations.length === 0 ? <DarkEmpty text="Nenhuma organizacao." /> : null}
+                {props.organizations.length === 0 ? <DarkEmpty text="Nenhuma organização." /> : null}
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="pb-3"><CardTitle>Membros da organizacao atual</CardTitle><CardDescription>{props.members.length} membros carregados.</CardDescription></CardHeader>
+              <CardHeader className="pb-3"><CardTitle>Membros da organização atual</CardTitle><CardDescription>{props.members.length} membros carregados.</CardDescription></CardHeader>
               <CardContent className="grid gap-2 md:grid-cols-2">
                 {props.members.map((member) => (
                   <div key={member.membership.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
@@ -1603,7 +1716,7 @@ function SettingsWorkspace(props: {
 
           {props.canAdmin ? (
             <Card>
-              <CardHeader className="pb-3"><CardTitle>Nova organizacao</CardTitle><CardDescription>Cria time/workspace compartilhado.</CardDescription></CardHeader>
+              <CardHeader className="pb-3"><CardTitle>Nova organização</CardTitle><CardDescription>Cria time/workspace compartilhado.</CardDescription></CardHeader>
               <CardContent className="grid gap-3">
                 <Field label="Nome"><Input value={props.orgDraft.name} onChange={(event) => props.onOrgDraftChange({ name: event.target.value })} placeholder="Nome" /></Field>
                 <Button onClick={props.onCreateOrganization} disabled={props.busy || !props.orgDraft.name.trim()}>Criar org</Button>
@@ -1617,7 +1730,7 @@ function SettingsWorkspace(props: {
         <div className="grid gap-4">
           {props.canAdmin ? (
             <Card>
-              <CardHeader className="pb-3"><CardTitle>Novo membro</CardTitle><CardDescription>Cria usuario na organizacao atual.</CardDescription></CardHeader>
+              <CardHeader className="pb-3"><CardTitle>Novo membro</CardTitle><CardDescription>Cria usuário na organização atual.</CardDescription></CardHeader>
               <CardContent className="grid gap-3">
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_160px]">
                   <Field label="Email"><Input type="email" value={props.memberDraft.email} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, email: event.target.value })} placeholder="user@empresa.com" /></Field>
@@ -1634,7 +1747,7 @@ function SettingsWorkspace(props: {
                   </Field>
                 </div>
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                  <Field label="Senha temporaria"><Input type="password" value={props.memberDraft.temporaryPassword} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, temporaryPassword: event.target.value })} placeholder="Opcional" /></Field>
+                  <Field label="Senha temporária"><Input type="password" value={props.memberDraft.temporaryPassword} onChange={(event) => props.onMemberDraftChange({ ...props.memberDraft, temporaryPassword: event.target.value })} placeholder="Opcional" /></Field>
                   <Button className="self-end" onClick={props.onCreateMember} disabled={props.busy || !props.canAdmin || !props.memberDraft.email.trim()}>Criar membro</Button>
                 </div>
               </CardContent>
@@ -1643,7 +1756,7 @@ function SettingsWorkspace(props: {
 
           {props.canAdmin ? (
             <Card>
-              <CardHeader className="pb-3"><CardTitle>Gestao de acessos</CardTitle><CardDescription>Organizacoes e roles por usuario.</CardDescription></CardHeader>
+              <CardHeader className="pb-3"><CardTitle>Gestão de acessos</CardTitle><CardDescription>Organizações e roles por usuário.</CardDescription></CardHeader>
               <CardContent className="grid gap-3">
                 {props.managedUsers.map((item) => (
                   <div key={item.user.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
@@ -1679,86 +1792,29 @@ function SettingsWorkspace(props: {
                     </div>
                   </div>
                 ))}
-                {props.managedUsers.length === 0 ? <DarkEmpty text="Nenhum usuario carregado." /> : null}
+                {props.managedUsers.length === 0 ? <DarkEmpty text="Nenhum usuário carregado." /> : null}
               </CardContent>
             </Card>
           ) : null}
         </div>
       </TabsContent>
 
-      <TabsContent value="flows" className="m-0">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_460px]">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle>Flow Library</CardTitle>
-              <CardDescription>Flows web reutilizaveis da organizacao atual.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-2">
-              {props.flowLibrary.map((flow) => (
-                <div key={flow.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold">{flow.namespace}.{flow.name}</p>
-                      <p className="truncate text-xs text-[#66705f]">{flow.description || `${flow.steps.length} steps`}</p>
-                    </div>
-                    <Badge variant="success">ativo</Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" onClick={() => props.onEditFlow(flow)}>Editar</Button>
-                    <Button variant="outline" size="sm" onClick={() => navigator.clipboard?.writeText(`use: ${flow.namespace}.${flow.name}`)}>
-                      <Copy data-icon="inline-start" />Copiar use
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => props.onArchiveFlow(flow.id)} disabled={props.busy || !props.canWrite}>
-                      <Trash2 data-icon="inline-start" />Arquivar
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              {props.flowLibrary.length === 0 ? <DarkEmpty text="Nenhum flow cadastrado." /> : null}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle>{props.flowDraft.id ? 'Editar flow' : 'Novo flow'}</CardTitle>
-              <CardDescription>{props.flowDraft.namespace && props.flowDraft.name ? `Referencia: use: ${props.flowDraft.namespace}.${props.flowDraft.name}` : 'Namespace + nome viram a referencia YAML.'}</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Namespace"><Input value={props.flowDraft.namespace} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, namespace: event.target.value })} placeholder="auth" /></Field>
-                <Field label="Nome"><Input value={props.flowDraft.name} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, name: event.target.value })} placeholder="login" /></Field>
-              </div>
-              <Field label="Descricao"><Input value={props.flowDraft.description} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, description: event.target.value })} placeholder="Opcional" /></Field>
-              <Field label="Params YAML">
-                <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} height="140px" />
-              </Field>
-              <Field label="Steps YAML">
-                <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, steps: value })} validateSpec={false} height="360px" />
-              </Field>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={props.onSaveFlow} disabled={props.busy || !props.canWrite || !props.flowDraft.namespace.trim() || !props.flowDraft.name.trim() || !props.flowDraft.steps.trim()}>Salvar flow</Button>
-                <Button variant="outline" onClick={props.onNewFlow}>Novo</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </TabsContent>
-
       <TabsContent value="security" className="m-0">
         <div className="grid gap-4">
           <Card>
-            <CardHeader className="pb-3"><CardTitle>Seguranca empresa</CardTitle><CardDescription>OIDC, RBAC, allowlist, secrets e retention.</CardDescription></CardHeader>
+            <CardHeader className="pb-3"><CardTitle>Segurança empresa</CardTitle><CardDescription>OIDC, RBAC, allowlist, secrets e retention.</CardDescription></CardHeader>
             <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
+              <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'não configurado'} />
               <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
               <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'viewer'} />
-              <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
+              <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de produção' : 'custom'} />
               <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
               <SecurityLine label="Retention" ok value={`${props.security?.retention.days ?? props.cleanupDays} dias`} />
             </CardContent>
           </Card>
+          <ProductionReadiness security={props.security} />
           <Card>
-            <CardHeader className="pb-3"><CardTitle>Tokens CLI/MCP</CardTitle><CardDescription>Bearer tokens pessoais para CLI, MCP e automacoes.</CardDescription></CardHeader>
+            <CardHeader className="pb-3"><CardTitle>Tokens CLI/MCP</CardTitle><CardDescription>Bearer tokens pessoais para CLI, MCP e automações.</CardDescription></CardHeader>
             <CardContent>
               <PersonalTokenControl
                 tokens={props.personalTokens}
@@ -1838,7 +1894,7 @@ function SettingsWorkspace(props: {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-3"><CardTitle>Cleanup</CardTitle><CardDescription>Aplica politica de retention.</CardDescription></CardHeader>
+            <CardHeader className="pb-3"><CardTitle>Cleanup</CardTitle><CardDescription>Aplica política de retention.</CardDescription></CardHeader>
             <CardContent className="grid gap-3">
               <Field label="Dias"><Input type="number" min={1} value={props.cleanupDays} onChange={(event) => props.onCleanupDaysChange(event.target.value)} /></Field>
               <Button variant="destructive" onClick={props.onCleanup} disabled={props.busy || !props.canAdmin || Number(props.cleanupDays) < 1}>Executar cleanup</Button>
@@ -1897,7 +1953,7 @@ function PersonalTokenControl(props: {
           </div>
         ) : null}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-[#66705f]">{props.draft.scope === 'all' ? 'Token acompanha todas organizacoes que voce tem acesso.' : `${selectedOrganizations.length} org(s) selecionada(s).`}</p>
+          <p className="text-xs text-[#66705f]">{props.draft.scope === 'all' ? 'Token acompanha todas organizações que voce tem acesso.' : `${selectedOrganizations.length} org(s) selecionada(s).`}</p>
           <Button onClick={props.onCreate} disabled={props.busy || !canCreate}>Criar token</Button>
         </div>
       </div>
@@ -1917,7 +1973,7 @@ function PersonalTokenControl(props: {
               <Button variant="outline" onClick={() => navigator.clipboard.writeText(token.token)}>Copiar</Button>
               <Button variant="destructive" onClick={() => props.onRevoke(token.id)} disabled={props.busy}>Revogar</Button>
             </div>
-            <p className="text-xs text-[#66705f]">Criado {formatDate(token.createdAt)}{token.lastUsedAt ? ` · ultimo uso ${formatDate(token.lastUsedAt)}` : ''}</p>
+            <p className="text-xs text-[#66705f]">Criado {formatDate(token.createdAt)}{token.lastUsedAt ? ` · último usó ${formatDate(token.lastUsedAt)}` : ''}</p>
           </div>
         ))}
         {props.tokens.length === 0 ? <DarkEmpty text="Nenhum token pessoal." /> : null}
@@ -1932,14 +1988,14 @@ function DocumentationWorkspace() {
       id: 'quickstart',
       group: 'Comece',
       title: 'Quickstart',
-      description: 'Do zero ate a primeira run com evidence.',
+      description: 'Do zero até a primeira run com evidence.',
       tags: ['projeto', 'ambiente', 'suite', 'run'],
       content: (
         <div className="grid gap-5">
-          <DocHero title="Documentacao TestHub" description="Guia operacional para criar, reutilizar, executar e depurar testes API e Web com organizacoes, ambientes, Flow Library, MCP e IA." />
+          <DocHero title="Documentação TestHub" description="Guia operacional para criar, reutilizar, executar e depurar testes API e Web com organizações, ambientes, Flow Library, MCP e IA." />
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <DocStep title="1. Projeto" text="Crie o workspace do produto ou squad." />
-            <DocStep title="2. Ambiente" text="Cadastre baseUrl e variaveis seguras." />
+            <DocStep title="2. Ambiente" text="Cadastre baseUrl e variáveis seguras." />
             <DocStep title="3. Suite" text="Escreva YAML API ou Web e valide." />
             <DocStep title="4. Run" text="Execute, revise timeline, artifacts e report." />
           </div>
@@ -1962,23 +2018,23 @@ tests:
       id: 'concepts',
       group: 'Fundamentos',
       title: 'Modelo mental',
-      description: 'Como as pecas se conectam.',
-      tags: ['organizacao', 'rbac', 'evidence', 'retention'],
+      description: 'Como as peças se conectam.',
+      tags: ['organização', 'rbac', 'evidence', 'retention'],
       content: (
         <div className="grid gap-4">
           <DocPanel title="Hierarquia">
             <div className="grid gap-3 md:grid-cols-2">
-              <InfoLine label="Organizacao" value="Escopo de usuarios, projetos, flows, AI e audit." />
+              <InfoLine label="Organização" value="Escopo de usuários, projetos, flows, AI e audit." />
               <InfoLine label="Projeto" value="Agrupa ambientes, suites e runs." />
-              <InfoLine label="Ambiente" value="baseUrl + variables/secrets para execucao." />
+              <InfoLine label="Ambiente" value="baseUrl + variables/secrets para execução." />
               <InfoLine label="Suite" value="YAML versionado via UI ou MCP." />
-              <InfoLine label="Run" value="Execucao com status, timeline e artifacts." />
-              <InfoLine label="Flow Library" value="Flows web compartilhados pela organizacao." />
+              <InfoLine label="Run" value="Execução com status, timeline e artifacts." />
+              <InfoLine label="Flow Library" value="Flows web compartilhados pela organização." />
             </div>
           </DocPanel>
-          <DocPanel title="Permissoes">
+          <DocPanel title="Permissões">
             <div className="grid gap-2 text-sm text-[#4b5348]">
-              <p><strong>admin</strong>: gerencia usuarios, organizacoes, tokens, AI, flows e recursos.</p>
+              <p><strong>admin</strong>: gerencia usuários, organizações, tokens, AI, flows e recursos.</p>
               <p><strong>editor</strong>: cria/edita projetos, ambientes, suites, flows e runs.</p>
               <p><strong>viewer</strong>: consulta recursos e evidence.</p>
             </div>
@@ -2028,14 +2084,14 @@ tests:
       path: ./fixtures/avatar.png`} />
           </DocPanel>
           <DocPanel title="Seletores recomendados">
-            <CodeBlock code={`# Preferidos: estaveis e acessiveis
+            <CodeBlock code={`# Preferidos: estáveis e acessíveis
 by: role
 by: label
 by: testId
 by: placeholder
 by: text
 
-# CSS direto: use quando nao houver alternativa melhor
+# CSS direto: use quando não houver alternativa melhor
 selector: '[data-testid="save"]'`} />
           </DocPanel>
         </div>
@@ -2045,7 +2101,7 @@ selector: '[data-testid="save"]'`} />
       id: 'api',
       group: 'YAML',
       title: 'API suites',
-      description: 'Requests HTTP, asserts e extracao.',
+      description: 'Requests HTTP, asserts e extração.',
       tags: ['request', 'expect', 'extract', 'schema'],
       content: (
         <div className="grid gap-4">
@@ -2096,12 +2152,12 @@ selector: '[data-testid="save"]'`} />
       id: 'flows',
       group: 'Reuso',
       title: 'Flow Library',
-      description: 'Flows web compartilhados por organizacao.',
+      description: 'Flows web compartilhados por organização.',
       tags: ['flows', 'use', 'with', 'auth.login'],
       content: (
         <div className="grid gap-4">
           <DocPanel title="Criar flow compartilhado">
-            <CodeBlock code={`# Settings / Flows
+            <CodeBlock code={`# Menu Flow Library
 namespace: auth
 name: login
 params:
@@ -2122,7 +2178,7 @@ steps:
       role: button
       name: Entrar`} />
           </DocPanel>
-          <DocPanel title="Usar em varias suites">
+          <DocPanel title="Usar em várias suites">
             <CodeBlock code={`version: 1
 type: web
 name: checkout
@@ -2135,7 +2191,7 @@ tests:
       - goto: /checkout
       - expectText: Finalizar compra`} />
           </DocPanel>
-          <DocCallout title="Precedencia" text="Flows locais em `flows:` continuam funcionando e vencem a biblioteca quando o nome exato for igual. Referencias com namespace, como `auth.login`, buscam a Flow Library." />
+          <DocCallout title="Precedência" text="Flows locais em `flows:` continuam funcionando e vencem a biblioteca quando o nome exato for igual. Referências com namespace, como `auth.login`, buscam a Flow Library." />
         </div>
       ),
     },
@@ -2143,10 +2199,10 @@ tests:
       id: 'extract',
       group: 'Reuso',
       title: 'Extract web',
-      description: 'Capture dados dinamicos da tela.',
+      description: 'Capture dados dinâmicos da tela.',
       tags: ['ORDER_ID', 'attribute', 'url'],
       content: (
-        <DocPanel title="Capturas disponiveis">
+        <DocPanel title="Capturas disponíveis">
           <CodeBlock code={`steps:
   - extract:
       as: ORDER_ID
@@ -2177,13 +2233,13 @@ tests:
     },
     {
       id: 'envs',
-      group: 'Operacao',
+      group: 'Operação',
       title: 'Ambientes e secrets',
-      description: 'Como passar configuracao sem vazar segredo.',
+      description: 'Como passar configuração sem vazar segredo.',
       tags: ['baseUrl', 'variables', 'secrets'],
       content: (
         <div className="grid gap-4">
-          <DocPanel title="Variaveis de ambiente">
+          <DocPanel title="Variáveis de ambiente">
             <CodeBlock code={`# Ambiente
 USER_EMAIL=qa@example.com
 USER_PASSWORD=secret
@@ -2199,7 +2255,7 @@ headers:
     },
     {
       id: 'runs',
-      group: 'Operacao',
+      group: 'Operação',
       title: 'Runs e evidence',
       description: 'Status, timeline e artifacts.',
       tags: ['report', 'video', 'trace', 'screenshot'],
@@ -2211,6 +2267,13 @@ headers:
               <p><strong>passed/failed</strong>: teste terminou com asserts ok ou falhando.</p>
               <p><strong>error</strong>: erro de spec, ambiente, infraestrutura ou runtime.</p>
               <p><strong>canceled/deleted</strong>: cancelada ou arquivada por cleanup.</p>
+            </div>
+          </DocPanel>
+          <DocPanel title="Health check e progresso live">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p>Antes de enfileirar uma run, o TestHub valida se o `baseUrl` do ambiente responde HTTP dentro de `TESTHUB_ENV_HEALTH_TIMEOUT_MS`.</p>
+              <p>Qualquer resposta HTTP conta como ambiente alcançável. DNS, conexão recusada, TLS e timeout bloqueiam a run com status `error`.</p>
+              <p>Durante a execução, Evidence mostra cenário atual, step atual, contadores e último heartbeat usando o polling da interface.</p>
             </div>
           </DocPanel>
           <DocPanel title="Checklist de debug">
@@ -2226,8 +2289,42 @@ headers:
       ),
     },
     {
+      id: 'production',
+      group: 'Operação',
+      title: 'Produção',
+      description: 'Checklist para subir TestHub com postura segura e previsível.',
+      tags: ['produção', 'docker', 'postgres', 'redis', 's3', 'backup', 'security'],
+      content: (
+        <div className="grid gap-4">
+          <DocPanel title="Checklist obrigatório">
+            <CodeBlock code={`TESTHUB_SECRET_KEY=valor-forte-não-default
+TESTHUB_AUTH_MODE=local
+TESTHUB_CORS_ORIGINS=https://testhub.suaempresa.com
+TESTHUB_ALLOWED_HOSTS=app.hml.suaempresa.com,api.hml.suaempresa.com
+DATABASE_URL=postgres://...
+REDIS_URL=redis://...
+S3_ENDPOINT=https://...
+S3_BUCKET=testhub-artifacts
+TESTHUB_RETENTION_DAYS=30
+TESTHUB_ENV_HEALTH_TIMEOUT_MS=5000`} />
+          </DocPanel>
+          <DocPanel title="Runbook objetivo">
+            <div className="grid gap-2 text-sm text-[#4b5348]">
+              <p><strong>Banco</strong>: usar Postgres gerenciado, backup diário e restore testado.</p>
+              <p><strong>Fila</strong>: usar Redis dedicado para worker assíncrono.</p>
+              <p><strong>Artifacts</strong>: usar S3/MinIO com lifecycle policy, versionamento conforme necessidade e backup se evidência for auditável.</p>
+              <p><strong>Networking</strong>: API e worker precisam resolver os hosts permitidos em `TESTHUB_ALLOWED_HOSTS`; em Docker, valide nomes internos e `host.docker.internal` quando usado.</p>
+              <p><strong>PAT</strong>: criar tokens por usuário/organização, revogar tokens antigos e evitar tokens pessoais compartilhados.</p>
+              <p><strong>Retention</strong>: combinar `TESTHUB_RETENTION_DAYS`, cleanup de projeto e política do bucket.</p>
+            </div>
+          </DocPanel>
+          <DocCallout title="Sem bloqueio de startup" text="Nesta v1 o TestHub mostra readiness e alertas claros, mas não impede startup automaticamente." />
+        </div>
+      ),
+    },
+    {
       id: 'mcp',
-      group: 'Automacao',
+      group: 'Automação',
       title: 'MCP',
       description: 'Criar, validar e executar suites YAML por agentes.',
       tags: ['MCP', 'PAT', 'YAML', 'agent'],
@@ -2259,15 +2356,15 @@ headers:
 8. testhub_wait_run
 9. testhub_get_run_report`} />
           </DocPanel>
-          <DocCallout title="IA" text="A IA nao executa testes. Ela usa report, timeline, artifacts e redaction para explicar falhas ou sugerir ajustes." />
-          <DocCallout title="Escopo do MCP" text="O MCP nao gerencia usuarios, tokens, OpenAPI import, cleanup ou AI connections. Essas operacoes ficam na aplicacao. O MCP fica focado em projetos, ambientes, Flow Library, suites YAML, runs e evidence." />
+          <DocCallout title="IA" text="A IA não executa testes. Ela usa report, timeline, artifacts e redaction para explicar falhas ou sugerir ajustes." />
+          <DocCallout title="Escopo do MCP" text="O MCP não gerencia usuários, tokens, OpenAPI import, cleanup ou AI connections. Essas operações ficam na aplicação. O MCP fica focado em projetos, ambientes, Flow Library, suites YAML, runs e evidence." />
         </div>
       ),
     },
     {
       id: 'reference',
-      group: 'Referencia',
-      title: 'Referencia rapida',
+      group: 'Referência',
+      title: 'Referência rápida',
       description: 'Campos YAML e erros comuns.',
       tags: ['defaults', 'hooks', 'errors'],
       content: (
@@ -2289,13 +2386,13 @@ beforeEach: []
 afterEach: []
 flows: {}
 tests: []`} />
-            <DocCallout title="Timeout" text="`defaults.timeoutMs` controla navegacao, clicks, fills, expects e extract. Para telas lentas, use valores maiores como `60000` ou `90000`; tambem e possivel sobrescrever por teste com `timeoutMs`." />
+            <DocCallout title="Timeout" text="`defaults.timeoutMs` controla navegação, clicks, fills, expects e extract. Para telas lentas, use valores maiores como `60000` ou `90000`; também é possível sobrescrever por teste com `timeoutMs`." />
           </DocPanel>
           <DocPanel title="Erros comuns">
             <div className="grid gap-2 text-sm text-[#4b5348]">
-              <p><strong>flow nao encontrado</strong>: `use` nao existe localmente nem na Flow Library.</p>
+              <p><strong>flow não encontrado</strong>: `use` não existe localmente nem na Flow Library.</p>
               <p><strong>ciclo em flows</strong>: um flow chama outro que volta para ele.</p>
-              <p><strong>Variavel obrigatoria ausente</strong>: placeholder sem valor em ambiente, params, variables ou extract.</p>
+              <p><strong>Variável obrigatória ausente</strong>: placeholder sem valor em ambiente, params, variables ou extract.</p>
               <p><strong>extract attribute requer attribute</strong>: informe o nome do atributo.</p>
             </div>
           </DocPanel>
@@ -2372,763 +2469,6 @@ tests: []`} />
   );
 }
 
-function LegacyDocumentationWorkspace() {
-  return (
-    <Tabs defaultValue="start" className="grid gap-4">
-      <TabsList className="grid h-auto grid-cols-2 md:grid-cols-3 xl:grid-cols-9">
-        <TabsTrigger value="start">Inicio</TabsTrigger>
-        <TabsTrigger value="yaml">YAML</TabsTrigger>
-        <TabsTrigger value="syntax">Sintaxes</TabsTrigger>
-        <TabsTrigger value="flows">Fluxos</TabsTrigger>
-        <TabsTrigger value="api">API suites</TabsTrigger>
-        <TabsTrigger value="web">Web suites</TabsTrigger>
-        <TabsTrigger value="ai">IA</TabsTrigger>
-        <TabsTrigger value="auth">Auth/MCP</TabsTrigger>
-        <TabsTrigger value="debug">Debug</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="start" className="m-0">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <Card>
-            <CardHeader className="pb-3"><CardTitle>Modelo mental</CardTitle><CardDescription>Como TestHub organiza testes e execucoes.</CardDescription></CardHeader>
-            <CardContent className="grid gap-3">
-              <DocStep title="1. Projeto" text="Agrupa suites, ambientes e runs de um produto, app ou squad." />
-              <DocStep title="2. Ambiente" text="Define baseUrl e variaveis seguras usadas pelas suites." />
-              <DocStep title="3. Suite" text="Arquivo YAML versionado pela UI. Pode ser API ou Web." />
-              <DocStep title="4. Run" text="Execucao de uma suite em um ambiente. Gera report, videos, screenshots e payloads." />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3"><CardTitle>Fluxo recomendado</CardTitle><CardDescription>Sequencia normal para comecar.</CardDescription></CardHeader>
-            <CardContent className="grid gap-3 text-sm text-[#4b5348]">
-              <p>Crie projeto, crie ambiente, importe OpenAPI ou escreva suite YAML, valide, rode, revise evidence.</p>
-              <CodeBlock code={`1. Projetos -> Novo projeto
-2. Projetos -> Novo ambiente
-3. Suites -> Nova suite
-4. Validar spec
-5. Run workspace -> Rodar
-6. Evidence -> Report/artifacts`} />
-            </CardContent>
-          </Card>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="yaml" className="m-0">
-        <div className="grid gap-4">
-          <DocAccordion title="Estrutura base">
-            <CodeBlock code={`version: 1
-type: api # api | web
-name: minha-suite
-tests:
-  - name: health
-    request:
-      method: GET
-      path: /health
-    expect:
-      status: 200`} />
-          </DocAccordion>
-          <DocAccordion title="Variaveis de ambiente">
-            <CodeBlock code={`# Ambiente
-API_TOKEN=secret
-TENANT_ID=qa
-
-# Suite
-request:
-  method: GET
-  path: /tenants/{TENANT_ID}/users
-  headers:
-    Authorization: Bearer \${API_TOKEN}`} />
-          </DocAccordion>
-          <DocAccordion title="Boas praticas">
-            <div className="grid gap-2 text-sm text-[#4b5348]">
-              <p>Use nomes estaveis, valide antes de salvar, mantenha secrets em ambientes, nao dentro do YAML.</p>
-              <p>Separe suites pequenas por fluxo: smoke, auth, checkout, regressao API.</p>
-            </div>
-          </DocAccordion>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="syntax" className="m-0">
-        <div className="grid gap-4">
-          <Card>
-            <CardHeader className="pb-3"><CardTitle>Sintaxe suportada</CardTitle><CardDescription>DSL YAML do TestHub. Web roda em Playwright por baixo, mas voce escreve estes steps.</CardDescription></CardHeader>
-            <CardContent className="grid gap-3 text-sm text-[#4b5348]">
-              <p>Use `type: web` para navegacao e asserts visuais. Use `type: api` para HTTP, asserts de contrato e extracao de valores.</p>
-              <p>Campos comuns: `version`, `type`, `name`, `description`, `baseUrl`, `defaults`, `variables`, `beforeEach`, `afterEach`, `tests`.</p>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <DocAccordion title="Web steps disponiveis">
-              <CodeBlock code={`steps:
-  - goto: /login
-  - click: button[type="submit"]
-  - fill:
-      selector: input[name="email"]
-      value: qa@example.com
-  - select:
-      selector: select[name="role"]
-      value: admin
-  - check:
-      by: label
-      target: Aceito termos
-  - press: Enter
-  - press:
-      by: testId
-      target: search-input
-      key: Control+A
-  - waitFor: 500
-  - waitFor: networkidle
-  - expectText: Dashboard
-  - expectUrlContains: /dashboard
-  - expectVisible:
-      by: role
-      role: heading
-      name: Dashboard
-  - expectHidden:
-      selector: .loading
-  - expectAttribute:
-      selector: button[type="submit"]
-      attribute: disabled
-      value: "true"
-  - expectValue:
-      selector: input[name="email"]
-      value: qa@example.com
-  - expectCount:
-      selector: .todo-item
-      count: 3
-  - uploadFile:
-      selector: input[type="file"]
-      path: ./fixtures/avatar.png`} />
-            </DocAccordion>
-
-            <DocAccordion title="Flows reutilizaveis">
-              <CodeBlock code={`flows:
-  login:
-    params:
-      email: \${USER_EMAIL}
-      password: \${USER_PASSWORD}
-    steps:
-      - goto: /login
-      - fill:
-          by: label
-          target: Email
-          value: \${email}
-      - fill:
-          by: label
-          target: Senha
-          value: \${password}
-      - click:
-          by: role
-          role: button
-          name: Entrar
-
-tests:
-  - name: checkout completo
-    steps:
-      - use: login
-        with:
-          email: qa@example.com
-      - goto: /checkout
-      - expectText: Finalizar compra`} />
-            </DocAccordion>
-
-            <DocAccordion title="Seletores estilo Playwright">
-              <CodeBlock code={`# CSS direto
-- click: button[type="submit"]
-- click:
-    selector: '[data-testid="save"]'
-
-# Texto visivel
-- expectVisible:
-    by: text
-    target: Salvo com sucesso
-    exact: true
-
-# Label de input
-- fill:
-    by: label
-    target: Email
-    value: qa@example.com
-
-# Role acessivel
-- click:
-    by: role
-    role: button
-    name: Entrar
-
-# data-testid
-- click:
-    by: testId
-    target: submit-login
-
-# Placeholder
-- fill:
-    by: placeholder
-    target: Buscar
-    value: pedido 123`} />
-            </DocAccordion>
-
-            <DocAccordion title="Defaults, hooks e controle">
-              <CodeBlock code={`defaults:
-  timeoutMs: 10000
-  retries: 1
-  screenshotOnFailure: true
-  screenshotOnSuccess: false
-  video: retain-on-failure
-  trace: retain-on-failure
-
-beforeEach:
-  - goto: /login
-  - fill:
-      by: label
-      target: Email
-      value: \${USER_EMAIL}
-  - fill:
-      by: label
-      target: Senha
-      value: \${USER_PASSWORD}
-  - click:
-      by: role
-      role: button
-      name: Entrar
-
-tests:
-  - name: dashboard carrega
-    tags: [smoke, web]
-    retries: 2
-    steps:
-      - expectVisible:
-          by: role
-          role: heading
-          name: Dashboard`} />
-            </DocAccordion>
-
-            <DocAccordion title="API request, expect e extract">
-              <CodeBlock code={`tests:
-  - name: login extrai token
-    request:
-      method: POST
-      path: /login
-      body:
-        email: qa@example.com
-        password: secret
-    expect:
-      status: 200
-      maxMs: 1500
-      headers:
-        content-type: application/json
-      bodyPathExists:
-        - token
-      bodyPathMatches:
-        token: "^ey"
-    extract:
-      AUTH_TOKEN: body.token
-
-  - name: usa token extraido
-    request:
-      method: GET
-      path: /me
-      headers:
-        Authorization: Bearer \${AUTH_TOKEN}
-      query:
-        expand: profile
-    expect:
-      status: 200
-      body:
-        email: qa@example.com`} />
-            </DocAccordion>
-
-            <DocAccordion title="Asserts API disponiveis">
-              <CodeBlock code={`expect:
-  status: 201
-  maxMs: 2000
-  headers:
-    x-request-id: abc
-  body:
-    user.email: qa@example.com
-  bodyContains:
-    status: active
-  bodyPathExists:
-    - user.id
-    - permissions
-  bodyPathMatches:
-    user.id: "^[a-z0-9-]+$"
-  jsonSchema:
-    type: object
-    required: [id, email]
-    properties:
-      id:
-        type: string
-      email:
-        type: string`} />
-            </DocAccordion>
-
-            <DocAccordion title="Variaveis e extracoes">
-              <div className="grid gap-3">
-                <p className="text-sm text-[#4b5348]">Variaveis podem vir da suite, do ambiente ou de `extract`. Referencie com `${'{NOME_DA_VARIAVEL}'}`.</p>
-                <CodeBlock code={`variables:
-  TENANT_ID: qa
-
-tests:
-  - name: cria pedido
-    request:
-      method: POST
-      path: /tenants/\${TENANT_ID}/orders
-    extract:
-      ORDER_ID: body.id
-
-  - name: consulta pedido
-    request:
-      method: GET
-      path: /orders/\${ORDER_ID}
-    expect:
-      status: 200`} />
-              </div>
-            </DocAccordion>
-            <DocAccordion title="Extract em testes web">
-              <CodeBlock code={`tests:
-  - name: pedido criado
-    steps:
-      - goto: /orders/new
-      - click:
-          by: role
-          role: button
-          name: Criar pedido
-      - extract:
-          as: ORDER_ID
-          from:
-            by: testId
-            target: order-id
-          property: text
-      - goto: /orders/\${ORDER_ID}
-      - expectText: \${ORDER_ID}
-      - extract:
-          as: ORDER_LINK
-          from:
-            by: testId
-            target: order-link
-          property: attribute
-          attribute: href
-      - extract:
-          as: CURRENT_URL
-          property: url`} />
-            </DocAccordion>
-          </div>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="flows" className="m-0">
-        <div className="grid gap-4">
-          <Card>
-            <CardHeader className="pb-3"><CardTitle>Fluxos extensos</CardTitle><CardDescription>Use flows para reaproveitar jornadas longas sem duplicar login, setup, busca ou checkout.</CardDescription></CardHeader>
-            <CardContent className="grid gap-3 text-sm text-[#4b5348]">
-              <p>Um `flow` e uma lista nomeada de steps web. Chame com `use`. Passe dados com `with`. Capture dados da tela com `extract` e reutilize com `${'{VARIAVEL}'}`.</p>
-              <p>No report, os steps aparecem expandidos com prefixo do flow, por exemplo `login / fill: Email`.</p>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <DocAccordion title="Exemplo completo">
-              <CodeBlock code={`version: 1
-type: web
-name: checkout-completo
-defaults:
-  timeoutMs: 15000
-  retries: 1
-  video: retain-on-failure
-  trace: retain-on-failure
-
-flows:
-  login:
-    params:
-      email: \${USER_EMAIL}
-      password: \${USER_PASSWORD}
-    steps:
-      - goto: /login
-      - fill:
-          by: label
-          target: Email
-          value: \${email}
-      - fill:
-          by: label
-          target: Senha
-          value: \${password}
-      - click:
-          by: role
-          role: button
-          name: Entrar
-
-tests:
-  - name: compra produto com cartao
-    tags: [checkout, smoke]
-    steps:
-      - use: login
-      - goto: /produtos
-      - click:
-          by: text
-          target: Produto A
-      - click:
-          by: role
-          role: button
-          name: Adicionar ao carrinho
-      - goto: /checkout
-      - click:
-          by: role
-          role: button
-          name: Finalizar compra
-      - extract:
-          as: ORDER_ID
-          from:
-            by: testId
-            target: order-id
-          property: text
-      - expectText: \${ORDER_ID}`} />
-            </DocAccordion>
-
-            <DocAccordion title="Params e with">
-              <CodeBlock code={`flows:
-  login:
-    params:
-      email: \${USER_EMAIL}
-      password: \${USER_PASSWORD}
-    steps:
-      - fill:
-          by: label
-          target: Email
-          value: \${email}
-      - fill:
-          by: label
-          target: Senha
-          value: \${password}
-
-tests:
-  - name: login usuario padrao
-    steps:
-      - use: login
-
-  - name: login usuario alternativo
-    steps:
-      - use: login
-        with:
-          email: editor@example.com
-          password: editor-secret`} />
-            </DocAccordion>
-
-            <DocAccordion title="Flow Library da organizacao">
-              <div className="grid gap-3">
-                <p className="text-sm text-[#4b5348]">Flows cadastrados em Settings / Flows ficam disponiveis para todas as suites da organizacao. A referencia usa `namespace.nome`, como `auth.login`.</p>
-                <CodeBlock code={`# Flow salvo na biblioteca
-namespace: auth
-name: login
-params:
-  email: \${USER_EMAIL}
-  password: \${USER_PASSWORD}
-steps:
-  - goto: /login
-  - fill:
-      by: label
-      target: Email
-      value: \${email}
-  - fill:
-      by: label
-      target: Senha
-      value: \${password}
-  - click:
-      by: role
-      role: button
-      name: Entrar
-
-# Suite usando o flow compartilhado
-version: 1
-type: web
-name: checkout-com-flow
-tests:
-  - name: compra autenticada
-    steps:
-      - use: auth.login
-        with:
-          email: qa@example.com
-      - goto: /checkout
-      - expectText: Finalizar compra`} />
-              </div>
-            </DocAccordion>
-
-            <DocAccordion title="Extract web">
-              <CodeBlock code={`# text: captura texto visivel
-- extract:
-    as: ORDER_ID
-    from:
-      by: testId
-      target: order-id
-    property: text
-
-# value: captura valor de input
-- extract:
-    as: EMAIL
-    from:
-      by: label
-      target: Email
-    property: value
-
-# attribute: captura atributo
-- extract:
-    as: DETAIL_URL
-    from:
-      by: testId
-      target: order-link
-    property: attribute
-    attribute: href
-
-# url: captura URL atual, sem selector
-- extract:
-    as: CURRENT_URL
-    property: url`} />
-            </DocAccordion>
-
-            <DocAccordion title="Boas praticas para fluxos longos">
-              <div className="grid gap-2 text-sm text-[#4b5348]">
-                <p>Prefira flows pequenos e semânticos: `login`, `criarPedido`, `abrirCheckout`, `finalizarCompra`.</p>
-                <p>Use `data-testid`, `role` e `label`; evite CSS frágil em jornadas críticas.</p>
-                <p>Mantenha secrets em ambientes. Passe só overrides pontuais com `with`.</p>
-                <p>Use `extract` para IDs gerados pela aplicação, URLs dinâmicas e valores necessários em steps seguintes.</p>
-              </div>
-            </DocAccordion>
-
-            <DocAccordion title="Erros comuns">
-              <div className="grid gap-2 text-sm text-[#4b5348]">
-                <p><strong>flow nao encontrado</strong>: o nome em `use` nao existe em `flows`.</p>
-                <p><strong>flow externo nao encontrado</strong>: `use: auth.login` nao existe na Flow Library da organizacao atual ou foi arquivado.</p>
-                <p><strong>ciclo em flows</strong>: um flow chama outro que chama o primeiro.</p>
-                <p><strong>Variavel obrigatoria ausente</strong>: `${'{VARIAVEL}'}` nao veio do ambiente, `variables`, params ou `extract`.</p>
-                <p><strong>extract attribute requer attribute</strong>: `property: attribute` precisa informar o nome do atributo.</p>
-              </div>
-            </DocAccordion>
-
-            <DocAccordion title="Usando pelo MCP">
-              <div className="grid gap-3">
-                <p className="text-sm text-[#4b5348]">Agentes MCP devem consultar a biblioteca antes de escrever suites web. Se o flow existir, use `use: namespace.nome`; se nao existir, crie com `testhub_create_flow`.</p>
-                <CodeBlock code={`1. testhub_list_flows({ "namespace": "auth" })
-2. testhub_get_spec_examples({ "example": "web-library-flow" })
-3. testhub_validate_spec({ "specContent": "..." })
-4. testhub_create_suite ou testhub_update_suite
-5. testhub_run_suite
-6. testhub_wait_run
-7. testhub_get_run_report`} />
-              </div>
-            </DocAccordion>
-          </div>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="api" className="m-0">
-        <div className="grid gap-4">
-          <DocAccordion title="Suite API minima">
-            <CodeBlock code={`version: 1
-type: api
-name: api-smoke
-tests:
-  - name: status 200
-    request:
-      method: GET
-      path: /status/200
-    expect:
-      status: 200`} />
-          </DocAccordion>
-          <DocAccordion title="Headers, body e asserts">
-            <CodeBlock code={`tests:
-  - name: cria usuario
-    request:
-      method: POST
-      path: /users
-      headers:
-        Content-Type: application/json
-        Authorization: Bearer \${API_TOKEN}
-      body:
-        name: Maria
-        email: maria@example.com
-    expect:
-      status: 201
-      json:
-        email: maria@example.com`} />
-          </DocAccordion>
-          <DocAccordion title="Import OpenAPI">
-            <p className="text-sm text-[#4b5348]">Use Sistema/Projetos ou Suites para importar OpenAPI JSON. O import cria suite API com paths selecionados e pode aplicar auth bearer/apiKey.</p>
-          </DocAccordion>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="web" className="m-0">
-        <div className="grid gap-4">
-          <DocAccordion title="Suite Web minima">
-            <CodeBlock code={`version: 1
-type: web
-name: login-invalido
-tests:
-  - name: mostra erro
-    steps:
-      - goto: /login
-      - fill:
-          selector: input[type="email"]
-          value: wrong@example.com
-      - fill:
-          selector: input[type="password"]
-          value: wrong-password
-      - click: button[type="submit"]
-      - expectText:
-          text: Invalid email or password`} />
-          </DocAccordion>
-          <DocAccordion title="Seletores">
-            <div className="grid gap-3">
-              <p className="text-sm text-[#4b5348]">Prefira seletores estaveis: `data-testid`, role/name, labels. Evite classes geradas.</p>
-              <CodeBlock code={`- click: '[data-testid="submit-login"]'
-- fill:
-    selector: input[name="email"]
-    value: qa@example.com
-- expectText:
-    text: Dashboard`} />
-            </div>
-          </DocAccordion>
-          <DocAccordion title="Artifacts Web">
-            <p className="text-sm text-[#4b5348]">Runs web podem gerar video, screenshot e trace. Use Evidence para revisar falhas visualmente.</p>
-          </DocAccordion>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="ai" className="m-0">
-        <div className="grid gap-4 lg:grid-cols-2">
-          <DocAccordion title="O que a IA faz hoje">
-            <div className="grid gap-3 text-sm text-[#4b5348]">
-              <p><strong>Explain failure</strong>: pega contexto sanitizado de uma run falhada e classifica causa provavel.</p>
-              <p><strong>Suggest test fix</strong>: sugere ajuste no YAML do teste quando a falha parece estar na suite.</p>
-              <p><strong>Suggest test cases</strong>: sugere poucos casos novos de alto valor, focados em smoke e contrato critico.</p>
-              <p><strong>Apply test fix</strong>: aplica uma sugestao no YAML somente depois de aprovacao humana na UI.</p>
-            </div>
-          </DocAccordion>
-
-          <DocAccordion title="Onde configurar">
-            <div className="grid gap-3">
-              <p className="text-sm text-[#4b5348]">Configure em Sistema / AI. Cada organizacao tem suas proprias conexoes.</p>
-              <CodeBlock code={`Provider: OpenRouter | OpenAI | Anthropic
-Modelo: openai/gpt-4o-mini, gpt-4o-mini, claude-3-5-sonnet...
-Base URL: opcional, use quando o provider exigir endpoint custom
-API key: armazenada criptografada quando TESTHUB_SECRET_KEY esta configurado`} />
-            </div>
-          </DocAccordion>
-
-          <DocAccordion title="Formato esperado do retorno">
-            <CodeBlock code={`# explain-failure
-{
-  "classification": "app_bug | test_broken | environment_down | auth_or_secret | data_issue | contract_changed | flaky | unknown",
-  "confidence": 0.82,
-  "summary": "Motivo provavel da falha",
-  "evidence": ["sinais usados"],
-  "nextAction": "proxima acao recomendada"
-}
-
-# suggest-test-fix
-suggestion:
-  type: test_broken
-  reason: seletor mudou
-  before: "- click: .old-button"
-  after: "- click:\\n    by: role\\n    role: button\\n    name: Entrar"
-  confidence: 0.74`} />
-          </DocAccordion>
-
-          <DocAccordion title="Limites importantes">
-            <div className="grid gap-2 text-sm text-[#4b5348]">
-              <p>A IA nao executa teste sozinha; ela analisa contexto e sugere.</p>
-              <p>O contexto enviado e sanitizado com redaction de secrets antes do prompt.</p>
-              <p>Sem AI connection ativa, os botoes de IA retornam erro de configuracao.</p>
-              <p>Em producao, gravar API key com `TESTHUB_SECRET_KEY` default e bloqueado.</p>
-            </div>
-          </DocAccordion>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="auth" className="m-0">
-        <div className="grid gap-4 lg:grid-cols-2">
-          <DocAccordion title="Personal Access Tokens">
-            <div className="grid gap-3">
-              <p className="text-sm text-[#4b5348]">Crie tokens em Sistema / Seguranca / Tokens CLI/MCP. O token pode valer para todas suas orgs ou apenas orgs selecionadas.</p>
-              <CodeBlock code={`export TESTHUB_URL=http://localhost:4321
-export TESTHUB_PAT=th_pat_xxx
-export TESTHUB_ORGANIZATION_ID=<org-id> # opcional para token multi-org`} />
-            </div>
-          </DocAccordion>
-          <DocAccordion title="MCP">
-            <div className="grid gap-3">
-              <p className="text-sm text-[#4b5348]">MCP usa o mesmo bearer token da API. Configure `TESTHUB_PAT` no processo que inicia o servidor MCP.</p>
-              <CodeBlock code={`TESTHUB_URL=http://localhost:4321 \\
-TESTHUB_PAT=th_pat_xxx \\
-npm run mcp`} />
-            </div>
-          </DocAccordion>
-          <DocAccordion title="Adicionar MCP em agentes de IA">
-            <div className="grid gap-3">
-              <p className="text-sm text-[#4b5348]">Use um Personal Access Token e a URL da API. Em agentes com suporte a MCP stdio, adicione um servidor `testhub` apontando para o pacote/command do MCP.</p>
-              <CodeBlock code={`{
-  "mcpServers": {
-    "testhub": {
-      "command": "npx",
-      "args": ["testhub-mcp"],
-      "env": {
-        "TESTHUB_URL": "http://localhost:4321",
-        "TESTHUB_PAT": "th_pat_xxx",
-        "TESTHUB_ORGANIZATION_ID": "<org-id-opcional>"
-      }
-    }
-  }
-}`} />
-              <p className="text-sm text-[#4b5348]">Depois de conectar, chame `testhub_help` no agente para ver tools, fluxo recomendado e exemplos operacionais.</p>
-              <p className="text-sm text-[#4b5348]">Para criar suites web, chame `testhub_list_flows` primeiro. Reuse Flow Library com `use: auth.login` quando possivel; depois chame `testhub_get_spec_examples` e valide o YAML.</p>
-              <CodeBlock code={`testhub_list_flows({ "namespace": "auth" })
-testhub_create_flow({
-  "namespace": "auth",
-  "name": "login",
-  "params": { "email": "\${USER_EMAIL}", "password": "\${USER_PASSWORD}" },
-  "steps": [{ "goto": "/login" }]
-})
-testhub_get_spec_examples({ "example": "web-library-flow" })`} />
-            </div>
-          </DocAccordion>
-          <DocAccordion title="Organizacoes e RBAC">
-            <p className="text-sm text-[#4b5348]">Projetos, ambientes, suites, runs, AI connections e audit ficam no escopo da organizacao ativa. Roles: admin gerencia tudo; editor escreve testes/runs; viewer apenas le.</p>
-          </DocAccordion>
-          <DocAccordion title="Reset de senha">
-            <p className="text-sm text-[#4b5348]">Sem email configurado, o reset exibe token apenas fora de producao ou com `TESTHUB_ALLOW_DISPLAY_RESET=true`.</p>
-          </DocAccordion>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="debug" className="m-0">
-        <div className="grid gap-4">
-          <DocAccordion title="Estados de run">
-            <div className="grid gap-2 text-sm text-[#4b5348]">
-              <p><strong>queued/running</strong>: aguardando ou executando.</p>
-              <p><strong>passed/failed</strong>: teste completou com asserts ok/falhando.</p>
-              <p><strong>error</strong>: problema de infraestrutura, config, spec ou runtime.</p>
-              <p><strong>canceled/deleted</strong>: cancelada ou arquivada por cleanup.</p>
-            </div>
-          </DocAccordion>
-          <DocAccordion title="Checklist de falha">
-            <CodeBlock code={`1. Abra Evidence
-2. Veja summary e erro principal
-3. Para API: request/response/payload
-4. Para Web: screenshot/video/trace
-5. Confirme baseUrl do ambiente
-6. Confirme variaveis e secrets
-7. Rode novamente apos ajustar suite ou ambiente`} />
-          </DocAccordion>
-          <DocAccordion title="Cleanup e retention">
-            <p className="text-sm text-[#4b5348]">Cleanup arquiva runs antigas. Retention global vem de `TESTHUB_RETENTION_DAYS`; projetos podem ajustar politica de retencao e limpeza de artifacts.</p>
-          </DocAccordion>
-        </div>
-      </TabsContent>
-    </Tabs>
-  );
-}
-
 function DocHero({ title, description }: { title: string; description: string }) {
   return (
     <div className="rounded-lg border border-[#d7d2c4] bg-[#fbfaf6] p-5">
@@ -3165,27 +2505,6 @@ function DocStep({ title, text }: { title: string; text: string }) {
       <p className="font-semibold">{title}</p>
       <p className="mt-1 text-sm text-[#4b5348]">{text}</p>
     </div>
-  );
-}
-
-function DocAccordion({ title, children }: { title: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <Card>
-        <CollapsibleTrigger asChild>
-          <button type="button" className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left">
-            <div>
-              <CardTitle className="text-base">{title}</CardTitle>
-            </div>
-            <ChevronDown className={cn('h-4 w-4 shrink-0 transition', open ? 'rotate-180' : '')} />
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <CardContent className="pt-0">{children}</CardContent>
-        </CollapsibleContent>
-      </Card>
-    </Collapsible>
   );
 }
 
@@ -3228,7 +2547,7 @@ function SystemMenu(props: {
         <TabsTrigger value="projects">Projetos</TabsTrigger>
         <TabsTrigger value="openapi">OpenAPI</TabsTrigger>
         <TabsTrigger value="ai">AI</TabsTrigger>
-        <TabsTrigger value="security">Seguranca</TabsTrigger>
+        <TabsTrigger value="security">Segurança</TabsTrigger>
         <TabsTrigger value="audit">Audit</TabsTrigger>
       </TabsList>
 
@@ -3269,7 +2588,7 @@ function SystemMenu(props: {
               </CardHeader>
               <CardContent className="grid gap-3">
                 <Field label="Nome"><Input value={props.projectDraft.name} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, name: event.target.value })} placeholder="Coziva Local" /></Field>
-                <Field label="Descricao"><Textarea value={props.projectDraft.description} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, description: event.target.value })} placeholder="Escopo, app ou squad." /></Field>
+                <Field label="Descrição"><Textarea value={props.projectDraft.description} onChange={(event) => props.onProjectDraftChange({ ...props.projectDraft, description: event.target.value })} placeholder="Escopo, app ou squad." /></Field>
                 <Button onClick={props.onSaveProject} disabled={props.busy || !props.projectDraft.name.trim()}>Salvar projeto</Button>
               </CardContent>
             </Card>
@@ -3342,12 +2661,12 @@ function SystemMenu(props: {
         <TabsContent value="security">
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
-              <CardHeader className="pb-3"><CardTitle>Seguranca empresa</CardTitle><CardDescription>Estado atual vindo da API.</CardDescription></CardHeader>
+              <CardHeader className="pb-3"><CardTitle>Segurança empresa</CardTitle><CardDescription>Estado atual vindo da API.</CardDescription></CardHeader>
               <CardContent className="grid gap-2">
-                <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'nao configurado'} />
+                <SecurityLine label="OIDC/Auth.js" ok={Boolean(props.security?.oidc.configured)} value={props.security?.oidc.issuer ?? 'não configurado'} />
                 <SecurityLine label="API token" ok={Boolean(props.security?.auth.apiTokenEnabled)} value={props.security?.auth.apiTokenEnabled ? 'ativo' : 'desligado'} />
                 <SecurityLine label="RBAC" ok value={props.security?.auth.rbacRole ?? 'viewer'} />
-                <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de producao' : 'custom'} />
+                <SecurityLine label="TESTHUB_SECRET_KEY" ok={!props.security?.secrets.defaultKey} value={props.security?.secrets.defaultKey ? 'default, trocar antes de produção' : 'custom'} />
                 <SecurityLine label="Allowlist hosts" ok={Boolean(props.security && !props.security.network.allowAllWhenEmpty)} value={props.security?.network.allowedHosts.join(', ') || 'vazia, permite tudo'} />
               </CardContent>
             </Card>
@@ -3393,6 +2712,27 @@ function SecurityLine({ label, ok, value }: { label: string; ok: boolean; value:
       </div>
       <Badge variant={ok ? 'success' : 'warning'}>{ok ? 'ok' : 'acao'}</Badge>
     </div>
+  );
+}
+
+function ProductionReadiness({ security }: { security: SecurityStatus | null }) {
+  const checks = [
+    { label: 'Secret forte', ok: Boolean(security && !security.secrets.defaultKey), value: security?.secrets.defaultKey ? 'TESTHUB_SECRET_KEY default' : 'TESTHUB_SECRET_KEY custom' },
+    { label: 'Auth ativo', ok: Boolean(security && security.auth.mode !== 'off'), value: security?.auth.mode ?? 'desconhecido' },
+    { label: 'RBAC visivel', ok: Boolean(security?.auth.rbacRole), value: security?.auth.rbacRole ?? 'viewer' },
+    { label: 'Allowlist de hosts', ok: Boolean(security && !security.network.allowAllWhenEmpty), value: security?.network.allowedHosts.join(', ') || 'vazia' },
+    { label: 'Retention configurado', ok: Boolean(security && security.retention.days > 0), value: `${security?.retention.days ?? '-'} dias` },
+  ];
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Production readiness</CardTitle>
+        <CardDescription>Alertas derivados do estado atual de segurança.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {checks.map((check) => <SecurityLine key={check.label} label={check.label} ok={check.ok} value={check.value} />)}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -3457,7 +2797,7 @@ function SuiteMenu(props: {
               <CardTitle>{props.draft.id ? 'Editar suite' : 'Nova suite'}</CardTitle>
               <CardDescription>{props.draft.id ? shortId(props.draft.id) : 'YAML versionavel da suite.'}</CardDescription>
             </div>
-            {props.validation ? <Badge variant={props.validation.valid ? 'success' : 'destructive'}>{props.validation.valid ? `${props.validation.tests} tests` : 'invalida'}</Badge> : null}
+            {props.validation ? <Badge variant={props.validation.valid ? 'success' : 'destructive'}>{props.validation.valid ? `${props.validation.tests} tests` : 'inválida'}</Badge> : null}
           </div>
         </CardHeader>
         <CardContent className="grid min-h-0 gap-3">
@@ -3562,7 +2902,7 @@ function EnvironmentMenu(props: {
             <Input value={props.draft.baseUrl} onChange={(event) => props.onDraftChange({ ...props.draft, baseUrl: event.target.value })} placeholder="https://app.local" />
           </div>
           <div className="grid gap-1.5">
-            <Label>Variaveis</Label>
+            <Label>Variáveis</Label>
             <Textarea className="min-h-44 font-mono text-xs" value={props.draft.variables} onChange={(event) => props.onDraftChange({ ...props.draft, variables: event.target.value })} placeholder="TOKEN=abc" />
           </div>
           <Button onClick={props.onSave} disabled={props.busy || !props.draft.name.trim() || !props.draft.baseUrl.trim()}>
@@ -3688,16 +3028,16 @@ function yamlDiagnostics(source: string, monaco: any) {
     markers.push(marker(monaco, 1, messageOf(error), monaco.MarkerSeverity.Error));
   }
   if (!parsed || typeof parsed !== 'object') return markers;
-  if (parsed.version !== 1) markers.push(marker(monaco, Math.max(1, findLine(lines, 'version')), 'version: 1 obrigatorio.', monaco.MarkerSeverity.Error));
+  if (parsed.version !== 1) markers.push(marker(monaco, Math.max(1, findLine(lines, 'version')), 'version: 1 obrigatório.', monaco.MarkerSeverity.Error));
   if (parsed.type !== 'api' && parsed.type !== 'web') markers.push(marker(monaco, Math.max(1, findLine(lines, 'type')), 'type deve ser api ou web/frontend.', monaco.MarkerSeverity.Error));
-  if (!parsed.name) markers.push(marker(monaco, Math.max(1, findLine(lines, 'name')), 'name obrigatorio.'));
+  if (!parsed.name) markers.push(marker(monaco, Math.max(1, findLine(lines, 'name')), 'name obrigatório.'));
   if (!Array.isArray(parsed.tests) || parsed.tests.length === 0) markers.push(marker(monaco, Math.max(1, findLine(lines, 'tests')), 'tests deve ter pelo menos 1 item.', monaco.MarkerSeverity.Error));
   if (Array.isArray(parsed.tests)) {
     parsed.tests.forEach((test: any, index: number) => {
       const line = findLine(lines, `- name: ${test?.name ?? ''}`) || findLine(lines, 'tests');
-      if (!test?.name) markers.push(marker(monaco, line, `tests[${index}].name obrigatorio.`));
-      if (parsed.type === 'api' && !test?.request) markers.push(marker(monaco, line, `tests[${index}].request obrigatorio para API.`));
-      if (parsed.type === 'web' && (!Array.isArray(test?.steps) || test.steps.length === 0)) markers.push(marker(monaco, line, `tests[${index}].steps obrigatorio para Frontend.`));
+      if (!test?.name) markers.push(marker(monaco, line, `tests[${index}].name obrigatório.`));
+      if (parsed.type === 'api' && !test?.request) markers.push(marker(monaco, line, `tests[${index}].request obrigatório para API.`));
+      if (parsed.type === 'web' && (!Array.isArray(test?.steps) || test.steps.length === 0)) markers.push(marker(monaco, line, `tests[${index}].steps obrigatório para Frontend.`));
     });
   }
   return markers;
@@ -3889,7 +3229,8 @@ function OverviewEvidence({ run, report }: { run?: Run; report: RunReport | null
         </div>
         {run.error ? <pre className="mt-3 overflow-auto rounded-lg bg-[#0b100c] p-3 font-mono text-xs text-[#ffb4a8]">{run.error}</pre> : null}
       </div>
-      {results.length > 0 ? <TestEvidenceList results={results} /> : <DarkEmpty text="Cenarios ainda indisponiveis para esta run." />}
+      {['queued', 'running'].includes(run.status) ? <LiveProgress run={run} /> : null}
+      {results.length > 0 ? <TestEvidenceList results={results} /> : <DarkEmpty text="Cenarios ainda indisponíveis para esta run." />}
     </div>
   );
 }
@@ -3921,7 +3262,7 @@ function TestEvidenceList({ results }: { results: NonNullable<RunReport['results
                 <div className="overflow-hidden rounded-lg bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_12px_24px_rgba(0,0,0,0.18)]">
                   <video className="aspect-video w-full bg-black" src={artifactUrl(videos[0].path)} controls preload="metadata" />
                 </div>
-              ) : <DarkEmpty text="Video indisponivel para este cenario." />}
+              ) : <DarkEmpty text="Video indisponivel para este cenário." />}
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {videos.slice(1).map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Video'} path={artifact.path} type={artifact.type} compact />)}
                 {screenshots.map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Screenshot'} path={artifact.path} type={artifact.type} compact />)}
@@ -3968,7 +3309,7 @@ function ArtifactEvidence({ run, artifacts, report }: { run?: Run; artifacts: Ar
   const uniqueArtifacts = dedupeArtifacts(artifacts).filter((artifact) => artifact.path !== run?.reportHtmlPath);
   const payloadGroups = groupHttpArtifacts(uniqueArtifacts);
   const otherArtifacts = uniqueArtifacts.filter((artifact) => artifact.type !== 'request' && artifact.type !== 'response');
-  if (!run?.reportHtmlPath && uniqueArtifacts.length === 0) return <DarkEmpty text="Artifacts indisponiveis." />;
+  if (!run?.reportHtmlPath && uniqueArtifacts.length === 0) return <DarkEmpty text="Artifacts indisponíveis." />;
   return (
     <div className="grid gap-3">
       {run?.reportHtmlPath ? <ArtifactLink label="HTML report" path={run.reportHtmlPath} type="html" /> : null}
@@ -4072,8 +3413,8 @@ function WizardDialog(props: {
         onPointerDownOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>Wizard de configuracao</DialogTitle>
-          <DialogDescription>Crie projeto, ambiente e primeira suite em fluxo unico.</DialogDescription>
+          <DialogTitle>Wizard de configuração</DialogTitle>
+          <DialogDescription>Crie projeto, ambiente e primeira suite em fluxo único.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4">
@@ -4085,7 +3426,7 @@ function WizardDialog(props: {
                 onClick={() => props.onStepChange(index)}
                 className={cn('rounded-lg border px-3 py-2 text-left text-sm font-semibold', props.step === index ? 'border-[#9fb25a] bg-[#f2f6d8]' : 'border-[#e1ddd1] bg-white')}
               >
-                <span className="font-mono text-[10px] text-[#66705f]">Passo {index + 1}</span>
+                <span className="font-mono text-[10px] text-[#66705f]">Passó {index + 1}</span>
                 <span className="block">{label}</span>
               </button>
             ))}
@@ -4094,7 +3435,7 @@ function WizardDialog(props: {
           {props.step === 0 ? (
             <div className="grid gap-3">
               <Field label="Nome do projeto"><Input autoFocus value={props.draft.projectName} onChange={(event) => props.onDraftChange({ ...props.draft, projectName: event.target.value })} placeholder="Checkout SaaS" /></Field>
-              <Field label="Descricao"><Textarea value={props.draft.projectDescription} onChange={(event) => props.onDraftChange({ ...props.draft, projectDescription: event.target.value })} placeholder="Escopo, squad, produto ou modulo." /></Field>
+              <Field label="Descrição"><Textarea value={props.draft.projectDescription} onChange={(event) => props.onDraftChange({ ...props.draft, projectDescription: event.target.value })} placeholder="Escopo, squad, produto ou módulo." /></Field>
             </div>
           ) : null}
 
@@ -4102,7 +3443,7 @@ function WizardDialog(props: {
             <div className="grid gap-3">
               <Field label="Nome do ambiente"><Input value={props.draft.environmentName} onChange={(event) => props.onDraftChange({ ...props.draft, environmentName: event.target.value })} placeholder="hml" /></Field>
               <Field label="Base URL"><Input value={props.draft.baseUrl} onChange={(event) => props.onDraftChange({ ...props.draft, baseUrl: event.target.value })} placeholder="https://app.local" /></Field>
-              <Field label="Variaveis"><Textarea className="min-h-36 font-mono text-xs" value={props.draft.variables} onChange={(event) => props.onDraftChange({ ...props.draft, variables: event.target.value })} placeholder="TOKEN=abc" /></Field>
+              <Field label="Variáveis"><Textarea className="min-h-36 font-mono text-xs" value={props.draft.variables} onChange={(event) => props.onDraftChange({ ...props.draft, variables: event.target.value })} placeholder="TOKEN=abc" /></Field>
             </div>
           ) : null}
 

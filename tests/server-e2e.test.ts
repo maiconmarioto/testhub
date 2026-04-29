@@ -1,3 +1,4 @@
+import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,7 @@ import { createApp } from '../apps/api/src/server.js';
 const originalDataDir = process.env.TESTHUB_DATA_DIR;
 const originalAuthMode = process.env.TESTHUB_AUTH_MODE;
 const originalNodeEnv = process.env.NODE_ENV;
+const originalHealthTimeout = process.env.TESTHUB_ENV_HEALTH_TIMEOUT_MS;
 let app: ReturnType<typeof createApp>;
 let token: string;
 
@@ -18,6 +20,7 @@ beforeAll(async () => {
   process.env.TESTHUB_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-server-e2e-'));
   process.env.TESTHUB_AUTH_MODE = 'local';
   process.env.NODE_ENV = 'test';
+  process.env.TESTHUB_ENV_HEALTH_TIMEOUT_MS = '100';
   app = createApp();
   await app.ready();
 
@@ -42,6 +45,8 @@ afterAll(async () => {
   else process.env.TESTHUB_AUTH_MODE = originalAuthMode;
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = originalNodeEnv;
+  if (originalHealthTimeout === undefined) delete process.env.TESTHUB_ENV_HEALTH_TIMEOUT_MS;
+  else process.env.TESTHUB_ENV_HEALTH_TIMEOUT_MS = originalHealthTimeout;
 });
 
 describe('server e2e', () => {
@@ -57,11 +62,12 @@ describe('server e2e', () => {
   });
 
   it('creates project, env, suite and run', async () => {
+    const target = await createTargetServer();
     const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'E2E' } });
     expect(projectResponse.statusCode).toBe(201);
     const project = projectResponse.json() as { id: string };
 
-    const envResponse = await app.inject({ method: 'POST', url: '/api/environments', headers: auth(), payload: { projectId: project.id, name: 'local', baseUrl: 'https://httpbin.org' } });
+    const envResponse = await app.inject({ method: 'POST', url: '/api/environments', headers: auth(), payload: { projectId: project.id, name: 'local', baseUrl: target.baseUrl } });
     expect(envResponse.statusCode).toBe(201);
     const environment = envResponse.json() as { id: string };
 
@@ -73,7 +79,7 @@ describe('server e2e', () => {
         projectId: project.id,
         name: 'health',
         type: 'api',
-        specContent: 'version: 1\ntype: api\nname: health\ntests:\n  - name: ok\n    request:\n      method: GET\n      path: /status/200\n    expect:\n      status: 200\n',
+        specContent: 'version: 1\ntype: api\nname: health\ntests:\n  - name: ok\n    request:\n      method: GET\n      path: /health\n    expect:\n      status: 200\n',
       },
     });
     expect(suiteResponse.statusCode).toBe(201);
@@ -81,6 +87,33 @@ describe('server e2e', () => {
 
     const runResponse = await app.inject({ method: 'POST', url: '/api/runs', headers: auth(), payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id } });
     expect(runResponse.statusCode).toBe(202);
+    const run = runResponse.json() as { status: string; progress?: unknown };
+    expect(run.status).toBe('queued');
+    await target.close();
+  });
+
+  it('blocks run when environment health check fails', async () => {
+    const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Health Block' } });
+    const project = projectResponse.json() as { id: string };
+    const envResponse = await app.inject({ method: 'POST', url: '/api/environments', headers: auth(), payload: { projectId: project.id, name: 'down', baseUrl: 'http://127.0.0.1:1' } });
+    const environment = envResponse.json() as { id: string };
+    const suiteResponse = await app.inject({
+      method: 'POST',
+      url: '/api/suites',
+      headers: auth(),
+      payload: {
+        projectId: project.id,
+        name: 'health-block',
+        type: 'api',
+        specContent: 'version: 1\ntype: api\nname: health\ntests:\n  - name: ok\n    request:\n      method: GET\n      path: /health\n',
+      },
+    });
+    const suite = suiteResponse.json() as { id: string };
+    const runResponse = await app.inject({ method: 'POST', url: '/api/runs', headers: auth(), payload: { projectId: project.id, environmentId: environment.id, suiteId: suite.id } });
+    expect(runResponse.statusCode).toBe(202);
+    expect(runResponse.json()).toMatchObject({ status: 'error' });
+    expect(runResponse.json().error).toContain('Environment health check falhou');
+    expect(runResponse.json().progress).toMatchObject({ phase: 'error', error: 1 });
   });
 
   it('updates and soft deletes environments', async () => {
@@ -132,7 +165,7 @@ describe('server e2e', () => {
       payload: { days: 1 },
     });
     expect(missingProjectResponse.statusCode).toBe(400);
-    expect(missingProjectResponse.json()).toMatchObject({ error: 'projectId obrigatorio para cleanup via API' });
+    expect(missingProjectResponse.json()).toMatchObject({ error: 'projectId obrigatório para cleanup via API' });
 
     const projectResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Cleanup' } });
     expect(projectResponse.statusCode).toBe(201);
@@ -168,3 +201,18 @@ describe('server e2e', () => {
     expect(deletedGetResponse.statusCode).toBe(404);
   });
 });
+
+async function createTargetServer(): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  const server = http.createServer((_req, res) => {
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('invalid target server');
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+}

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runWebSpec } from '../packages/runner/src/web-runner.js';
+import { ProgressTracker } from '../packages/runner/src/progress.js';
 import type { WebSpec } from '../packages/shared/src/types.js';
 
 let server: http.Server;
@@ -149,5 +150,37 @@ describe('web runner', () => {
       'auth.login / fill: {"selector":"input[type=\\"password\\"]","value":"shared-secret"}',
       'expectText: TestHub',
     ]);
+  });
+
+  it('emits progress for web suites and failed steps', async () => {
+    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-web-progress-'));
+    const events: string[] = [];
+    const progress = new ProgressTracker(1, (event) => {
+      events.push(`${event.phase}:${event.currentTest ?? ''}:${event.currentStep ?? ''}:${event.failed}`);
+    });
+    const spec: WebSpec = {
+      version: 1,
+      type: 'web',
+      name: 'web',
+      baseUrl,
+      defaults: { trace: false, video: false, timeoutMs: 500 },
+      tests: [
+        {
+          name: 'home fails',
+          steps: [
+            { goto: '/' },
+            { expectText: 'Texto inexistente' },
+          ],
+        },
+      ],
+    };
+
+    const results = await runWebSpec(spec, runDir, { progress });
+
+    expect(results[0]?.status).toBe('failed');
+    expect(events).toContain('test:home fails::0');
+    expect(events.some((event) => event.includes('goto: /'))).toBe(true);
+    expect(events.some((event) => event.includes('expectText: Texto inexistente'))).toBe(true);
+    expect(events.some((event) => event.endsWith(':1'))).toBe(true);
   });
 });

@@ -1,5 +1,20 @@
 export type TestType = 'web' | 'api';
 export type TestStatus = 'passed' | 'failed' | 'skipped' | 'error';
+export type RunProgressPhase = 'queued' | 'starting' | 'running' | 'test' | 'step' | 'artifacts' | 'finished' | 'failed' | 'skipped' | 'error';
+
+export interface RunProgress {
+  phase: RunProgressPhase;
+  totalTests: number;
+  completedTests: number;
+  currentTest?: string;
+  currentStep?: string;
+  passed: number;
+  failed: number;
+  error: number;
+  updatedAt: string;
+}
+
+export type RunProgressCallback = (progress: RunProgress) => void | Promise<void>;
 
 export interface RunOptions {
   specPath: string;
@@ -13,6 +28,7 @@ export interface RunOptions {
   noHtml?: boolean;
   junit?: boolean;
   tags?: string[];
+  onProgress?: RunProgressCallback;
 }
 
 export interface Artifact {

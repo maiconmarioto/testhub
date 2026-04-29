@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Ajv } from 'ajv';
-import type { ApiRequestStep, ApiSpec, Artifact, TestResult } from '../../shared/src/types.js';
+import type { ApiRequestStep, ApiSpec, Artifact, StepResult, TestResult } from '../../shared/src/types.js';
 import { ensureDir, sanitizeFilename, writeJson } from '../../shared/src/fs-utils.js';
 import { redactDeep } from '../../shared/src/redact.js';
 import { MissingVariableError, resolveVariablesWithContext } from '../../spec/src/spec.js';
+import type { ProgressTracker } from './progress.js';
 
-export async function runApiSpec(spec: ApiSpec, runDir: string): Promise<TestResult[]> {
+export async function runApiSpec(spec: ApiSpec, runDir: string, options: { progress?: ProgressTracker } = {}): Promise<TestResult[]> {
   const results: TestResult[] = [];
   const ajv = new Ajv({ allErrors: true, strict: false });
   const runtime: Record<string, string | number | boolean | undefined> = {
@@ -14,8 +15,11 @@ export async function runApiSpec(spec: ApiSpec, runDir: string): Promise<TestRes
   };
 
   for (const test of spec.tests) {
+    await options.progress?.startTest(test.name);
     const started = Date.now();
     const artifacts: Artifact[] = [];
+    const steps: StepResult[] = [];
+    let failedStepIndex: number | undefined;
     const testDir = path.join(runDir, sanitizeFilename(test.name));
     ensureDir(testDir);
     const retries = test.retries ?? spec.defaults?.retries ?? 0;
@@ -23,9 +27,9 @@ export async function runApiSpec(spec: ApiSpec, runDir: string): Promise<TestRes
     try {
       await runWithRetries(retries, async () => {
         for (const [index, beforeStep] of (spec.beforeEach ?? []).entries()) {
-          await executeApiStep({ step: beforeStep, spec, testDir, artifacts, ajv, runtime, label: `beforeEach-${index + 1}` });
+          await executeApiProgressStep({ step: beforeStep, spec, testDir, artifacts, ajv, runtime, label: `beforeEach-${index + 1}`, steps, progress: options.progress });
         }
-        await executeApiStep({
+        await executeApiProgressStep({
           step: { ...test.request, expect: test.expect, extract: test.extract ?? test.request.extract },
           spec,
           testDir,
@@ -33,31 +37,67 @@ export async function runApiSpec(spec: ApiSpec, runDir: string): Promise<TestRes
           ajv,
           runtime,
           label: 'request',
+          steps,
+          progress: options.progress,
         });
         for (const [index, afterStep] of (spec.afterEach ?? []).entries()) {
-          await executeApiStep({ step: afterStep, spec, testDir, artifacts, ajv, runtime, label: `afterEach-${index + 1}` });
+          await executeApiProgressStep({ step: afterStep, spec, testDir, artifacts, ajv, runtime, label: `afterEach-${index + 1}`, steps, progress: options.progress });
         }
       });
       results.push({
         name: test.name,
         status: 'passed',
         durationMs: Date.now() - started,
+        steps,
         artifacts,
         metadata: { tags: test.tags ?? [] },
       });
+      await options.progress?.finishTest('passed');
     } catch (error) {
+      const status = isApiRuntimeError(error) ? 'error' : 'failed';
+      failedStepIndex = steps.find((step) => step.status !== 'passed')?.index;
       results.push({
         name: test.name,
-        status: isApiRuntimeError(error) ? 'error' : 'failed',
+        status,
         durationMs: Date.now() - started,
+        failedStepIndex,
         error: error instanceof Error ? error.message : String(error),
+        steps,
         artifacts,
         metadata: { tags: test.tags ?? [] },
       });
+      await options.progress?.finishTest(status);
     }
   }
 
   return results;
+}
+
+async function executeApiProgressStep(input: {
+  step: ApiRequestStep;
+  spec: ApiSpec;
+  testDir: string;
+  artifacts: Artifact[];
+  ajv: InstanceType<typeof Ajv>;
+  runtime: Record<string, string | number | boolean | undefined>;
+  label: string;
+  steps: StepResult[];
+  progress?: ProgressTracker;
+}): Promise<void> {
+  const index = input.steps.length;
+  const started = Date.now();
+  await input.progress?.startStep(input.label);
+  try {
+    await executeApiStep(input);
+    input.steps.push({ index, name: input.label, status: 'passed', durationMs: Date.now() - started });
+    await input.progress?.finishStep('passed', input.label);
+  } catch (error) {
+    const status = isApiRuntimeError(error) ? 'error' : 'failed';
+    const message = error instanceof Error ? error.message : String(error);
+    input.steps.push({ index, name: input.label, status, durationMs: Date.now() - started, error: message });
+    await input.progress?.finishStep(status, input.label);
+    throw error;
+  }
 }
 
 async function executeApiStep(input: {

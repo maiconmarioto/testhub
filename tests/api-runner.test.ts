@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runApiSpec } from '../packages/runner/src/api-runner.js';
+import { ProgressTracker } from '../packages/runner/src/progress.js';
 import type { ApiSpec } from '../packages/shared/src/types.js';
 
 let server: http.Server;
@@ -98,5 +99,33 @@ describe('api runner', () => {
 
     expect(assertionResults[0]?.status).toBe('failed');
     expect(missingVarResults[0]?.status).toBe('error');
+  });
+
+  it('emits progress for api suites', async () => {
+    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'testhub-api-progress-'));
+    const events: string[] = [];
+    const progress = new ProgressTracker(1, (event) => {
+      events.push(`${event.phase}:${event.currentTest ?? ''}:${event.currentStep ?? ''}:${event.completedTests}`);
+    });
+    const spec: ApiSpec = {
+      version: 1,
+      type: 'api',
+      name: 'api',
+      baseUrl,
+      tests: [
+        {
+          name: 'me',
+          request: { method: 'GET', path: '/me' },
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const results = await runApiSpec(spec, runDir, { progress });
+
+    expect(results[0]?.status).toBe('passed');
+    expect(events).toContain('test:me::0');
+    expect(events.some((event) => event.startsWith('step:me:request:0'))).toBe(true);
+    expect(events.some((event) => event.endsWith(':1'))).toBe(true);
   });
 });

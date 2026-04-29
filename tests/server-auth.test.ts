@@ -133,7 +133,7 @@ describe('server local auth', () => {
       },
     });
     expect(publicSignup.statusCode).toBe(403);
-    expect(publicSignup.json()).toMatchObject({ error: 'Cadastro publico desabilitado' });
+    expect(publicSignup.json()).toMatchObject({ error: 'Cadastro público desabilitado' });
 
     const meWithBearer = await app.inject({
       method: 'GET',
@@ -273,7 +273,7 @@ describe('server local auth', () => {
       },
     });
     expect(duplicateMember.statusCode).toBe(409);
-    expect(duplicateMember.json()).toEqual({ error: 'Usuario ja existe; troca de organizacao ainda nao suportada' });
+    expect(duplicateMember.json()).toEqual({ error: 'Usuário já existe; troca de organização ainda não suportada' });
 
     const originalPasswordLogin = await app.inject({
       method: 'POST',

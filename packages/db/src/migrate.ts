@@ -22,7 +22,7 @@ const statements = [
   `create unique index if not exists personal_access_tokens_hash_unique on personal_access_tokens (token_hash)`,
   `create table if not exists environments (id text primary key, project_id text not null, name text not null, base_url text not null, status text not null, variables jsonb, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create table if not exists suites (id text primary key, project_id text not null, name text not null, type text not null, spec_path text not null, status text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
-  `create table if not exists runs (id text primary key, project_id text not null, environment_id text not null, suite_id text not null, status text not null, report_path text, report_html_path text, error text, created_at timestamptz not null, started_at timestamptz, finished_at timestamptz, summary jsonb)`,
+  `create table if not exists runs (id text primary key, project_id text not null, environment_id text not null, suite_id text not null, status text not null, report_path text, report_html_path text, error text, created_at timestamptz not null, started_at timestamptz, finished_at timestamptz, summary jsonb, progress jsonb, heartbeat_at timestamptz)`,
   `create table if not exists ai_connections (id text primary key, organization_id text not null, name text not null, provider text not null, api_key text, model text not null, base_url text, enabled text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create table if not exists flow_library (id text primary key, organization_id text not null, namespace text not null, name text not null, description text, params jsonb, steps jsonb not null, status text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create unique index if not exists flow_library_org_namespace_name_unique on flow_library (organization_id, namespace, name) where status <> 'inactive'`,
@@ -37,5 +37,7 @@ await pool.query(`alter table projects alter column organization_id set not null
 await pool.query(`alter table ai_connections add column if not exists organization_id text`);
 await pool.query(`update ai_connections set organization_id = 'legacy-local' where organization_id is null`);
 await pool.query(`alter table ai_connections alter column organization_id set not null`);
+await pool.query(`alter table runs add column if not exists progress jsonb`);
+await pool.query(`alter table runs add column if not exists heartbeat_at timestamptz`);
 await pool.end();
 console.log('migrations ok');

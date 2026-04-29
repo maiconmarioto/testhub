@@ -4,13 +4,14 @@ import { chromium, expect, type Browser, type BrowserContext, type Locator, type
 import type { Artifact, SelectorInput, StepResult, TestResult, WebFlow, WebSpec, WebStep } from '../../shared/src/types.js';
 import { ensureDir, sanitizeFilename } from '../../shared/src/fs-utils.js';
 import { resolveVariablesWithContext } from '../../spec/src/spec.js';
+import type { ProgressTracker } from './progress.js';
 
 type RuntimeContext = Record<string, string | number | boolean | undefined>;
 
 export async function runWebSpec(
   spec: WebSpec,
   runDir: string,
-  options: { headed?: boolean; externalFlows?: Record<string, WebFlow> } = {},
+  options: { headed?: boolean; externalFlows?: Record<string, WebFlow>; progress?: ProgressTracker } = {},
 ): Promise<TestResult[]> {
   const results: TestResult[] = [];
   let browser: Browser | undefined;
@@ -19,6 +20,7 @@ export async function runWebSpec(
     browser = await chromium.launch({ headless: !options.headed });
 
     for (const test of spec.tests) {
+      await options.progress?.startTest(test.name);
       const started = Date.now();
       const testDir = path.join(runDir, sanitizeFilename(test.name));
       ensureDir(testDir);
@@ -71,16 +73,19 @@ export async function runWebSpec(
                 continue;
               }
               const currentIndex = stepIndex++;
+              const stepName = describeStep(step, prefix);
               const stepStarted = Date.now();
               try {
+                await options.progress?.startStep(stepName);
                 const output = await runWebStep(page!, spec.baseUrl, step, test.timeoutMs ?? spec.defaults?.timeoutMs ?? 10_000);
                 if (output?.extract) {
                   runtime[output.extract.name] = output.extract.value;
                   frame[output.extract.name] = output.extract.value;
                 }
+                await options.progress?.finishStep('passed', stepName);
                 steps.push({
                   index: currentIndex,
-                  name: describeStep(step, prefix),
+                  name: stepName,
                   status: 'passed',
                   durationMs: Date.now() - stepStarted,
                 });
@@ -88,6 +93,7 @@ export async function runWebSpec(
                 status = 'failed';
                 failedStepIndex = currentIndex;
                 errorMessage = error instanceof Error ? error.message : String(error);
+                await options.progress?.finishStep('failed', stepName);
                 const stepArtifacts: Artifact[] = [];
                 if (spec.defaults?.screenshotOnFailure !== false) {
                   const screenshotPath = path.join(testDir, `step-${currentIndex + 1}-failure.png`);
@@ -98,7 +104,7 @@ export async function runWebSpec(
                 }
                 steps.push({
                   index: currentIndex,
-                  name: describeStep(step, prefix),
+                  name: stepName,
                   status: 'failed',
                   durationMs: Date.now() - stepStarted,
                   error: errorMessage,
@@ -162,6 +168,7 @@ export async function runWebSpec(
         artifacts,
         metadata: { tags: test.tags ?? [] },
       });
+      await options.progress?.finishTest(status);
     }
   } finally {
     await browser?.close();

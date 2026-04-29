@@ -9,45 +9,45 @@
 | Versao | 0.2 |
 | Status | Draft |
 | Data | 2026-04-25 |
-| Publico | Engenharia, QA, DevOps, liderancas tecnicas |
-| Escopo inicial | Runner + CLI para Web Smoke e API Contract contra aplicacoes ja publicadas |
+| Publico | Engenharia, QA, DevOps, liderancas técnicas |
+| Escopo inicial | Runner + CLI para Web Smoke e API Contract contra aplicações já publicadas |
 
 ## 2. Resumo Executivo
 
-TestHub sera uma plataforma interna para padronizar testes automatizados em sistemas legados e novos. A primeira versao nao sobe aplicacoes, nao faz build, nao cria ambiente e nao depende de IA. Ela executa testes contra aplicacoes ja rodando em ambientes acessiveis, como desenvolvimento compartilhado, homologacao, staging ou ambiente produtivo controlado.
+TestHub será uma plataforma interna para padronizar testes automatizados em sistemas legados e novos. A primeira versão não sobe aplicações, não faz build, não cria ambiente e não depende de IA. Ela executa testes contra aplicações já rodando em ambientes acessíveis, como desenvolvimento compartilhado, homologação, staging ou ambiente produtivo controlado.
 
-O MVP comeca por runner e CLI. O usuario escreve specs declarativas em YAML, escolhe `web` ou `api`, executa contra uma URL, recebe resultado, exit code e evidencias tecnicas. Depois entram API, dashboard, worker, IA opcional e MCP.
+O MVP começa por runner e CLI. O usuário escreve specs declarativas em YAML, escolhe `web` ou `api`, executa contra uma URL, recebe resultado, exit code e evidências técnicas. Depois entram API, dashboard, worker, IA opcional e MCP.
 
-Principio central: execucao deterministica. IA ajuda a explicar falhas, sugerir correcao de teste e sugerir/refinar cenarios, mas nunca decide pass/fail, nunca aplica mudanca sozinha e pode ser desligada sem quebrar o produto.
+Princípio central: execução determinística. IA ajuda a explicar falhas, sugerir correção de teste e sugerir/refinar cenários, mas nunca decide pass/fail, nunca aplica mudança sozinha e pode ser desligada sem quebrar o produto.
 
 ## 3. Problema
 
-A empresa possui muitos sistemas legados e muitos projetos novos mudando continuamente. Cada time tende a criar testes de forma diferente, ou nao criar teste. Isso gera:
+A empresa possui muitos sistemas legados e muitos projetos novos mudando continuamente. Cada time tende a criar testes de forma diferente, ou não criar teste. Issó gera:
 
 - regressao manual repetitiva;
 - baixa confianca em releases;
 - falhas descobertas tarde;
-- falta de historico e evidencia;
+- falta de histórico e evidência;
 - APIs sem contrato validado;
-- testes espalhados e sem padrao;
+- testes espalhados e sem padrão;
 - dificuldade de onboarding em sistemas legados.
 
 ## 4. Objetivos
 
 ## 4.1 Objetivos de Produto
 
-- Criar padrao unico para smoke tests web e API contract tests.
-- Permitir execucao local e CI via CLI.
-- Gerar reports e artifacts diagnosticos.
-- Evoluir para dashboard central com historico.
-- Suportar IA opcional para diagnostico e manutencao de specs.
+- Criar padrão único para smoke tests web e API contract tests.
+- Permitir execução local e CI via CLI.
+- Gerar reports e artifacts diagnósticos.
+- Evoluir para dashboard central com histórico.
+- Suportar IA opcional para diagnóstico e manutenção de specs.
 - Suportar MCP futuro como interface para IDE/agentes.
 
 ## 4.2 Objetivos Tecnicos
 
 - Runner separado de API/dashboard.
 - Specs YAML versionaveis.
-- Engines plugaveis: `web` e `api`.
+- Engines plugáveis: `web` e `api`.
 - Reports JSON/HTML.
 - Exit codes claros.
 - Secrets via env/connection, nunca plaintext em report.
@@ -55,15 +55,15 @@ A empresa possui muitos sistemas legados e muitos projetos novos mudando continu
 
 ## 5. Nao Objetivos
 
-MVP nao deve:
+MVP não deve:
 
-- subir aplicacao alvo;
+- subir aplicação alvo;
 - fazer build/deploy;
 - ler repo automaticamente;
 - criar PRD automatico;
 - depender de IA;
 - depender de MCP;
-- corrigir codigo da aplicacao;
+- corrigir codigo da aplicação;
 - substituir unit/integration tests;
 - executar teste de carga;
 - executar mobile;
@@ -73,7 +73,7 @@ MVP nao deve:
 
 ## 6.1 QA
 
-Quer transformar fluxos repetitivos em testes reexecutaveis, com evidencia visual de falha.
+Quer transformar fluxos repetitivos em testes reexecutaveis, com evidência visual de falha.
 
 ## 6.2 Desenvolvedor
 
@@ -87,15 +87,15 @@ Quer visibilidade de qualidade minima por projeto/ambiente.
 
 Quer runner containerizado, CI simples, secrets seguros e logs auditaveis.
 
-## 7. Principios
+## 7. Princípios
 
 - Simples antes de inteligente.
 - Deterministico antes de generativo.
-- Evidencia antes de opiniao.
+- Evidência antes de opiniao.
 - YAML/JSON antes de UI complexa.
 - Runner/CLI antes de dashboard.
-- IA como copiloto, nao motor.
-- MCP como camada fina, nao executor.
+- IA como copiloto, não motor.
+- MCP como camada fina, não executor.
 
 ## 8. Escopo MVP
 
@@ -105,7 +105,7 @@ Quer runner containerizado, CI simples, secrets seguros e logs auditaveis.
 - Parser/validator de specs YAML.
 - Web runner com Playwright.
 - API runner com HTTP + AJV.
-- Substituicao de variaveis `${VAR}` via ambiente.
+- Substituicao de variáveis `${VAR}` via ambiente.
 - Artifacts locais.
 - Report JSON.
 - Report HTML.
@@ -164,7 +164,7 @@ Artifacts:
 
 ## 9.2 API Contract
 
-Valida endpoints e contratos basicos.
+Valida endpoints e contratos básicos.
 
 Casos:
 
@@ -174,7 +174,7 @@ Casos:
 - headers;
 - body fields;
 - tempo maximo;
-- auth ausente/invalida.
+- auth ausente/inválida.
 
 Engine:
 
@@ -223,12 +223,12 @@ tests:
 version: 1
 type: api
 name: users-contract
-description: Valida contrato basico de usuarios
+description: Valida contrato basico de usuários
 baseUrl: ${API_URL}
 defaults:
   timeoutMs: 5000
 tests:
-  - name: listar usuarios
+  - name: listar usuários
     tags: [contract, users]
     request:
       method: GET
@@ -254,19 +254,19 @@ tests:
 
 ## RF-001 - Validar Spec
 
-Como usuario, quero validar YAML antes de executar.
+Como usuário, quero validar YAML antes de executar.
 
 Aceite:
 
-- `testhub validate spec.yaml` retorna erro claro se spec invalida.
-- Spec invalida retorna exit code `2`.
-- Erros apontam path/campo quando possivel.
+- `testhub validate spec.yaml` retorna erro claro se spec inválida.
+- Spec inválida retorna exit code `2`.
+- Erros apontam path/campo quando possível.
 
 Prioridade: Must.
 
 ## RF-002 - Executar Web Spec
 
-Como usuario, quero executar spec web contra URL existente.
+Como usuário, quero executar spec web contra URL existente.
 
 Aceite:
 
@@ -280,7 +280,7 @@ Prioridade: Must.
 
 ## RF-003 - Executar API Spec
 
-Como usuario, quero executar spec API contra URL existente.
+Como usuário, quero executar spec API contra URL existente.
 
 Aceite:
 
@@ -290,13 +290,13 @@ Aceite:
 
 Prioridade: Must.
 
-## RF-004 - Variaveis e Secrets via Env
+## RF-004 - Variáveis e Secrets via Env
 
-Como usuario, quero usar `${VAR}` em specs.
+Como usuário, quero usar `${VAR}` em specs.
 
 Aceite:
 
-- Runner resolve variaveis do ambiente.
+- Runner resolve variáveis do ambiente.
 - Variavel ausente falha com erro claro.
 - Valores sensiveis sao mascarados em logs/reports.
 
@@ -318,7 +318,7 @@ Exit codes:
 
 - `0`: passou.
 - `1`: teste falhou.
-- `2`: spec invalida.
+- `2`: spec inválida.
 - `3`: erro de infraestrutura.
 - `4`: variavel/env ausente.
 
@@ -326,7 +326,7 @@ Prioridade: Must.
 
 ## RF-006 - Reports
 
-Como usuario, quero report facil de ler.
+Como usuário, quero report facil de ler.
 
 Aceite:
 
@@ -339,7 +339,7 @@ Prioridade: Must.
 
 ## RF-007 - Artifacts
 
-Como usuario, quero evidencias de falha.
+Como usuário, quero evidências de falha.
 
 Aceite:
 
@@ -352,7 +352,7 @@ Prioridade: Must.
 
 ## RF-008 - Dashboard Futuro
 
-Como usuario, quero historico central.
+Como usuário, quero histórico central.
 
 Aceite futuro:
 
@@ -367,16 +367,16 @@ Prioridade: Should pos-MVP.
 
 ## RF-009 - AI Test Assistant Opcional
 
-Como usuario, quero IA opcional para diagnostico e manutencao de testes.
+Como usuário, quero IA opcional para diagnóstico e manutenção de testes.
 
 Aceite:
 
 - IA pode ser desligada globalmente.
 - Produto funciona sem IA configurada.
 - Connections: OpenRouter, Anthropic, OpenAI.
-- IA nao recebe secrets.
-- IA nao decide pass/fail.
-- IA nao aplica mudanca sem aprovacao.
+- IA não recebe secrets.
+- IA não decide pass/fail.
+- IA não aplica mudança sem aprovacao.
 
 Prioridade: Could.
 
@@ -388,7 +388,7 @@ Aceite futuro:
 
 - MCP server como camada fina sobre API.
 - Tools para listar projetos, listar suites, executar run, consultar status e report.
-- MCP nao roda Playwright.
+- MCP não roda Playwright.
 - Auth via `TESTHUB_TOKEN`.
 
 Prioridade: Could.
@@ -403,11 +403,11 @@ Prioridade: Could.
 
 ## 12.2 Confiabilidade
 
-- Falha de um teste nao deve impedir report final.
-- Artifacts devem ser salvos quando possivel.
+- Falha de um teste não deve impedir report final.
+- Artifacts devem ser salvos quando possível.
 - Erro de infra deve ser separado de assertion failure.
 
-## 12.3 Seguranca
+## 12.3 Segurança
 
 - Secrets nunca em plaintext no report.
 - Redaction de `Authorization`, `Cookie`, `Set-Cookie`, senha, token, api key.
@@ -490,9 +490,9 @@ Storage
 
 ## 15. AI Test Assistant Opcional
 
-## 15.1 Principio
+## 15.1 Princípio
 
-IA e modulo opcional. Se desligada, todo runner/CLI/dashboard continua funcionando. IA so ajuda usuario.
+IA e módulo opcional. Se desligada, todo runner/CLI/dashboard continua funcionando. IA só ajuda usuário.
 
 ## 15.2 Connections
 
@@ -513,7 +513,7 @@ Requisitos:
 
 ## 15.3 Casos Priorizados
 
-### 15.3.1 Resumo, Explicacao e Classificacao de Falha
+### 15.3.1 Resumo, Explicação e Classificação de Falha
 
 Entrada:
 
@@ -522,7 +522,7 @@ Entrada:
 - screenshot/DOM summary;
 - console logs;
 - request/response;
-- historico recente.
+- histórico recente.
 
 Classes:
 
@@ -541,7 +541,7 @@ Saida:
 {
   "classification": "auth_or_secret",
   "confidence": 0.76,
-  "summary": "Login nao concluiu porque API /auth retornou 401.",
+  "summary": "Login não concluiu porque API /auth retornou 401.",
   "evidence": [
     "Step 3 falhou apos clicar Entrar",
     "Response /auth/login = 401",
@@ -586,9 +586,9 @@ Uso: melhorar cobertura com poucos testes de alto valor.
 Entrada:
 
 - spec existente;
-- descricao do sistema;
+- descrição do sistema;
 - OpenAPI opcional;
-- historico de falhas;
+- histórico de falhas;
 - tags/criticidade.
 
 Saida:
@@ -596,13 +596,13 @@ Saida:
 ```yaml
 suggestions:
   - name: login invalido
-    reason: "Fluxo auth tem apenas caso feliz"
+    reason: "Fluxo auth tem apenas casó feliz"
     priority: High
     type: web
     proposedSteps:
       - goto: /login
-      - fill: { by: label, target: Email, value: usuario_invalido }
-      - fill: { by: label, target: Senha, value: senha_invalida }
+      - fill: { by: label, target: Email, value: usuário_invalido }
+      - fill: { by: label, target: Senha, value: senha_inválida }
       - click: { by: role, role: button, name: Entrar }
       - expectText: Invalid email or password
 ```
@@ -613,7 +613,7 @@ suggestions:
 - sem auto-apply;
 - output validado por schema;
 - timeout obrigatorio;
-- erro de IA nao falha run;
+- erro de IA não falha run;
 - prompt/output auditaveis com redaction;
 - pass/fail sempre deterministicos.
 
@@ -639,7 +639,7 @@ Runner Worker
 
 ## 16.3 Tools Propostas
 
-| Tool | Descricao |
+| Tool | Descrição |
 | --- | --- |
 | `testhub_list_projects` | Lista projetos |
 | `testhub_list_environments` | Lista ambientes |
@@ -652,8 +652,8 @@ Runner Worker
 
 ## 16.4 Regras MCP
 
-- MCP nao executa browser.
-- MCP nao acessa secrets.
+- MCP não executa browser.
+- MCP não acessa secrets.
 - MCP chama API.
 - Auth via token.
 - Fora do MVP.
@@ -708,7 +708,7 @@ Runner Worker
 - Monaco YAML editor;
 - botao Run.
 
-## Fase 5 - Seguranca Empresa
+## Fase 5 - Segurança Empresa
 
 - OIDC/Auth.js;
 - RBAC simples;
@@ -745,44 +745,44 @@ MVP aceito quando:
 - JSON report gerado.
 - HTML report gerado.
 - Exit codes corretos.
-- Variaveis `${VAR}` resolvidas.
+- Variáveis `${VAR}` resolvidas.
 - Secrets mascarados.
 - Exemplos funcionam.
-- Documentacao explica primeira suite.
+- Documentação explica primeira suite.
 
 ## 19. Riscos
 
 ## R-001 - Flaky UI
 
-Mitigacao: Playwright auto-wait, selectors robustos, timeout claro, retry controlado no futuro.
+Mitigação: Playwright auto-wait, selectors robustos, timeout claro, retry controlado no futuro.
 
 ## R-002 - Ambiente instavel
 
-Mitigacao: classificar infra error separado de assertion failure; health check futuro.
+Mitigação: classificar infra error separado de assertion failure; health check futuro.
 
 ## R-003 - Vazamento de secret
 
-Mitigacao: redaction agressivo e testes de mascaramento.
+Mitigação: redaction agressivo e testes de mascaramento.
 
 ## R-004 - Escopo crescer demais
 
-Mitigacao: runner/CLI primeiro; dashboard/IA/MCP depois.
+Mitigação: runner/CLI primeiro; dashboard/IA/MCP depois.
 
 ## R-005 - Lock-in IA
 
-Mitigacao: IA opcional, connections plugaveis, fallback sem IA.
+Mitigação: IA opcional, connections plugáveis, fallback sem IA.
 
 ## 20. Decisoes
 
 | ID | Decisao | Alternativas | Motivo |
 | --- | --- | --- | --- |
-| D-001 | Aplicacao alvo ja roda em ambiente | TestHub subir app | Reduz complexidade |
+| D-001 | Aplicacao alvo já roda em ambiente | TestHub subir app | Reduz complexidade |
 | D-002 | Web Smoke + API Contract | apenas web/API | Cobre legado e APIs novas |
-| D-003 | YAML declarativo | Playwright code direto | Padrao comum para dev/QA |
+| D-003 | YAML declarativo | Playwright code direto | Padrão comum para dev/QA |
 | D-004 | TypeScript | Python/Go | Coesao UI/API/CLI/runner |
 | D-005 | Playwright | Cypress/Selenium | Traces, video, auto-wait |
 | D-006 | AJV/JSON Schema | assert manual | Contrato padronizado |
 | D-007 | Runner separado | API executando teste | Robustez operacional |
 | D-008 | IA opcional | IA core | Sem dependencia externa |
 | D-009 | MCP futuro | MCP MVP | Evita distracao |
-| D-010 | Connections OpenRouter/Anthropic/OpenAI | provider unico | Evita lock-in |
+| D-010 | Connections OpenRouter/Anthropic/OpenAI | provider único | Evita lock-in |

@@ -187,7 +187,7 @@ export function createApp() {
   function requireOrganization(actor?: AuthActor): string {
     if (!actor) throw new Error('Unauthorized');
     if (actor.source === 'local' && authMode() !== 'off') {
-      if (!actor.organizationId) throw new Error('Local actor sem organizacao');
+      if (!actor.organizationId) throw new Error('Local actor sem organização');
       return actor.organizationId;
     }
     return actor.organizationId ?? 'legacy-local';
@@ -276,7 +276,7 @@ export function createApp() {
         status: 'blocked',
         detail: { permission },
       }, store.rootDir);
-      return reply.code(403).send({ error: `Papel ${actor.role} nao permite ${permission}` });
+      return reply.code(403).send({ error: `Papel ${actor.role} não permite ${permission}` });
     }
   });
 
@@ -345,18 +345,18 @@ export function createApp() {
     }).parse(req.body);
     const hasActiveUsers = await store.hasActiveUsers();
     if (hasActiveUsers && process.env.TESTHUB_ALLOW_PUBLIC_SIGNUP !== 'true') {
-      return reply.code(403).send({ error: 'Cadastro publico desabilitado' });
+      return reply.code(403).send({ error: 'Cadastro público desabilitado' });
     }
     const existing = await store.findUserByEmail(input.email);
-    if (existing) return reply.code(409).send({ error: 'Email ja cadastrado' });
+    if (existing) return reply.code(409).send({ error: 'Email já cadastrado' });
     const selectedOrganizations = input.organizationIds.length > 0
       ? (await store.listOrganizations()).filter((organization) => input.organizationIds.includes(organization.id))
       : [];
     if (input.organizationIds.length > 0 && selectedOrganizations.length !== new Set(input.organizationIds).size) {
-      return reply.code(400).send({ error: 'Organizacao invalida' });
+      return reply.code(400).send({ error: 'Organização inválida' });
     }
     if (selectedOrganizations.length === 0 && !input.organizationName) {
-      return reply.code(400).send({ error: 'Organizacao obrigatoria' });
+      return reply.code(400).send({ error: 'Organização obrigatória' });
     }
 
     const user = await store.createUser({
@@ -389,7 +389,7 @@ export function createApp() {
     }
     const memberships = await store.listMembershipsForUser(user.id);
     const membership = memberships[0];
-    if (!membership) return reply.code(403).send({ error: 'Usuario sem organizacao' });
+    if (!membership) return reply.code(403).send({ error: 'Usuário sem organização' });
     const token = createSessionToken();
     const expiresAt = sessionExpiresAt();
     await store.createSession({ userId: user.id, organizationId: membership.organizationId, tokenHash: hashToken(token), expiresAt });
@@ -415,11 +415,11 @@ export function createApp() {
     if (!actor?.userId) return reply.code(401).send({ error: 'Unauthorized' });
     const input = z.object({ organizationId: z.string().min(1) }).parse(req.body);
     const membership = await store.findMembership(actor.userId, input.organizationId);
-    if (!membership) return reply.code(403).send({ error: 'Usuario sem acesso a organizacao' });
+    if (!membership) return reply.code(403).send({ error: 'Usuário sem acessó a organização' });
     const user = await store.findUserById(actor.userId);
     const organizations = await store.listOrganizationsForUser(actor.userId);
     const organization = organizations.find((item) => item.id === input.organizationId);
-    if (!user || !organization) return reply.code(404).send({ error: 'Organizacao nao encontrada' });
+    if (!user || !organization) return reply.code(404).send({ error: 'Organização não encontrada' });
     const currentToken = tokenFromRequest(req);
     if (currentToken) {
       const currentSession = await store.findSessionByTokenHash(hashToken(currentToken));
@@ -445,13 +445,13 @@ export function createApp() {
     if (!user) return reply.code(401).send({ error: 'Unauthorized' });
     if (input.newPassword) {
       if (!input.currentPassword || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
-        return reply.code(401).send({ error: 'Senha atual invalida' });
+        return reply.code(401).send({ error: 'Senha atual inválida' });
       }
     }
     try {
       user = await store.updateUserProfile(actor.userId, { email: input.email, name: input.name });
     } catch (error) {
-      if (messageOf(error).includes('Email ja cadastrado')) return reply.code(409).send({ error: 'Email ja cadastrado' });
+      if (messageOf(error).includes('Email já cadastrado')) return reply.code(409).send({ error: 'Email já cadastrado' });
       throw error;
     }
     if (!user) return reply.code(401).send({ error: 'Unauthorized' });
@@ -486,12 +486,12 @@ export function createApp() {
     const memberOrganizationIds = new Set(memberships.map((membership) => membership.organizationId));
     const requestedOrganizationIds = input.organizationIds?.length ? [...new Set(input.organizationIds)] : undefined;
     if (requestedOrganizationIds?.some((id) => !memberOrganizationIds.has(id))) {
-      return reply.code(400).send({ error: 'Organizacao invalida' });
+      return reply.code(400).send({ error: 'Organização inválida' });
     }
     const allowedOrganizationIds = requestedOrganizationIds ?? [...memberOrganizationIds];
     const defaultOrganizationId = input.defaultOrganizationId ?? actor.organizationId ?? allowedOrganizationIds[0];
     if (!defaultOrganizationId || !allowedOrganizationIds.includes(defaultOrganizationId)) {
-      return reply.code(400).send({ error: 'Organizacao padrao invalida' });
+      return reply.code(400).send({ error: 'Organização padrão inválida' });
     }
     const rawToken = createPersonalAccessToken();
     const token = await store.createPersonalAccessToken({
@@ -510,7 +510,7 @@ export function createApp() {
     if (!actor?.userId) return reply.code(401).send({ error: 'Unauthorized' });
     const params = z.object({ id: z.string().min(1) }).parse(req.params);
     const revoked = await store.revokePersonalAccessToken(actor.userId, params.id);
-    return revoked ? reply.code(204).send() : reply.code(404).send({ error: 'Token nao encontrado' });
+    return revoked ? reply.code(204).send() : reply.code(404).send({ error: 'Token não encontrado' });
   });
 
   app.get('/api/organizations', { schema: { tags: ['system'], summary: 'List organizations' } }, async () => store.listOrganizations());
@@ -534,11 +534,11 @@ export function createApp() {
       })).min(1),
     }).parse(req.body);
     const user = await store.findUserById(params.id);
-    if (!user) return reply.code(404).send({ error: 'Usuario nao encontrado' });
+    if (!user) return reply.code(404).send({ error: 'Usuário não encontrado' });
     const organizations = await store.listOrganizations();
     const organizationIds = new Set(organizations.map((organization) => organization.id));
     if (input.memberships.some((membership) => !organizationIds.has(membership.organizationId))) {
-      return reply.code(400).send({ error: 'Organizacao invalida' });
+      return reply.code(400).send({ error: 'Organização inválida' });
     }
     const requested = new Map(input.memberships.map((membership) => [membership.organizationId, membership.role as MembershipRole]));
     const current = await store.listMembershipsForUser(user.id);
@@ -572,7 +572,7 @@ export function createApp() {
     }).parse(req.body);
     const organizationId = requireOrganization(req.actor);
     const existingUser = await store.findUserByEmail(input.email);
-    if (existingUser) return reply.code(409).send({ error: 'Usuario ja existe; troca de organizacao ainda nao suportada' });
+    if (existingUser) return reply.code(409).send({ error: 'Usuário já existe; troca de organização ainda não suportada' });
     let generatedTemporaryPassword: string | undefined;
     const temporaryPassword = input.temporaryPassword ?? createResetToken();
     passwordSchema.parse(temporaryPassword);
@@ -667,7 +667,7 @@ export function createApp() {
   app.get('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Get project' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const project = await getProjectInActorOrg(params.id, req.actor);
-    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
     return project;
   });
   app.put('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Update project' } }, async (req, reply) => {
@@ -679,17 +679,17 @@ export function createApp() {
       cleanupArtifacts: z.boolean().optional(),
     }).parse(req.body);
     const existing = await getProjectInActorOrg(params.id, req.actor);
-    if (!existing) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!existing) return reply.code(404).send({ error: 'Projeto não encontrado' });
     const project = await store.updateProject(params.id, input);
-    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
     return project;
   });
   app.delete('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Soft delete project and child records' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const project = await getProjectInActorOrg(params.id, req.actor);
-    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
     const archived = await store.archiveProject(params.id);
-    if (!archived) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!archived) return reply.code(404).send({ error: 'Projeto não encontrado' });
     return reply.code(204).send();
   });
 
@@ -698,7 +698,7 @@ export function createApp() {
     const organizationId = requireOrganization(req.actor);
     const db = await getDb();
     if (query.projectId && !db.projects.some((project) => project.id === query.projectId && project.organizationId === organizationId && project.status !== 'inactive')) {
-      return reply.code(404).send({ error: 'Projeto nao encontrado' });
+      return reply.code(404).send({ error: 'Projeto não encontrado' });
     }
     const projectIds = new Set(db.projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive').map((project) => project.id));
     return db.environments
@@ -708,7 +708,7 @@ export function createApp() {
   app.get('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Get environment' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const environment = await getEnvironmentInActorOrg(params.id, req.actor);
-    if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    if (!environment) return reply.code(404).send({ error: 'Ambiente não encontrado' });
     return { ...environment, variables: maskVariables(environment.variables) };
   });
   app.post('/api/environments', { schema: { tags: ['environments'], summary: 'Create environment' } }, async (req, reply) => {
@@ -719,10 +719,10 @@ export function createApp() {
       variables: z.record(z.string()).optional(),
     }).parse(req.body);
     if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.variables && Object.keys(input.variables).length > 0) {
-      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de secrets em producao.' });
+      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravação de secrets em produção.' });
     }
     const project = await getProjectInActorOrg(input.projectId, req.actor);
-    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
     return reply.code(201).send(await store.createEnvironment(input));
   });
   app.put('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Update environment' } }, async (req, reply) => {
@@ -733,20 +733,20 @@ export function createApp() {
       variables: z.record(z.string()).optional(),
     }).parse(req.body);
     if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.variables && Object.keys(input.variables).length > 0) {
-      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de secrets em producao.' });
+      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravação de secrets em produção.' });
     }
     const existing = await getEnvironmentInActorOrg(params.id, req.actor);
-    if (!existing) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    if (!existing) return reply.code(404).send({ error: 'Ambiente não encontrado' });
     const environment = await store.updateEnvironment(params.id, input);
-    if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    if (!environment) return reply.code(404).send({ error: 'Ambiente não encontrado' });
     return environment;
   });
   app.delete('/api/environments/:id', { schema: { tags: ['environments'], summary: 'Soft delete environment and child runs' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const environment = await getEnvironmentInActorOrg(params.id, req.actor);
-    if (!environment) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    if (!environment) return reply.code(404).send({ error: 'Ambiente não encontrado' });
     const archived = await store.archiveEnvironment(params.id);
-    if (!archived) return reply.code(404).send({ error: 'Ambiente nao encontrado' });
+    if (!archived) return reply.code(404).send({ error: 'Ambiente não encontrado' });
     return reply.code(204).send();
   });
 
@@ -755,7 +755,7 @@ export function createApp() {
     const organizationId = requireOrganization(req.actor);
     const db = await getDb();
     if (query.projectId && !db.projects.some((project) => project.id === query.projectId && project.organizationId === organizationId && project.status !== 'inactive')) {
-      return reply.code(404).send({ error: 'Projeto nao encontrado' });
+      return reply.code(404).send({ error: 'Projeto não encontrado' });
     }
     const projectIds = new Set(db.projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive').map((project) => project.id));
     return db.suites.filter((suite) => suite.status !== 'inactive' && projectIds.has(suite.projectId) && (!query.projectId || suite.projectId === query.projectId));
@@ -763,9 +763,9 @@ export function createApp() {
   app.get('/api/suites/:id', { schema: { tags: ['suites'], summary: 'Get suite with spec content' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const existing = await getSuiteInActorOrg(params.id, req.actor);
-    if (!existing) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    if (!existing) return reply.code(404).send({ error: 'Suite não encontrada' });
     const suite = await store.getSuiteContent(params.id);
-    if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    if (!suite) return reply.code(404).send({ error: 'Suite não encontrada' });
     return suite;
   });
   app.post('/api/suites', { schema: { tags: ['suites'], summary: 'Create suite' } }, async (req, reply) => {
@@ -776,7 +776,7 @@ export function createApp() {
       specContent: z.string().min(1),
     }).parse(req.body);
     const project = await getProjectInActorOrg(input.projectId, req.actor);
-    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
     try {
       await validateSpecForActor(input.specContent, req.actor);
     } catch (error) {
@@ -793,7 +793,7 @@ export function createApp() {
       specContent: z.string().min(1),
     }).parse(req.body);
     const existing = await getSuiteInActorOrg(params.id, req.actor);
-    if (!existing) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    if (!existing) return reply.code(404).send({ error: 'Suite não encontrada' });
     try {
       await validateSpecForActor(input.specContent, req.actor);
     } catch (error) {
@@ -801,7 +801,7 @@ export function createApp() {
       throw error;
     }
     const suite = await store.updateSuite(params.id, input);
-    if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    if (!suite) return reply.code(404).send({ error: 'Suite não encontrada' });
     return suite;
   });
 
@@ -839,7 +839,7 @@ export function createApp() {
   app.get('/api/flows/:id', { schema: { tags: ['suites'], summary: 'Get reusable web flow' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const flow = await store.getFlow(params.id);
-    if (!flow || flow.organizationId !== requireOrganization(req.actor)) return reply.code(404).send({ error: 'Flow nao encontrado' });
+    if (!flow || flow.organizationId !== requireOrganization(req.actor)) return reply.code(404).send({ error: 'Flow não encontrado' });
     return flow;
   });
 
@@ -859,7 +859,7 @@ export function createApp() {
     const params = z.object({ id: z.string() }).parse(req.params);
     const organizationId = requireOrganization(req.actor);
     const existing = await store.getFlow(params.id);
-    if (!existing || existing.organizationId !== organizationId) return reply.code(404).send({ error: 'Flow nao encontrado' });
+    if (!existing || existing.organizationId !== organizationId) return reply.code(404).send({ error: 'Flow não encontrado' });
     const input = flowInputSchema.parse(req.body);
     try {
       await validateFlowForActor({ ...input, steps: input.steps as WebFlow['steps'] }, req.actor);
@@ -872,7 +872,7 @@ export function createApp() {
 
   app.delete('/api/flows/:id', { schema: { tags: ['suites'], summary: 'Archive reusable web flow' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
-    if (!(await store.archiveFlow(requireOrganization(req.actor), params.id))) return reply.code(404).send({ error: 'Flow nao encontrado' });
+    if (!(await store.archiveFlow(requireOrganization(req.actor), params.id))) return reply.code(404).send({ error: 'Flow não encontrado' });
     return reply.code(204).send();
   });
 
@@ -890,7 +890,7 @@ export function createApp() {
     }).parse(req.body);
     try {
       const project = await getProjectInActorOrg(input.projectId, req.actor);
-      if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+      if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
       const specContent = openApiToSuite(input.spec, input.name, input);
       return reply.code(201).send(await store.createSuite({ projectId: input.projectId, name: input.name, type: 'api', specContent }));
     } catch (error) {
@@ -903,7 +903,7 @@ export function createApp() {
     const organizationId = requireOrganization(req.actor);
     const db = await getDb();
     if (query.projectId && !db.projects.some((project) => project.id === query.projectId && project.organizationId === organizationId && project.status !== 'inactive')) {
-      return reply.code(404).send({ error: 'Projeto nao encontrado' });
+      return reply.code(404).send({ error: 'Projeto não encontrado' });
     }
     const projectIds = new Set(db.projects.filter((project) => project.organizationId === organizationId && project.status !== 'inactive').map((project) => project.id));
     return db.runs.filter((run) => run.status !== 'deleted' && projectIds.has(run.projectId) && (!query.projectId || run.projectId === query.projectId));
@@ -911,13 +911,13 @@ export function createApp() {
   app.get('/api/runs/:id', { schema: { tags: ['runs'], summary: 'Get run' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const run = await getRunInActorOrg(params.id, req.actor);
-    if (!run) return reply.code(404).send({ error: 'Run nao encontrada' });
+    if (!run) return reply.code(404).send({ error: 'Run não encontrada' });
     return run;
   });
   app.post('/api/runs', { schema: { tags: ['runs'], summary: 'Create run' } }, async (req, reply) => {
     const input = z.object({ projectId: z.string(), environmentId: z.string(), suiteId: z.string() }).parse(req.body);
     const project = await getProjectInActorOrg(input.projectId, req.actor);
-    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
     const environment = await getEnvironmentInActorOrg(input.environmentId, req.actor);
     const suite = await getSuiteInActorOrg(input.suiteId, req.actor);
     if (!environment || !suite) return reply.code(400).send({ error: 'Environment ou suite invalido' });
@@ -936,6 +936,36 @@ export function createApp() {
       return reply.code(403).send({ error: `Host fora da allowlist: ${new URL(environment.baseUrl).hostname}` });
     }
     const createdRun = await store.createRun(input);
+    const environmentHealth = await checkEnvironmentReachable(environment.baseUrl);
+    if (!environmentHealth.ok) {
+      const finishedAt = new Date().toISOString();
+      const failedRun = await store.updateRun(createdRun.id, {
+        status: 'error',
+        error: `Environment health check falhou para ${environment.baseUrl}: ${environmentHealth.error}`,
+        finishedAt,
+        summary: { total: 0, passed: 0, failed: 0, skipped: 0, error: 1 },
+        progress: {
+          phase: 'error',
+          totalTests: 0,
+          completedTests: 0,
+          passed: 0,
+          failed: 0,
+          error: 1,
+          updatedAt: finishedAt,
+        },
+        heartbeatAt: finishedAt,
+      });
+      writeAudit({
+        action: 'run.blocked.environment_health',
+        organizationId: req.actor?.organizationId,
+        actor: actorLabel(req.actor ?? null),
+        actorRole: req.actor?.role,
+        target: environment.baseUrl,
+        status: 'blocked',
+        detail: { error: environmentHealth.error, timeoutMs: environmentHealthTimeoutMs() },
+      }, store.rootDir);
+      return reply.code(202).send(failedRun);
+    }
     if (runQueue) await runQueue.add('run', { runId: createdRun.id });
     else void executeRun(store, createdRun.id);
     return reply.code(202).send(createdRun);
@@ -943,7 +973,7 @@ export function createApp() {
   app.post('/api/runs/:id/cancel', { schema: { tags: ['runs'], summary: 'Cancel run' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const run = await getRunInActorOrg(params.id, req.actor);
-    if (!run) return reply.code(404).send({ error: 'Run nao encontrada' });
+    if (!run) return reply.code(404).send({ error: 'Run não encontrada' });
     if (!['queued', 'running'].includes(run.status)) return run;
     if (runQueue) {
       const jobs = await runQueue.getJobs(['waiting', 'delayed', 'prioritized']);
@@ -954,7 +984,7 @@ export function createApp() {
   app.get('/api/runs/:id/report', { schema: { tags: ['runs'], summary: 'Get run JSON report' } }, async (req, reply) => {
     const params = z.object({ id: z.string() }).parse(req.params);
     const run = await getRunInActorOrg(params.id, req.actor);
-    if (!run?.reportPath || !fs.existsSync(run.reportPath)) return reply.code(404).send({ error: 'Report nao encontrado' });
+    if (!run?.reportPath || !fs.existsSync(run.reportPath)) return reply.code(404).send({ error: 'Report não encontrado' });
     return JSON.parse(fs.readFileSync(run.reportPath, 'utf8'));
   });
 
@@ -964,9 +994,9 @@ export function createApp() {
       days: z.number().int().min(1).optional(),
       cleanupArtifacts: z.boolean().optional(),
     }).parse(req.body ?? {});
-    if (!input.projectId) return reply.code(400).send({ error: 'projectId obrigatorio para cleanup via API' });
+    if (!input.projectId) return reply.code(400).send({ error: 'projectId obrigatório para cleanup via API' });
     const project = await getProjectInActorOrg(input.projectId, req.actor);
-    if (!project) return reply.code(404).send({ error: 'Projeto nao encontrado' });
+    if (!project) return reply.code(404).send({ error: 'Projeto não encontrado' });
     const days = input.days ?? project?.retentionDays ?? retentionDays();
     const cleanupArtifacts = input.cleanupArtifacts ?? project?.cleanupArtifacts ?? false;
     return reply.send(await cleanupOldRuns(store, days, { projectId: input.projectId, cleanupArtifacts }));
@@ -985,8 +1015,8 @@ export function createApp() {
       .map((item) => path.resolve(item));
     const authorized = authorizedReportPaths.some((reportPath) => requested === reportPath || isPathInside(path.dirname(reportPath), requested));
     if (!authorized) return reply.code(403).send({ error: 'Artifact fora de area permitida' });
-    if (!fs.existsSync(requested)) return reply.code(404).send({ error: 'Artifact nao encontrado' });
-    if (!fs.statSync(requested).isFile()) return reply.code(404).send({ error: 'Artifact nao encontrado' });
+    if (!fs.existsSync(requested)) return reply.code(404).send({ error: 'Artifact não encontrado' });
+    if (!fs.statSync(requested).isFile()) return reply.code(404).send({ error: 'Artifact não encontrado' });
     const contentType = contentTypeFor(requested);
     if (contentType) reply.type(contentType);
     return reply.send(fs.createReadStream(requested));
@@ -1004,10 +1034,10 @@ export function createApp() {
       enabled: z.boolean().default(true),
     }).parse(req.body);
     if (process.env.NODE_ENV === 'production' && isDefaultSecretKey() && input.apiKey) {
-      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravacao de API key em producao.' });
+      return reply.code(400).send({ error: 'TESTHUB_SECRET_KEY default bloqueia gravação de API key em produção.' });
     }
     const organizationId = requireOrganization(req.actor);
-    if (input.id && !(await store.getAiConnection(organizationId, input.id))) return reply.code(404).send({ error: 'AI connection nao encontrada' });
+    if (input.id && !(await store.getAiConnection(organizationId, input.id))) return reply.code(404).send({ error: 'AI connection não encontrada' });
     return reply.code(201).send(await store.upsertAiConnection({ ...input, organizationId }));
   });
   app.post('/api/ai/:kind', { schema: { tags: ['ai'], summary: 'Run AI assistant task' } }, async (req, reply) => {
@@ -1042,11 +1072,11 @@ export function createApp() {
       approved: z.boolean(),
       reason: z.string().optional(),
     }).parse(req.body);
-    if (!input.approved) return reply.code(400).send({ error: 'Aprovacao humana obrigatoria.' });
+    if (!input.approved) return reply.code(400).send({ error: 'Aprovacao humana obrigatória.' });
     const existing = await getSuiteInActorOrg(input.suiteId, req.actor);
-    if (!existing) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    if (!existing) return reply.code(404).send({ error: 'Suite não encontrada' });
     const suite = await store.updateSuite(input.suiteId, { name: input.name, type: input.type, specContent: input.specContent });
-    if (!suite) return reply.code(404).send({ error: 'Suite nao encontrada' });
+    if (!suite) return reply.code(404).send({ error: 'Suite não encontrada' });
     writeAudit({
       action: 'ai.apply-test-fix',
       organizationId: req.actor?.organizationId,
@@ -1161,6 +1191,30 @@ function permissionFor(method: string, url: string): Permission | null {
 function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function environmentHealthTimeoutMs(): number {
+  const value = Number(process.env.TESTHUB_ENV_HEALTH_TIMEOUT_MS ?? 5000);
+  return Number.isFinite(value) && value > 0 ? value : 5000;
+}
+
+async function checkEnvironmentReachable(baseUrl: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return { ok: false, error: 'baseUrl inválida' };
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), environmentHealthTimeoutMs());
+  try {
+    await fetch(url, { method: 'HEAD', redirect: 'manual', signal: controller.signal });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: messageOf(error) };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function flowValidationSpec(steps: unknown[]): string {
