@@ -4,14 +4,14 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { BookOpen, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Copy, Database, FileCode2, Film, FolderKanban, GitBranch, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
+import { BookOpen, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Copy, Database, FileCode2, Film, FolderKanban, GitBranch, GripVertical, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
 import YAML from 'yaml';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -2060,6 +2060,12 @@ function FlowLibraryWorkspace(props: {
 }) {
   const [search, setSearch] = useState('');
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
+  const [builderDialogOpen, setBuilderDialogOpen] = useState(false);
+  const [builderSteps, setBuilderSteps] = useState<unknown[]>([]);
+  const [selectedBuilderStepIndex, setSelectedBuilderStepIndex] = useState(0);
+  const [builderApplied, setBuilderApplied] = useState(true);
+  const [draggedBuilderStepIndex, setDraggedBuilderStepIndex] = useState<number | null>(null);
+  const [dragOverBuilderStepIndex, setDragOverBuilderStepIndex] = useState<number | null>(null);
   const currentProjectFlows = props.currentProjectId
     ? props.flowLibrary.filter((flow) => !flow.projectIds?.length || flow.projectIds.includes(props.currentProjectId))
     : props.flowLibrary;
@@ -2081,6 +2087,8 @@ function FlowLibraryWorkspace(props: {
   const draftReference = flowUseReference(props.flowDraft.namespace, props.flowDraft.name);
   const draftStepCount = roughYamlListCount(props.flowDraft.steps);
   const draftParamCount = roughYamlListCount(props.flowDraft.params);
+  const flowPreview = flowStepPreviewRows(props.flowDraft.steps);
+  const builderPreview = builderSteps.map((step, index) => describeFlowStep(step, index + 1));
   const canSaveFlow = !props.busy && props.canWrite && Boolean(props.flowDraft.displayName.trim() && props.flowDraft.namespace.trim() && props.flowDraft.name.trim() && props.flowDraft.steps.trim());
   const requestSaveFlow = () => {
     if (!canSaveFlow) return;
@@ -2089,6 +2097,75 @@ function FlowLibraryWorkspace(props: {
   const confirmSaveFlow = () => {
     setScopeDialogOpen(false);
     props.onSaveFlow();
+  };
+  const openBuilder = () => {
+    const nextSteps = parseFlowStepsYaml(props.flowDraft.steps);
+    setBuilderSteps(nextSteps);
+    setSelectedBuilderStepIndex(Math.min(selectedBuilderStepIndex, Math.max(0, nextSteps.length - 1)));
+    setBuilderApplied(true);
+    setBuilderDialogOpen(true);
+  };
+  const appendBuilderStep = (template: FlowStepTemplate) => {
+    setBuilderSteps((current) => {
+      const next = [...current, cloneFlowStep(template.step)];
+      setSelectedBuilderStepIndex(next.length - 1);
+      return next;
+    });
+    setBuilderApplied(false);
+  };
+  const updateBuilderStep = (index: number, step: unknown) => {
+    setBuilderSteps((current) => current.map((item, itemIndex) => itemIndex === index ? step : item));
+    setBuilderApplied(false);
+  };
+  const removeBuilderStep = (index: number) => {
+    setBuilderSteps((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index);
+      setSelectedBuilderStepIndex(Math.max(0, Math.min(index, next.length - 1)));
+      return next;
+    });
+    setBuilderApplied(false);
+  };
+  const moveBuilderStep = (index: number, direction: -1 | 1) => {
+    reorderBuilderStep(index, index + direction);
+  };
+  const reorderBuilderStep = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setBuilderSteps((current) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= current.length || toIndex >= current.length) return current;
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      setSelectedBuilderStepIndex(toIndex);
+      return next;
+    });
+    setBuilderApplied(false);
+  };
+  const startBuilderStepDrag = (event: React.DragEvent, index: number) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    setDraggedBuilderStepIndex(index);
+    setDragOverBuilderStepIndex(index);
+  };
+  const overBuilderStepDrag = (event: React.DragEvent, index: number) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverBuilderStepIndex(index);
+  };
+  const dropBuilderStep = (event: React.DragEvent, index: number) => {
+    event.preventDefault();
+    const transferredIndex = Number(event.dataTransfer.getData('text/plain'));
+    const fromIndex = draggedBuilderStepIndex ?? transferredIndex;
+    if (Number.isInteger(fromIndex)) reorderBuilderStep(fromIndex, index);
+    setDraggedBuilderStepIndex(null);
+    setDragOverBuilderStepIndex(null);
+  };
+  const endBuilderStepDrag = () => {
+    setDraggedBuilderStepIndex(null);
+    setDragOverBuilderStepIndex(null);
+  };
+  const applyBuilderSteps = () => {
+    props.onFlowDraftChange({ ...props.flowDraft, steps: YAML.stringify(builderSteps).trim() });
+    setBuilderApplied(true);
   };
   return (
     <div className="grid min-h-0 content-start gap-4">
@@ -2185,6 +2262,7 @@ function FlowLibraryWorkspace(props: {
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <code className="rounded-md border border-[#e8e6dc] bg-white px-3 py-2 font-mono text-sm font-bold text-[#141413]">use: {draftReference}</code>
+                <Button variant="outline" onClick={openBuilder}><Bot data-icon="inline-start" />Builder visual</Button>
                 <Button variant="outline" onClick={props.onNewFlow}>Limpar</Button>
                 <Button onClick={requestSaveFlow} disabled={!canSaveFlow}>{props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}Salvar flow</Button>
               </div>
@@ -2217,26 +2295,32 @@ function FlowLibraryWorkspace(props: {
               </aside>
 
               <section className="grid content-start gap-4 bg-white p-4">
-                <div className="rounded-lg border border-[#e8e6dc] bg-[#141413] p-4 text-[#faf9f5]">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#b0aea5]">Contrato do flow</p>
-                      <p className="mt-1 text-lg font-black">{props.flowDraft.displayName || 'Sem nome'}</p>
+                <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className="grid content-start gap-4">
+                    <div className="rounded-lg border border-[#e8e6dc] bg-[#141413] p-4 text-[#faf9f5]">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#b0aea5]">Contrato do flow</p>
+                          <p className="mt-1 text-lg font-black">{props.flowDraft.displayName || 'Sem nome'}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Badge variant="outline" className="border-[#b0aea5] text-[#faf9f5]">{draftParamCount} params</Badge>
+                          <Badge variant="outline" className="border-[#b0aea5] text-[#faf9f5]">{draftStepCount} steps</Badge>
+                        </div>
+                      </div>
+                      <code className="mt-3 block truncate rounded-md bg-black/30 px-3 py-2 font-mono text-sm text-[#faf9f5]">use: {draftReference}</code>
                     </div>
-                    <div className="flex gap-2">
-                      <Badge variant="outline" className="border-[#b0aea5] text-[#faf9f5]">{draftParamCount} params</Badge>
-                      <Badge variant="outline" className="border-[#b0aea5] text-[#faf9f5]">{draftStepCount} steps</Badge>
-                    </div>
-                  </div>
-                  <code className="mt-3 block truncate rounded-md bg-black/30 px-3 py-2 font-mono text-sm text-[#faf9f5]">use: {draftReference}</code>
-                </div>
 
-                <Field label="Params YAML">
-                  <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} height="150px" />
-                </Field>
-                <Field label="Steps YAML">
-                  <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, steps: value })} validateSpec={false} height="520px" />
-                </Field>
+                    <Field label="Params YAML">
+                      <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} validationMode="flowParams" height="150px" />
+                    </Field>
+                    <Field label="Steps YAML">
+                      <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, steps: value })} validateSpec={false} validationMode="flowSteps" height="520px" />
+                    </Field>
+                  </div>
+
+                  <FlowHumanPreview rows={flowPreview} />
+                </div>
               </section>
             </div>
           </CardContent>
@@ -2281,6 +2365,114 @@ function FlowLibraryWorkspace(props: {
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog open={builderDialogOpen} onOpenChange={setBuilderDialogOpen}>
+        <DialogContent
+          className="max-h-[94vh] w-[calc(100vw-1rem)] max-w-[1760px]"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Builder visual de flow</DialogTitle>
+            <DialogDescription>Monte o fluxo por blocos, edite cada passo e aplique no YAML só quando estiver pronto.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 lg:grid-cols-[280px_minmax(520px,1fr)_420px]">
+            <div className="grid max-h-[74vh] content-start gap-2 overflow-auto rounded-lg border border-[#e8e6dc] bg-[#faf9f5] p-3">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">Blocos</p>
+              {flowStepTemplates.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => appendBuilderStep(template)}
+                  className="rounded-md border border-[#e8e6dc] bg-white p-3 text-left transition hover:border-[#788c5d] hover:bg-[#eef2dd]"
+                >
+                  <span className="block text-sm font-bold">{template.label}</span>
+                  <span className="mt-1 block text-xs text-[#66705f]">{template.description}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="grid min-h-[72vh] content-start gap-3 rounded-lg border border-[#e8e6dc] bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#788c5d]">Canvas do fluxo</p>
+                  <h3 className="text-lg font-black">{props.flowDraft.displayName || 'Flow sem nome'}</h3>
+                  <p className="mt-1 text-sm text-[#66705f]">Arraste os blocos para reorganizar. Use os botões no inspector como alternativa.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={builderPreview.length > 0 ? 'success' : 'warning'}>{builderPreview.length} passo(s)</Badge>
+                  <Badge variant={builderApplied ? 'success' : 'warning'}>{builderApplied ? 'aplicado' : 'não aplicado'}</Badge>
+                </div>
+              </div>
+              <div className="grid max-h-[62vh] gap-0 overflow-auto pr-1">
+                {builderPreview.map((row, index) => (
+                  <div
+                    key={`${row.index}:${row.title}:${row.detail}`}
+                    data-flow-builder-dropzone={index}
+                    className={cn('grid grid-cols-[34px_minmax(0,1fr)] gap-3 rounded-lg transition', dragOverBuilderStepIndex === index && draggedBuilderStepIndex !== index && 'bg-[#eef2dd] ring-2 ring-[#9fb25a]')}
+                    onDragOver={(event) => overBuilderStepDrag(event, index)}
+                    onDrop={(event) => dropBuilderStep(event, index)}
+                    onDragLeave={() => setDragOverBuilderStepIndex((current) => current === index ? null : current)}
+                  >
+                    <div className="grid justify-items-center">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBuilderStepIndex(index)}
+                        className={cn('grid h-8 w-8 place-items-center rounded-full border bg-white font-mono text-xs font-bold transition', selectedBuilderStepIndex === index ? 'border-[#141413] bg-[#eef2dd]' : 'border-[#e8e6dc] hover:border-[#788c5d]')}
+                      >
+                        {row.index}
+                      </button>
+                      {index < builderPreview.length - 1 ? <span className="h-8 w-px bg-[#e8e6dc]" /> : null}
+                    </div>
+                    <div
+                      draggable
+                      data-flow-builder-step={index}
+                      onDragStart={(event) => startBuilderStepDrag(event, index)}
+                      onDragEnd={endBuilderStepDrag}
+                      className={cn('mb-3 grid cursor-grab grid-cols-[32px_minmax(0,1fr)] items-center rounded-lg border text-left transition active:cursor-grabbing', selectedBuilderStepIndex === index ? 'border-[#141413] bg-[#eef2dd] shadow-[inset_4px_0_0_#788c5d]' : 'border-[#e8e6dc] bg-[#faf9f5] hover:border-[#788c5d]', draggedBuilderStepIndex === index && 'opacity-50')}
+                    >
+                      <button
+                        type="button"
+                        aria-label={`Arrastar passo ${row.index}`}
+                        className="grid h-full min-h-20 cursor-grab place-items-center border-r border-[#e8e6dc] text-[#66705f] active:cursor-grabbing"
+                        onMouseDown={() => setSelectedBuilderStepIndex(index)}
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBuilderStepIndex(index)}
+                        className="min-w-0 p-3 text-left"
+                      >
+                        <p className="font-bold">{row.title}</p>
+                        <p className="mt-1 text-sm text-[#66705f]">{row.detail}</p>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {builderPreview.length === 0 ? <DarkEmpty text="Adicione um bloco para começar o fluxo." /> : null}
+              </div>
+            </div>
+
+            <FlowStepInspector
+              step={builderSteps[selectedBuilderStepIndex]}
+              index={selectedBuilderStepIndex}
+              total={builderSteps.length}
+              onChange={(step) => updateBuilderStep(selectedBuilderStepIndex, step)}
+              onDelete={() => removeBuilderStep(selectedBuilderStepIndex)}
+              onMove={(direction) => moveBuilderStep(selectedBuilderStepIndex, direction)}
+            />
+          </div>
+          <div className="flex flex-wrap justify-between gap-2 border-t pt-4">
+            <DialogClose asChild>
+              <Button variant="outline">Voltar</Button>
+            </DialogClose>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Badge variant={builderApplied ? 'success' : 'warning'}>{builderApplied ? 'YAML sincronizado' : 'alterações não aplicadas'}</Badge>
+              <Button onClick={applyBuilderSteps} disabled={builderApplied}>Aplicar no YAML</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -2295,6 +2487,466 @@ function FlowStepHeader({ index, title, description }: { index: number; title: s
       </div>
     </div>
   );
+}
+
+type FlowPreviewRow = { index: number; title: string; detail: string };
+type FlowStepTemplate = { id: string; label: string; description: string; step: unknown };
+type FlowStepAction =
+  | 'goto'
+  | 'click'
+  | 'fill'
+  | 'select'
+  | 'check'
+  | 'press'
+  | 'waitFor'
+  | 'expectText'
+  | 'expectUrlContains'
+  | 'expectVisible'
+  | 'expectHidden'
+  | 'expectAttribute'
+  | 'expectValue'
+  | 'expectCount'
+  | 'uploadFile'
+  | 'use'
+  | 'extract';
+type FlowSelectorMode = 'label' | 'text' | 'role' | 'testId' | 'css' | 'placeholder' | 'selector' | 'textObject';
+
+const flowStepTemplates: FlowStepTemplate[] = [
+  { id: 'goto', label: 'Abrir página', description: 'Acessa uma rota ou URL.', step: { goto: '/login' } },
+  { id: 'click', label: 'Clicar ação', description: 'Clica em botão/link por role.', step: { click: { by: 'role', role: 'button', name: 'Entrar' } } },
+  { id: 'fill', label: 'Preencher campo', description: 'Digite valor em input.', step: { fill: { by: 'label', target: 'Email', value: '${email}' } } },
+  { id: 'select', label: 'Selecionar opção', description: 'Seleciona item de select.', step: { select: { by: 'label', target: 'Plano', value: 'pro' } } },
+  { id: 'check', label: 'Marcar checkbox', description: 'Marca checkbox/radio.', step: { check: { by: 'label', target: 'Aceito os termos' } } },
+  { id: 'press', label: 'Pressionar tecla', description: 'Envia tecla global ou em campo.', step: { press: 'Enter' } },
+  { id: 'wait', label: 'Aguardar', description: 'Espera rede, load ou tempo.', step: { waitFor: 'networkidle' } },
+  { id: 'text', label: 'Validar texto', description: 'Confirma texto na tela.', step: { expectText: 'Dashboard' } },
+  { id: 'url', label: 'Validar URL', description: 'Confirma trecho da URL.', step: { expectUrlContains: '/dashboard' } },
+  { id: 'visible', label: 'Ver elemento', description: 'Confirma que algo aparece.', step: { expectVisible: { by: 'text', target: 'Dashboard' } } },
+  { id: 'hidden', label: 'Elemento oculto', description: 'Confirma que algo sumiu.', step: { expectHidden: { by: 'text', target: 'Carregando' } } },
+  { id: 'attribute', label: 'Validar atributo', description: 'Confirma atributo de elemento.', step: { expectAttribute: { by: 'testId', target: 'order-link', attribute: 'href', value: '/orders/123' } } },
+  { id: 'value', label: 'Validar valor', description: 'Confirma valor de um campo.', step: { expectValue: { by: 'label', target: 'Email', value: '${email}' } } },
+  { id: 'count', label: 'Validar quantidade', description: 'Confirma número de elementos.', step: { expectCount: { by: 'css', target: '.item', count: 2 } } },
+  { id: 'upload', label: 'Enviar arquivo', description: 'Preenche input file.', step: { uploadFile: { selector: 'input[type="file"]', path: './fixtures/avatar.png' } } },
+  { id: 'use', label: 'Usar flow', description: 'Chama flow reutilizável.', step: { use: 'auth.login' } },
+  { id: 'extract', label: 'Extrair dado', description: 'Guarda texto para usar depois.', step: { extract: { as: 'ORDER_ID', from: { by: 'testId', target: 'order-id' }, property: 'text' } } },
+];
+
+const flowStepActionOptions: Array<{ value: FlowStepAction; label: string }> = [
+  { value: 'goto', label: 'Abrir página' },
+  { value: 'click', label: 'Clicar' },
+  { value: 'fill', label: 'Preencher campo' },
+  { value: 'select', label: 'Selecionar opção' },
+  { value: 'check', label: 'Marcar checkbox' },
+  { value: 'press', label: 'Pressionar tecla' },
+  { value: 'waitFor', label: 'Aguardar' },
+  { value: 'expectText', label: 'Validar texto' },
+  { value: 'expectUrlContains', label: 'Validar URL' },
+  { value: 'expectVisible', label: 'Ver elemento' },
+  { value: 'expectHidden', label: 'Elemento oculto' },
+  { value: 'expectAttribute', label: 'Validar atributo' },
+  { value: 'expectValue', label: 'Validar valor' },
+  { value: 'expectCount', label: 'Validar quantidade' },
+  { value: 'uploadFile', label: 'Enviar arquivo' },
+  { value: 'use', label: 'Usar flow' },
+  { value: 'extract', label: 'Extrair dado' },
+];
+
+const flowSelectorModeOptions: Array<{ value: FlowSelectorMode; label: string; placeholder: string }> = [
+  { value: 'label', label: 'Label', placeholder: 'Email' },
+  { value: 'text', label: 'Texto por target', placeholder: 'Dashboard' },
+  { value: 'role', label: 'Role acessível', placeholder: 'Entrar' },
+  { value: 'testId', label: 'Test id', placeholder: 'submit-button' },
+  { value: 'css', label: 'CSS por target', placeholder: '[data-testid="save"]' },
+  { value: 'placeholder', label: 'Placeholder', placeholder: 'Buscar' },
+  { value: 'selector', label: 'Selector direto', placeholder: 'button[type="submit"]' },
+  { value: 'textObject', label: 'Texto direto', placeholder: 'Pedido salvo' },
+];
+
+function FlowHumanPreview({ rows, compact = false }: { rows: FlowPreviewRow[]; compact?: boolean }) {
+  return (
+    <aside className={cn('grid content-start gap-3 rounded-lg border border-[#e8e6dc] bg-[#faf9f5] p-3', compact && 'bg-white')}>
+      <div>
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#788c5d]">Preview humano</p>
+        <p className="mt-1 text-sm text-[#66705f]">Leitura do fluxo sem YAML.</p>
+      </div>
+      <div className="grid gap-2">
+        {rows.map((row) => (
+          <div key={`${row.index}:${row.title}:${row.detail}:preview`} className="grid grid-cols-[28px_minmax(0,1fr)] gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-full border border-[#e8e6dc] bg-white font-mono text-[11px] font-bold">{row.index}</span>
+            <div className="min-w-0 rounded-md border border-[#e8e6dc] bg-white p-2">
+              <p className="truncate text-sm font-bold">{row.title}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-[#66705f]">{row.detail}</p>
+            </div>
+          </div>
+        ))}
+        {rows.length === 0 ? <DarkEmpty text="Sem passos para exibir." /> : null}
+      </div>
+    </aside>
+  );
+}
+
+function FlowStepInspector({ step, index, total, onChange, onDelete, onMove }: { step: unknown; index: number; total: number; onChange: (step: unknown) => void; onDelete: () => void; onMove: (direction: -1 | 1) => void }) {
+  if (!step) {
+    return (
+      <aside className="grid content-start gap-3 rounded-lg border border-[#e8e6dc] bg-[#faf9f5] p-3">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#788c5d]">Inspector</p>
+        <DarkEmpty text="Selecione ou adicione um bloco." />
+      </aside>
+    );
+  }
+  const action = flowStepAction(step);
+  const preview = describeFlowStep(step, index + 1);
+  const payload = action !== 'custom' ? flowStepPayload(step, action) : undefined;
+  const objectPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+  const fromPayload = objectPayload.from && typeof objectPayload.from === 'object' && !Array.isArray(objectPayload.from) ? objectPayload.from as Record<string, unknown> : {};
+  const setSimplePayload = (value: string) => action !== 'custom' && onChange({ [action]: value });
+  const setObjectField = (field: string, value: string) => action !== 'custom' && onChange({ [action]: { ...objectPayload, [field]: value } });
+  const setObjectNumberField = (field: string, value: string) => {
+    const numeric = Number(value);
+    if (action !== 'custom') onChange({ [action]: { ...objectPayload, [field]: Number.isFinite(numeric) ? numeric : 0 } });
+  };
+  const setSelectorPayload = (selector: Record<string, unknown>) => action !== 'custom' && onChange({ [action]: selector });
+  const setFromSelector = (selector: Record<string, unknown>) => action !== 'custom' && onChange({ [action]: { ...objectPayload, from: selector } });
+  const selectorAction = action === 'fill'
+    || action === 'click'
+    || action === 'select'
+    || action === 'check'
+    || action === 'expectVisible'
+    || action === 'expectHidden'
+    || action === 'expectAttribute'
+    || action === 'expectValue'
+    || action === 'expectCount'
+    || action === 'uploadFile';
+  return (
+    <aside className="grid max-h-[74vh] content-start gap-3 overflow-auto rounded-lg border border-[#e8e6dc] bg-[#faf9f5] p-3">
+      <div>
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#788c5d]">Inspector</p>
+        <h3 className="mt-1 text-lg font-black">Passo {index + 1}</h3>
+        <p className="text-sm text-[#66705f]">{preview.title}: {preview.detail}</p>
+      </div>
+      <Field label="Tipo do bloco">
+        <Select value={action === 'custom' ? 'goto' : action} onValueChange={(value) => onChange(defaultFlowStep(value as FlowStepAction))}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {flowStepActionOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {action === 'goto' ? <Field label="Página ou URL"><Input value={String(payload ?? '')} onChange={(event) => setSimplePayload(event.target.value)} placeholder="/login" /></Field> : null}
+      {action === 'waitFor' ? <Field label="Aguardar"><Input value={String(payload ?? '')} onChange={(event) => setSimplePayload(event.target.value)} placeholder="networkidle" /></Field> : null}
+      {action === 'expectUrlContains' ? <Field label="Trecho da URL"><Input value={String(payload ?? '')} onChange={(event) => setSimplePayload(event.target.value)} placeholder="/dashboard" /></Field> : null}
+      {action === 'press' ? (
+        <div className="grid gap-3">
+          <Field label="Destino da tecla">
+            <Select
+              value={payload && typeof payload === 'object' && !Array.isArray(payload) ? 'element' : 'page'}
+              onValueChange={(value) => onChange({ press: value === 'element' ? { by: 'label', target: 'Campo', key: String(payload || 'Enter') } : String(objectPayload.key ?? payload ?? 'Enter') })}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="page">Página inteira</SelectItem>
+                <SelectItem value="element">Elemento específico</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {payload && typeof payload === 'object' && !Array.isArray(payload) ? <FlowSelectorFields selector={objectPayload} onChange={setSelectorPayload} /> : null}
+          <Field label="Tecla">
+            <Input
+              value={payload && typeof payload === 'object' && !Array.isArray(payload) ? String(objectPayload.key ?? '') : String(payload ?? '')}
+              onChange={(event) => onChange({ press: payload && typeof payload === 'object' && !Array.isArray(payload) ? { ...objectPayload, key: event.target.value } : event.target.value })}
+              placeholder="Enter"
+            />
+          </Field>
+        </div>
+      ) : null}
+      {action === 'expectText' ? (
+        <div className="grid gap-3">
+          <Field label="Modo da validação">
+            <Select
+              value={payload && typeof payload === 'object' && !Array.isArray(payload) ? 'selector' : 'text'}
+              onValueChange={(value) => onChange({ expectText: value === 'selector' ? { by: 'text', target: String(payload ?? 'Dashboard') } : flowSelectorTarget(objectPayload, flowSelectorMode(objectPayload)) })}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="text">Texto simples</SelectItem>
+                <SelectItem value="selector">Selector</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {payload && typeof payload === 'object' && !Array.isArray(payload) ? (
+            <FlowSelectorFields selector={objectPayload} onChange={setSelectorPayload} />
+          ) : (
+            <Field label="Texto esperado"><Input value={String(payload ?? '')} onChange={(event) => setSimplePayload(event.target.value)} placeholder="Dashboard" /></Field>
+          )}
+        </div>
+      ) : null}
+      {action === 'use' ? <Field label="Flow chamado"><Input value={String(payload ?? '')} onChange={(event) => setSimplePayload(event.target.value)} placeholder="auth.login" /></Field> : null}
+
+      {selectorAction ? (
+        <div className="grid gap-3">
+          <FlowSelectorFields selector={objectPayload} onChange={setSelectorPayload} />
+          {action === 'fill' || action === 'select' || action === 'expectValue' ? (
+            <Field label={action === 'fill' ? 'Valor para preencher' : action === 'select' ? 'Opção' : 'Valor esperado'}>
+              <Input value={String(objectPayload.value ?? '')} onChange={(event) => setObjectField('value', event.target.value)} placeholder={action === 'select' ? 'pro' : '${email}'} />
+            </Field>
+          ) : null}
+          {action === 'expectAttribute' ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Atributo"><Input value={String(objectPayload.attribute ?? '')} onChange={(event) => setObjectField('attribute', event.target.value)} placeholder="href" /></Field>
+              <Field label="Valor esperado"><Input value={String(objectPayload.value ?? '')} onChange={(event) => setObjectField('value', event.target.value)} placeholder="/orders/123" /></Field>
+            </div>
+          ) : null}
+          {action === 'expectCount' ? (
+            <Field label="Quantidade esperada">
+              <Input type="number" value={String(objectPayload.count ?? 1)} onChange={(event) => setObjectNumberField('count', event.target.value)} placeholder="2" />
+            </Field>
+          ) : null}
+          {action === 'uploadFile' ? (
+            <Field label="Caminho do arquivo">
+              <Input value={String(objectPayload.path ?? '')} onChange={(event) => setObjectField('path', event.target.value)} placeholder="./fixtures/avatar.png" />
+            </Field>
+          ) : null}
+        </div>
+      ) : null}
+
+      {action === 'extract' ? (
+        <div className="grid gap-3">
+          <Field label="Salvar como"><Input value={String(objectPayload.as ?? '')} onChange={(event) => setObjectField('as', event.target.value)} placeholder="ORDER_ID" /></Field>
+          <Field label="Propriedade">
+            <Select value={String(objectPayload.property ?? 'text')} onValueChange={(value) => setObjectField('property', value)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="text">Texto</SelectItem>
+                <SelectItem value="value">Valor</SelectItem>
+                <SelectItem value="url">URL atual</SelectItem>
+                <SelectItem value="attribute">Atributo</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {String(objectPayload.property ?? 'text') !== 'url' ? <FlowSelectorFields selector={fromPayload} onChange={setFromSelector} /> : null}
+          {String(objectPayload.property ?? 'text') === 'attribute' ? <Field label="Atributo"><Input value={String(objectPayload.attribute ?? '')} onChange={(event) => setObjectField('attribute', event.target.value)} placeholder="href" /></Field> : null}
+        </div>
+      ) : null}
+
+      {action === 'custom' ? (
+        <div className="rounded-lg border border-[#e8e6dc] bg-white p-3 text-sm text-[#66705f]">
+          Este passo usa uma ação customizada. Troque o tipo para editar pelo builder.
+        </div>
+      ) : null}
+
+      <Separator />
+
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant="outline" onClick={() => onMove(-1)} disabled={index <= 0}>Subir</Button>
+        <Button variant="outline" onClick={() => onMove(1)} disabled={index >= total - 1}>Descer</Button>
+      </div>
+      <Button variant="destructive" onClick={onDelete}><Trash2 data-icon="inline-start" />Excluir passo</Button>
+    </aside>
+  );
+}
+
+function FlowSelectorFields({ selector, onChange }: { selector: Record<string, unknown>; onChange: (selector: Record<string, unknown>) => void }) {
+  const mode = flowSelectorMode(selector);
+  const option = flowSelectorModeOptions.find((item) => item.value === mode) ?? flowSelectorModeOptions[0];
+  const targetValue = flowSelectorTarget(selector, mode);
+  const supportsExact = mode === 'label' || mode === 'text' || mode === 'role' || mode === 'placeholder' || mode === 'textObject';
+  const updateMode = (nextMode: FlowSelectorMode) => {
+    onChange(buildFlowSelector(selector, nextMode, flowSelectorTarget(selector, mode)));
+  };
+  const updateTarget = (value: string) => {
+    onChange(buildFlowSelector(selector, mode, value));
+  };
+  const updateField = (field: string, value: unknown) => {
+    onChange({ ...selector, [field]: value });
+  };
+  const updateExact = (checked: boolean) => {
+    const next = { ...selector };
+    if (checked) next.exact = true;
+    else delete next.exact;
+    onChange(next);
+  };
+  return (
+    <div className="grid gap-3 rounded-lg border border-[#e8e6dc] bg-white p-3">
+      <div>
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#788c5d]">Selector</p>
+        <p className="mt-1 text-xs text-[#66705f]">Escolha o mesmo tipo aceito pelo YAML do Playwright.</p>
+      </div>
+      <Field label="Tipo de selector">
+        <Select value={mode} onValueChange={(value) => updateMode(value as FlowSelectorMode)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {flowSelectorModeOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </Field>
+      {mode === 'role' ? (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Role"><Input value={String(selector.role ?? 'button')} onChange={(event) => updateField('role', event.target.value)} placeholder="button" /></Field>
+          <Field label="Nome"><Input value={targetValue} onChange={(event) => updateTarget(event.target.value)} placeholder={option.placeholder} /></Field>
+        </div>
+      ) : (
+        <Field label={mode === 'selector' ? 'CSS selector' : mode === 'textObject' ? 'Texto' : 'Alvo'}>
+          <Input value={targetValue} onChange={(event) => updateTarget(event.target.value)} placeholder={option.placeholder} />
+        </Field>
+      )}
+      {supportsExact ? (
+        <label className="flex items-center gap-2 rounded-md border border-[#e8e6dc] bg-[#faf9f5] px-3 py-2 text-sm text-[#31372f]">
+          <input
+            type="checkbox"
+            checked={Boolean(selector.exact)}
+            onChange={(event) => updateExact(event.target.checked)}
+          />
+          Match exato
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
+function parseFlowStepsYaml(source: string): unknown[] {
+  try {
+    const parsed = source.trim() ? YAML.parse(source) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function cloneFlowStep(step: unknown): unknown {
+  try {
+    return YAML.parse(YAML.stringify(step));
+  } catch {
+    return step;
+  }
+}
+
+function flowSelectorMode(selector: Record<string, unknown>): FlowSelectorMode {
+  if (typeof selector.selector === 'string') return 'selector';
+  if (typeof selector.text === 'string') return 'textObject';
+  if (selector.by === 'role') return 'role';
+  if (selector.by === 'text') return 'text';
+  if (selector.by === 'testId') return 'testId';
+  if (selector.by === 'css') return 'css';
+  if (selector.by === 'placeholder') return 'placeholder';
+  return 'label';
+}
+
+function flowSelectorTarget(selector: Record<string, unknown>, mode: FlowSelectorMode): string {
+  if (mode === 'selector') return String(selector.selector ?? selector.target ?? '');
+  if (mode === 'textObject') return String(selector.text ?? selector.target ?? '');
+  if (mode === 'role') return String(selector.name ?? selector.target ?? '');
+  return String(selector.target ?? selector.name ?? '');
+}
+
+function buildFlowSelector(current: Record<string, unknown>, mode: FlowSelectorMode, target: string): Record<string, unknown> {
+  const extras = flowSelectorExtras(current);
+  const exact = current.exact === true && (mode === 'label' || mode === 'text' || mode === 'role' || mode === 'placeholder' || mode === 'textObject') ? { exact: true } : {};
+  if (mode === 'selector') return { ...extras, selector: target };
+  if (mode === 'textObject') return { ...extras, text: target, ...exact };
+  if (mode === 'role') return { ...extras, by: 'role', role: String(current.role ?? 'button'), name: target, ...exact };
+  return { ...extras, by: mode, target, ...exact };
+}
+
+function flowSelectorExtras(selector: Record<string, unknown>): Record<string, unknown> {
+  const selectorKeys = new Set(['by', 'target', 'role', 'name', 'exact', 'selector', 'text']);
+  return Object.fromEntries(Object.entries(selector).filter(([key]) => !selectorKeys.has(key)));
+}
+
+function flowStepAction(step: unknown): FlowStepAction | 'custom' {
+  if (!step || typeof step !== 'object' || Array.isArray(step)) return 'custom';
+  const action = Object.keys(step as Record<string, unknown>)[0];
+  return flowStepActionOptions.some((option) => option.value === action) ? action as FlowStepAction : 'custom';
+}
+
+function flowStepPayload(step: unknown, action: FlowStepAction): unknown {
+  if (!step || typeof step !== 'object' || Array.isArray(step)) return undefined;
+  return (step as Record<string, unknown>)[action];
+}
+
+function defaultFlowStep(action: FlowStepAction): unknown {
+  return cloneFlowStep(flowStepTemplates.find((template) => Object.keys(template.step as Record<string, unknown>)[0] === action)?.step ?? { [action]: '' });
+}
+
+function flowStepPreviewRows(source: string): FlowPreviewRow[] {
+  let steps: unknown[] = [];
+  try {
+    const parsed = source.trim() ? YAML.parse(source) : [];
+    if (!Array.isArray(parsed)) return [];
+    steps = parsed;
+  } catch {
+    return [{ index: 1, title: 'YAML inválido', detail: 'Corrija a sintaxe para visualizar o fluxo.' }];
+  }
+  return steps.map((step, index) => describeFlowStep(step, index + 1));
+}
+
+function describeFlowStep(step: unknown, index: number): FlowPreviewRow {
+  if (typeof step === 'string') return { index, title: 'Executar comando', detail: step };
+  if (!step || typeof step !== 'object') return { index, title: 'Passo vazio', detail: 'Preencha este bloco no YAML.' };
+  const entry = Object.entries(step as Record<string, unknown>)[0];
+  if (!entry) return { index, title: 'Passo vazio', detail: 'Preencha este bloco no YAML.' };
+  const [action, payload] = entry;
+  if (action === 'goto') return { index, title: 'Abrir página', detail: String(payload) };
+  if (action === 'waitFor') return { index, title: 'Aguardar', detail: String(payload) };
+  if (action === 'fill') return { index, title: 'Preencher campo', detail: locatorDetail(payload, 'com valor') };
+  if (action === 'click') return { index, title: 'Clicar', detail: locatorDetail(payload, 'na ação') };
+  if (action === 'select') return { index, title: 'Selecionar opção', detail: locatorDetail(payload, 'com opção') };
+  if (action === 'check') return { index, title: 'Marcar checkbox', detail: locatorDetail(payload, 'marcado') };
+  if (action === 'press') return { index, title: 'Pressionar tecla', detail: pressDetail(payload) };
+  if (action === 'expectUrlContains') return { index, title: 'Validar URL', detail: String(payload) };
+  if (action === 'expectVisible') return { index, title: 'Ver elemento', detail: locatorDetail(payload, 'visível') };
+  if (action === 'expectHidden') return { index, title: 'Elemento oculto', detail: locatorDetail(payload, 'oculto') };
+  if (action === 'expectText') return { index, title: 'Validar texto', detail: typeof payload === 'string' ? payload : locatorDetail(payload, 'com texto') };
+  if (action === 'expectAttribute') return { index, title: 'Validar atributo', detail: attributeDetail(payload) };
+  if (action === 'expectValue') return { index, title: 'Validar valor', detail: locatorDetail(payload, 'com valor esperado') };
+  if (action === 'expectCount') return { index, title: 'Validar quantidade', detail: countDetail(payload) };
+  if (action === 'uploadFile') return { index, title: 'Enviar arquivo', detail: uploadDetail(payload) };
+  if (action === 'extract') return { index, title: 'Extrair dado', detail: extractDetail(payload) };
+  if (action === 'use') return { index, title: 'Usar flow', detail: String(payload) };
+  return { index, title: action, detail: typeof payload === 'string' ? payload : 'Configuração customizada.' };
+}
+
+function locatorDetail(payload: unknown, suffix: string): string {
+  if (!payload || typeof payload !== 'object') return String(payload ?? suffix);
+  const input = payload as Record<string, unknown>;
+  const target = input.target ?? input.name ?? input.selector ?? input.text ?? input.role ?? input.by ?? 'alvo';
+  const value = input.value ? `: ${redactPlainSensitive(String(input.value), '')}` : '';
+  return `${String(target)} ${suffix}${value}`;
+}
+
+function pressDetail(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return String(payload ?? 'tecla');
+  const input = payload as Record<string, unknown>;
+  const target = input.target ?? input.name ?? input.selector ?? input.text ?? 'elemento';
+  return `${String(input.key ?? 'tecla')} em ${String(target)}`;
+}
+
+function attributeDetail(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return String(payload ?? 'atributo');
+  const input = payload as Record<string, unknown>;
+  const target = input.target ?? input.name ?? input.selector ?? input.text ?? 'alvo';
+  return `${String(target)} atributo ${String(input.attribute ?? 'atributo')} = ${String(input.value ?? '')}`;
+}
+
+function countDetail(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return String(payload ?? 'quantidade');
+  const input = payload as Record<string, unknown>;
+  const target = input.target ?? input.name ?? input.selector ?? input.text ?? 'alvo';
+  return `${String(target)} com ${String(input.count ?? 0)} ocorrência(s)`;
+}
+
+function uploadDetail(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return String(payload ?? 'arquivo');
+  const input = payload as Record<string, unknown>;
+  const target = input.target ?? input.name ?? input.selector ?? input.text ?? 'input file';
+  return `${String(input.path ?? 'arquivo')} em ${String(target)}`;
+}
+
+function extractDetail(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return 'Extrair dado';
+  const input = payload as Record<string, unknown>;
+  const from = input.from && typeof input.from === 'object' ? input.from as Record<string, unknown> : {};
+  return `${String(input.as ?? 'VAR')} de ${String(from.target ?? from.selector ?? 'elemento')}`;
 }
 
 function SettingsWorkspace(props: {
@@ -3636,17 +4288,20 @@ function SuitePreviewDialog({ open, suite, projectId, onOpenChange }: { open: bo
   );
 }
 
-function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, height = 'calc(100vh - 410px)' }: { value: string; onChange: (value: string) => void; readOnly?: boolean; validateSpec?: boolean; height?: string }) {
+type YamlValidationMode = 'syntax' | 'spec' | 'flowSteps' | 'flowParams';
+
+function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, validationMode, height = 'calc(100vh - 410px)' }: { value: string; onChange: (value: string) => void; readOnly?: boolean; validateSpec?: boolean; validationMode?: YamlValidationMode; height?: string }) {
   const monacoRef = useRef<any>(null);
   const editorRef = useRef<any>(null);
   const modelPathRef = useRef(`testhub-${Math.random().toString(36).slice(2)}.yaml`);
+  const mode = validationMode ?? (validateSpec ? 'spec' : 'syntax');
   useEffect(() => {
     const monaco = monacoRef.current;
     const editor = editorRef.current;
     const model = editor?.getModel?.();
     if (!monaco || !model) return;
-    monaco.editor.setModelMarkers(model, 'testhub-yaml', validateSpec ? yamlDiagnostics(value, monaco) : yamlSyntaxDiagnostics(value, monaco));
-  }, [value, validateSpec]);
+    monaco.editor.setModelMarkers(model, 'testhub-yaml', yamlDiagnosticsForMode(value, monaco, mode));
+  }, [value, mode]);
 
   return (
     <div className="overflow-hidden rounded-md border border-input bg-[#0b100c]" style={{ height }}>
@@ -3676,7 +4331,7 @@ function YamlEditor({ value, onChange, readOnly = false, validateSpec = true, he
           editorRef.current = editor;
           monacoRef.current = monaco;
           const model = editor.getModel();
-          if (model) monaco.editor.setModelMarkers(model, 'testhub-yaml', validateSpec ? yamlDiagnostics(value, monaco) : yamlSyntaxDiagnostics(value, monaco));
+          if (model) monaco.editor.setModelMarkers(model, 'testhub-yaml', yamlDiagnosticsForMode(value, monaco, mode));
         }}
         options={{
           minimap: { enabled: false },
@@ -3712,6 +4367,80 @@ function yamlSyntaxDiagnostics(source: string, monaco: any) {
   }
   return markers;
 }
+
+function yamlDiagnosticsForMode(source: string, monaco: any, mode: YamlValidationMode) {
+  if (mode === 'spec') return yamlDiagnostics(source, monaco);
+  if (mode === 'flowSteps') return flowStepsDiagnostics(source, monaco);
+  if (mode === 'flowParams') return flowParamsDiagnostics(source, monaco);
+  return yamlSyntaxDiagnostics(source, monaco);
+}
+
+function flowParamsDiagnostics(source: string, monaco: any) {
+  const markers = yamlSyntaxDiagnostics(source, monaco);
+  if (markers.length > 0) return markers;
+  if (!source.trim()) return markers;
+  const parsed = YAML.parse(source);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    markers.push(marker(monaco, 1, 'Params YAML deve ser um objeto chave: valor.', monaco.MarkerSeverity.Error));
+  }
+  return markers;
+}
+
+function flowStepsDiagnostics(source: string, monaco: any) {
+  const markers = yamlSyntaxDiagnostics(source, monaco);
+  if (markers.length > 0) return markers;
+  const lines = source.split('\n');
+  let parsed: unknown = [];
+  try {
+    parsed = source.trim() ? YAML.parse(source) : [];
+  } catch {
+    return markers;
+  }
+  if (!Array.isArray(parsed)) {
+    markers.push(marker(monaco, 1, 'Steps YAML deve ser uma lista de passos.', monaco.MarkerSeverity.Error));
+    return markers;
+  }
+  if (parsed.length === 0) markers.push(marker(monaco, 1, 'Adicione pelo menos 1 passo ao flow.', monaco.MarkerSeverity.Warning));
+  parsed.forEach((step, index) => {
+    const line = flowStepLine(lines, index);
+    if (typeof step === 'string') return;
+    if (!step || typeof step !== 'object' || Array.isArray(step)) {
+      markers.push(marker(monaco, line, `Passo ${index + 1} deve ser um comando YAML válido.`, monaco.MarkerSeverity.Error));
+      return;
+    }
+    const stepObject = step as Record<string, unknown>;
+    const entries = Object.entries(stepObject);
+    const [action, payload] = entries[0] ?? [];
+    if (!action) return;
+    const validUseWith = action === 'use' && entries.every(([key]) => key === 'use' || key === 'with');
+    if (entries.length !== 1 && !validUseWith) markers.push(marker(monaco, line, `Passo ${index + 1} deve ter apenas uma ação.`, monaco.MarkerSeverity.Warning));
+    if (!knownFlowActions.has(action)) markers.push(marker(monaco, line, `Ação "${action}" não é reconhecida pelo builder.`, monaco.MarkerSeverity.Warning));
+    if ((action === 'goto' || action === 'waitFor' || action === 'expectText' || action === 'expectUrlContains' || action === 'use') && !payload) {
+      markers.push(marker(monaco, line, `${action} precisa de valor.`, monaco.MarkerSeverity.Error));
+    }
+    if (
+      (
+        action === 'fill'
+        || action === 'click'
+        || action === 'select'
+        || action === 'check'
+        || action === 'expectVisible'
+        || action === 'expectHidden'
+        || action === 'expectAttribute'
+        || action === 'expectValue'
+        || action === 'expectCount'
+        || action === 'uploadFile'
+      ) && (!payload || typeof payload !== 'object')
+    ) {
+      markers.push(marker(monaco, line, `${action} precisa de objeto com by/target.`, monaco.MarkerSeverity.Error));
+    }
+    if (action === 'extract' && (!payload || typeof payload !== 'object')) markers.push(marker(monaco, line, 'extract precisa de objeto.', monaco.MarkerSeverity.Error));
+    if (action === 'press' && (!payload || (typeof payload !== 'string' && typeof payload !== 'object'))) markers.push(marker(monaco, line, 'press precisa de tecla ou objeto com key.', monaco.MarkerSeverity.Error));
+  });
+  return markers;
+}
+
+const knownFlowActions = new Set<string>(flowStepActionOptions.map((option) => option.value));
 
 function yamlDiagnostics(source: string, monaco: any) {
   const markers: Array<ReturnType<typeof marker>> = [];
@@ -3761,6 +4490,17 @@ function lineFromOffset(source: string, offset: number): number {
 function findLine(lines: string[], token: string): number {
   const index = lines.findIndex((line) => line.includes(token));
   return index >= 0 ? index + 1 : 1;
+}
+
+function flowStepLine(lines: string[], stepIndex: number): number {
+  let current = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^\s*-\s+/.test(lines[index] ?? '')) {
+      current += 1;
+      if (current === stepIndex) return index + 1;
+    }
+  }
+  return Math.max(1, stepIndex + 1);
 }
 
 function EvidenceColumn(props: {
