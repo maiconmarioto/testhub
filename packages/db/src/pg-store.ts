@@ -565,7 +565,9 @@ export class PgStore implements Store {
       organizationId: input.organizationId,
       namespace: input.namespace,
       name: input.name,
+      displayName: input.displayName ?? null,
       description: input.description ?? null,
+      projectIds: input.projectIds ?? null,
       params: input.params ?? null,
       steps: input.steps,
       status: 'active',
@@ -705,8 +707,8 @@ function rowToAiSafe(row: { id: string; organizationId: string; name: string; pr
   return { id: row.id, organizationId: row.organizationId, name: row.name, provider: row.provider as AiConnection['provider'], apiKey: row.apiKey ? '[REDACTED]' : undefined, model: row.model, baseUrl: row.baseUrl ?? undefined, enabled: row.enabled === true || row.enabled === 'true', createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
 }
 
-function rowToFlow(row: { id: string; organizationId: string; namespace: string; name: string; description?: string | null; params?: Record<string, string | number | boolean> | null; steps?: unknown[] | null; status: string; createdAt: Date | string; updatedAt: Date | string }): FlowLibraryItem {
-  return { id: row.id, organizationId: row.organizationId, namespace: row.namespace, name: row.name, description: row.description ?? undefined, params: row.params ?? undefined, steps: (row.steps ?? []) as WebStep[], status: row.status as FlowLibraryItem['status'], createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
+function rowToFlow(row: { id: string; organizationId: string; namespace: string; name: string; displayName?: string | null; description?: string | null; projectIds?: string[] | null; params?: Record<string, string | number | boolean> | null; steps?: unknown[] | null; status: string; createdAt: Date | string; updatedAt: Date | string }): FlowLibraryItem {
+  return { id: row.id, organizationId: row.organizationId, namespace: row.namespace, name: row.name, displayName: row.displayName ?? undefined, description: row.description ?? undefined, projectIds: row.projectIds ?? undefined, params: row.params ?? undefined, steps: (row.steps ?? []) as WebStep[], status: row.status as FlowLibraryItem['status'], createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
 }
 
 function toIso(value: Date | string): string {

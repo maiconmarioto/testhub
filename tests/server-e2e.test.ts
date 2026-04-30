@@ -197,6 +197,54 @@ describe('server e2e', () => {
     expect(invalidResponse.json()).toMatchObject({ valid: false });
   });
 
+  it('scopes reusable flows to selected projects', async () => {
+    const projectAResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Flow A' } });
+    const projectBResponse = await app.inject({ method: 'POST', url: '/api/projects', headers: auth(), payload: { name: 'Flow B' } });
+    const projectA = projectAResponse.json() as { id: string };
+    const projectB = projectBResponse.json() as { id: string };
+
+    const flowResponse = await app.inject({
+      method: 'POST',
+      url: '/api/flows',
+      headers: auth(),
+      payload: {
+        namespace: 'auth',
+        name: 'login',
+        displayName: 'Login compartilhado',
+        projectIds: [projectA.id],
+        steps: [{ goto: '/login' }],
+      },
+    });
+    expect(flowResponse.statusCode).toBe(201);
+    expect(flowResponse.json()).toMatchObject({ displayName: 'Login compartilhado', projectIds: [projectA.id] });
+
+    const scopedA = await app.inject({ method: 'GET', url: `/api/flows?projectId=${projectA.id}`, headers: auth() });
+    expect(scopedA.statusCode).toBe(200);
+    expect(scopedA.json()).toHaveLength(1);
+
+    const scopedB = await app.inject({ method: 'GET', url: `/api/flows?projectId=${projectB.id}`, headers: auth() });
+    expect(scopedB.statusCode).toBe(200);
+    expect(scopedB.json()).toEqual([]);
+
+    const specContent = 'version: 1\ntype: web\nname: flow-use\ntests:\n  - name: login\n    steps:\n      - use: auth.login\n';
+    const allowedSuite = await app.inject({
+      method: 'POST',
+      url: '/api/suites',
+      headers: auth(),
+      payload: { projectId: projectA.id, name: 'allowed-flow', type: 'web', specContent },
+    });
+    expect(allowedSuite.statusCode).toBe(201);
+
+    const blockedSuite = await app.inject({
+      method: 'POST',
+      url: '/api/suites',
+      headers: auth(),
+      payload: { projectId: projectB.id, name: 'blocked-flow', type: 'web', specContent },
+    });
+    expect(blockedSuite.statusCode).toBe(400);
+    expect(blockedSuite.json().error).toContain('flow "auth.login" nao encontrado');
+  });
+
   it('requires cleanup to be project scoped', async () => {
     const missingProjectResponse = await app.inject({
       method: 'POST',

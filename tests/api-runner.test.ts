@@ -63,6 +63,8 @@ describe('api runner', () => {
     };
     const results = await runApiSpec(spec, runDir);
     expect(results.map((result) => result.status)).toEqual(['passed', 'passed']);
+    expect(results[0]?.startedAt).toEqual(expect.any(String));
+    expect(results[0]?.steps?.[0]?.startedAt).toEqual(expect.any(String));
   });
 
   it('classifies assertions as failed and runtime problems as error', async () => {

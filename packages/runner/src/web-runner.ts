@@ -3,6 +3,7 @@ import path from 'node:path';
 import { chromium, expect, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import type { Artifact, SelectorInput, StepResult, TestResult, WebFlow, WebSpec, WebStep } from '../../shared/src/types.js';
 import { ensureDir, sanitizeFilename } from '../../shared/src/fs-utils.js';
+import { redactValue } from '../../shared/src/redact.js';
 import { resolveVariablesWithContext } from '../../spec/src/spec.js';
 import type { ProgressTracker } from './progress.js';
 
@@ -21,7 +22,8 @@ export async function runWebSpec(
 
     for (const test of spec.tests) {
       await options.progress?.startTest(test.name);
-      const started = Date.now();
+      const startedAt = new Date();
+      const started = startedAt.getTime();
       const testDir = path.join(runDir, sanitizeFilename(test.name));
       ensureDir(testDir);
       const artifacts: Artifact[] = [];
@@ -74,7 +76,8 @@ export async function runWebSpec(
               }
               const currentIndex = stepIndex++;
               const stepName = describeStep(step, prefix);
-              const stepStarted = Date.now();
+              const stepStartedAt = new Date();
+              const stepStarted = stepStartedAt.getTime();
               try {
                 await options.progress?.startStep(stepName);
                 const output = await runWebStep(page!, spec.baseUrl, step, test.timeoutMs ?? spec.defaults?.timeoutMs ?? 10_000);
@@ -87,6 +90,7 @@ export async function runWebSpec(
                   index: currentIndex,
                   name: stepName,
                   status: 'passed',
+                  startedAt: stepStartedAt.toISOString(),
                   durationMs: Date.now() - stepStarted,
                 });
               } catch (error) {
@@ -106,6 +110,7 @@ export async function runWebSpec(
                   index: currentIndex,
                   name: stepName,
                   status: 'failed',
+                  startedAt: stepStartedAt.toISOString(),
                   durationMs: Date.now() - stepStarted,
                   error: errorMessage,
                   artifacts: stepArtifacts,
@@ -161,6 +166,7 @@ export async function runWebSpec(
       results.push({
         name: test.name,
         status,
+        startedAt: startedAt.toISOString(),
         durationMs: Date.now() - started,
         failedStepIndex,
         error: errorMessage,
@@ -310,8 +316,26 @@ async function extractValue(page: Page, input: Extract<WebStep, { extract: unkno
 
 function describeStep(step: WebStep, prefix?: string): string {
   const [key, value] = Object.entries(step)[0] ?? ['step', ''];
-  const label = `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`;
+  const safeValue = redactStepPayload(value);
+  const label = `${key}: ${typeof safeValue === 'string' ? safeValue : JSON.stringify(safeValue)}`;
   return prefix ? `${prefix} / ${label}` : label;
+}
+
+function redactStepPayload(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactStepPayload);
+  if (!value || typeof value !== 'object') return value;
+  const input = value as Record<string, unknown>;
+  const descriptor = [input.by, input.target, input.name, input.label, input.selector, input.text]
+    .filter((item): item is string => typeof item === 'string')
+    .join(' ');
+  return Object.fromEntries(Object.entries(input).map(([key, nestedValue]) => {
+    if (key === 'value' && isSensitiveDescriptor(descriptor)) return [key, '[REDACTED]'];
+    return [key, redactValue(key, redactStepPayload(nestedValue))];
+  }));
+}
+
+function isSensitiveDescriptor(value: string): boolean {
+  return /(authorization|cookie|set-cookie|token|secret|password|senha|api[-_ ]?key)/i.test(value);
 }
 
 function shouldRecord(value: WebSpec['defaults'] extends infer D ? D extends { video?: infer V } ? V : never : never): boolean {

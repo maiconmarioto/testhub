@@ -41,6 +41,7 @@ export interface StepResult {
   index: number;
   name: string;
   status: TestStatus;
+  startedAt: string;
   durationMs: number;
   error?: string;
   artifacts?: Artifact[];
@@ -49,6 +50,7 @@ export interface StepResult {
 export interface TestResult {
   name: string;
   status: TestStatus;
+  startedAt: string;
   durationMs: number;
   failedStepIndex?: number;
   error?: string;
@@ -121,7 +123,9 @@ export interface FlowLibraryItem extends WebFlow {
   organizationId: string;
   namespace: string;
   name: string;
+  displayName?: string;
   description?: string;
+  projectIds?: string[];
   status: 'active' | 'inactive';
   createdAt: string;
   updatedAt: string;

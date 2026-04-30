@@ -16,7 +16,8 @@ export async function runApiSpec(spec: ApiSpec, runDir: string, options: { progr
 
   for (const test of spec.tests) {
     await options.progress?.startTest(test.name);
-    const started = Date.now();
+    const startedAt = new Date();
+    const started = startedAt.getTime();
     const artifacts: Artifact[] = [];
     const steps: StepResult[] = [];
     let failedStepIndex: number | undefined;
@@ -47,6 +48,7 @@ export async function runApiSpec(spec: ApiSpec, runDir: string, options: { progr
       results.push({
         name: test.name,
         status: 'passed',
+        startedAt: startedAt.toISOString(),
         durationMs: Date.now() - started,
         steps,
         artifacts,
@@ -59,6 +61,7 @@ export async function runApiSpec(spec: ApiSpec, runDir: string, options: { progr
       results.push({
         name: test.name,
         status,
+        startedAt: startedAt.toISOString(),
         durationMs: Date.now() - started,
         failedStepIndex,
         error: error instanceof Error ? error.message : String(error),
@@ -85,16 +88,17 @@ async function executeApiProgressStep(input: {
   progress?: ProgressTracker;
 }): Promise<void> {
   const index = input.steps.length;
-  const started = Date.now();
+  const startedAt = new Date();
+  const started = startedAt.getTime();
   await input.progress?.startStep(input.label);
   try {
     await executeApiStep(input);
-    input.steps.push({ index, name: input.label, status: 'passed', durationMs: Date.now() - started });
+    input.steps.push({ index, name: input.label, status: 'passed', startedAt: startedAt.toISOString(), durationMs: Date.now() - started });
     await input.progress?.finishStep('passed', input.label);
   } catch (error) {
     const status = isApiRuntimeError(error) ? 'error' : 'failed';
     const message = error instanceof Error ? error.message : String(error);
-    input.steps.push({ index, name: input.label, status, durationMs: Date.now() - started, error: message });
+    input.steps.push({ index, name: input.label, status, startedAt: startedAt.toISOString(), durationMs: Date.now() - started, error: message });
     await input.progress?.finishStep(status, input.label);
     throw error;
   }

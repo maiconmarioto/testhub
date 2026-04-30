@@ -39,5 +39,7 @@ await pool.query(`update ai_connections set organization_id = 'legacy-local' whe
 await pool.query(`alter table ai_connections alter column organization_id set not null`);
 await pool.query(`alter table runs add column if not exists progress jsonb`);
 await pool.query(`alter table runs add column if not exists heartbeat_at timestamptz`);
+await pool.query(`alter table flow_library add column if not exists display_name text`);
+await pool.query(`alter table flow_library add column if not exists project_ids jsonb`);
 await pool.end();
 console.log('migrations ok');

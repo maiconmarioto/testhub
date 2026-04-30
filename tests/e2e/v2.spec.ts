@@ -39,7 +39,7 @@ test('v2 keeps shared query params and navigates real management pages', async (
 
   await page.getByRole('link', { name: 'Alterar' }).first().click();
   await expect(page).toHaveURL(/\/suites/);
-  await expect(page.getByRole('heading', { name: 'Suites' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Suites', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Biblioteca' })).toBeVisible();
 
   await page.getByLabel('Sistema').click();
@@ -76,7 +76,7 @@ test('suites page imports OpenAPI with advanced options and saves Monaco YAML', 
   await page.getByRole('button', { name: 'Salvar' }).click();
   await expect(page.getByText(/Suite criada|Suite atualizada/)).toBeVisible({ timeout: 20_000 });
 
-  await page.getByText('Import OpenAPI').scrollIntoViewIfNeeded();
+  await page.getByRole('tab', { name: 'Import OpenAPI' }).click();
   await page.getByLabel('Base URL').fill(apiBase);
   await page.getByLabel('Tags').fill('health');
   await page.getByLabel('OpenAPI JSON').fill(JSON.stringify({
@@ -96,12 +96,14 @@ test('settings cover AI connection, retention cleanup and audit export link', as
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: 'Sistema' })).toBeVisible();
 
-  await page.getByLabel('Nome').nth(1).fill(`OpenRouter ${Date.now()}`);
+  await page.getByRole('tab', { name: 'AI' }).click();
+  await page.getByLabel('Nome').fill(`OpenRouter ${Date.now()}`);
   await page.getByLabel('Modelo').fill('openai/gpt-4o-mini');
   await page.getByLabel('API key').fill('sk-test');
   await page.getByRole('button', { name: 'Salvar AI' }).click();
   await expect(page.getByText(/AI connection criada|AI connection atualizada/)).toBeVisible({ timeout: 20_000 });
 
+  await page.getByRole('tab', { name: 'Audit' }).click();
   await page.getByLabel('Dias').fill('7');
   await page.getByRole('button', { name: 'Executar cleanup' }).click();
   await expect(page.getByText('Cleanup executado.')).toBeVisible({ timeout: 20_000 });
@@ -113,16 +115,16 @@ test('evidence sheet exposes tabs and artifacts without duplicate request rows',
   const fixture = await seedWorkspace(token, 'evidence-tabs');
   await page.goto(`/v2?project=${fixture.project.id}&environment=${fixture.environment.id}&suite=${fixture.suite.id}`);
 
-  await page.getByRole('button', { name: 'Run suite' }).click();
-  await expect(page.getByText(/Run enviada/)).toBeVisible();
-  await page.locator('header').getByRole('button', { name: 'Evidence' }).click();
-  await expect(page.getByRole('heading', { name: 'Evidence' })).toBeVisible();
+  await page.getByRole('button', { name: 'Executar suite' }).first().click();
+  await expect(page.getByText(/Execução enviada/)).toBeVisible();
+  await page.getByRole('button', { name: 'Evidências brutas' }).click();
+  await expect(page.getByRole('heading', { name: 'Evidências' })).toBeVisible();
   await page.getByRole('tab', { name: 'Timeline' }).click();
-  await expect(page.getByRole('heading', { name: 'health', exact: true }).or(page.getByText('Timeline indisponivel.'))).toBeVisible({ timeout: 20_000 });
-  await page.getByRole('tab', { name: 'Artifacts' }).click();
+  await expect(page.getByRole('heading', { name: 'health', exact: true }).or(page.getByText('Timeline indisponível.'))).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('tab', { name: 'Artefatos' }).click();
   await expect(page.getByRole('link', { name: /HTML report html/ }).first()).toBeVisible({ timeout: 20_000 });
   await page.getByRole('tab', { name: 'Payload' }).click();
-  await expect(page.getByText('Payload indisponivel para runs frontend.').or(page.getByText('loading...')).or(page.getByText(/status/)).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Payload indisponível para runs frontend.').or(page.getByText('loading...')).or(page.getByText(/status/)).first()).toBeVisible({ timeout: 20_000 });
 });
 
 test('wizard creates a full workspace and ignores Escape', async ({ page }) => {
@@ -154,7 +156,7 @@ test('v2 run flow creates evidence', async ({ page }) => {
   await expect(page.getByText(/Execução enviada/)).toBeVisible();
   await expect(page.getByText(/Execução enviada/)).toBeVisible({ timeout: 20_000 });
 
-  await expect(page.getByRole('heading', { name: 'Linha do tempo' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Relatório da execução' })).toBeVisible();
   await page.getByRole('button', { name: 'Evidências brutas' }).click();
   await expect(page.getByRole('heading', { name: 'Evidências' })).toBeVisible();
 });

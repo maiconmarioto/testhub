@@ -4,13 +4,15 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { BookOpen, Bot, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Database, FileCode2, FolderKanban, GitBranch, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
+import { BookOpen, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Copy, Database, FileCode2, Film, FolderKanban, GitBranch, Loader2, LogOut, Play, Settings2, ShieldAlert, Square, TerminalSquare, Trash2, Upload, WandSparkles, XCircle, type LucideIcon } from 'lucide-react';
 import YAML from 'yaml';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -65,14 +67,16 @@ type FlowLibraryItem = {
   organizationId: string;
   namespace: string;
   name: string;
+  displayName?: string;
   description?: string;
+  projectIds?: string[];
   params?: Record<string, string | number | boolean>;
   steps: unknown[];
   status: 'active' | 'inactive';
   createdAt: string;
   updatedAt: string;
 };
-type FlowDraft = { id: string; namespace: string; name: string; description: string; params: string; steps: string };
+type FlowDraft = { id: string; namespace: string; name: string; displayName: string; description: string; projectIds: string[]; params: string; steps: string };
 type AuditEntry = { id: string; action: string; actor: string; status: 'ok' | 'blocked' | 'error'; target?: string; createdAt: string; detail?: Record<string, unknown> };
 type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'error' | 'canceled' | 'deleted';
 type RunProgress = {
@@ -108,10 +112,11 @@ type RunReport = {
   results?: Array<{
     name: string;
     status: RunStatus;
+    startedAt?: string;
     durationMs?: number;
     error?: string;
     artifacts?: Artifact[];
-    steps?: Array<{ index?: number; name: string; status: RunStatus; error?: string; durationMs?: number; artifacts?: Artifact[] }>;
+    steps?: Array<{ index?: number; name: string; status: RunStatus; error?: string; startedAt?: string; durationMs?: number; artifacts?: Artifact[] }>;
   }>;
 };
 type EvidenceTab = 'overview' | 'timeline' | 'artifacts' | 'payload';
@@ -140,7 +145,9 @@ const defaultFlowDraft: FlowDraft = {
   id: '',
   namespace: 'auth',
   name: 'login',
+  displayName: 'Login padrão',
   description: 'Login padrão reutilizável',
+  projectIds: [],
   params: 'email: ${USER_EMAIL}\npassword: ${USER_PASSWORD}',
   steps: [
     '- goto: /login',
@@ -498,7 +505,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       return false;
     }
     try {
-      const result = await api<ValidationResult>('/api/spec/validate', { method: 'POST', body: JSON.stringify({ specContent: suiteDraft.specContent }) });
+      const result = await api<ValidationResult>('/api/spec/validate', { method: 'POST', body: JSON.stringify({ specContent: suiteDraft.specContent, projectId: projectId || undefined }) });
       setValidation(result);
       if (showNotice && result.valid) setNotice('Spec valida.');
       return result.valid;
@@ -749,7 +756,9 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       id: flow.id,
       namespace: flow.namespace,
       name: flow.name,
+      displayName: flow.displayName ?? flow.name,
       description: flow.description ?? '',
+      projectIds: flow.projectIds ?? [],
       params: flow.params ? YAML.stringify(flow.params).trim() : '',
       steps: YAML.stringify(flow.steps).trim(),
     });
@@ -758,7 +767,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
   async function saveFlow() {
     const namespace = flowDraft.namespace.trim();
     const name = flowDraft.name.trim();
-    if (!namespace || !name) return;
+    const displayName = flowDraft.displayName.trim();
+    if (!namespace || !name || !displayName) return;
     await mutate(async () => {
       const params = flowDraft.params.trim() ? YAML.parse(flowDraft.params) : undefined;
       const steps = YAML.parse(flowDraft.steps);
@@ -766,7 +776,9 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
       const payload = {
         namespace,
         name,
+        displayName,
         description: flowDraft.description.trim() || undefined,
+        projectIds: flowDraft.projectIds.length > 0 ? flowDraft.projectIds : undefined,
         params,
         steps,
       };
@@ -850,7 +862,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
     : view === 'suites'
       ? 'Suites'
       : view === 'flows'
-        ? 'Flow Library'
+        ? 'Flows'
       : view === 'settings'
         ? 'Sistema'
         : view === 'docs'
@@ -873,11 +885,7 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               <RailLink icon={BookOpen} active={view === 'docs'} label="Docs" href="/docs" />
               <RailLink icon={Settings2} active={view === 'settings'} label="Sistema" href="/settings" />
             </div>
-            <Button asChild variant="outline" size="icon" className="rounded-lg border-white/15 bg-transparent text-[#f7f6f0] hover:bg-white/10">
-              <Link href="/v2" aria-label="Ir para Execuções">
-                <ChevronRight className="h-4 w-4 rotate-180" />
-              </Link>
-            </Button>
+            <UserSidebarMenu me={me} role={role} busy={busy} onLogout={logout} />
           </div>
         </aside>
 
@@ -896,12 +904,6 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                 )}
               </div>
               <div className="flex flex-wrap items-end gap-2">
-                {me ? (
-                  <div className="grid min-w-44 rounded-md border border-[#d7d2c4] bg-white px-3 py-2 text-right">
-                    <span className="truncate text-sm font-semibold">{me.user.name || me.user.email}</span>
-                    <span className="truncate font-mono text-[10px] uppercase tracking-[0.16em] text-[#66705f]">{me.organization.name} · {role}</span>
-                  </div>
-                ) : null}
                 <Field label="Projeto">
                   <Select value={projectId} onValueChange={(value) => {
                     setProjectId(value);
@@ -924,14 +926,6 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
                     <SelectContent>{projectEnvs.map((env) => <SelectItem key={env.id} value={env.id}>{env.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
-                <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={() => setOpenSheet('evidence')}>
-                  <ClipboardCheck className="h-4 w-4" />
-                  Evidências
-                </Button>
-                <Button variant="outline" className="h-10 rounded-md border-[#d7d2c4] bg-white text-[#1f241f] hover:bg-[#eeece3]" onClick={logout} disabled={busy}>
-                  <LogOut className="h-4 w-4" />
-                  Sair
-                </Button>
               </div>
             </div>
             {error || notice ? (
@@ -1075,6 +1069,8 @@ export function V2Console({ view = 'run' }: { view?: V2View }) {
               <FlowLibraryWorkspace
                 flowLibrary={flowLibrary}
                 flowDraft={flowDraft}
+                projects={projects}
+                currentProjectId={projectId}
                 busy={busy}
                 canWrite={canWrite}
                 onFlowDraftChange={setFlowDraft}
@@ -1393,19 +1389,19 @@ function SuiteDetailPanel(props: {
             <Button variant="outline" onClick={props.onOpenEvidence} disabled={!selectedRun}><ClipboardCheck data-icon="inline-start" />Evidências brutas</Button>
             {selectedRun && ['queued', 'running'].includes(selectedRun.status) ? <Button variant="destructive" onClick={() => props.onCancelRun(selectedRun)}><Square data-icon="inline-start" />Cancelar</Button> : null}
           </div>
-          <Tabs defaultValue="timeline" className="grid gap-4">
+          <Tabs defaultValue="report" className="grid gap-4">
             <TabsList className="grid h-auto grid-cols-2 lg:grid-cols-5">
-              <TabsTrigger value="timeline">Timeline</TabsTrigger>
+              <TabsTrigger value="report">Relatório</TabsTrigger>
+              <TabsTrigger value="timeline">Passos</TabsTrigger>
               <TabsTrigger value="history">Histórico</TabsTrigger>
               <TabsTrigger value="health">Saúde</TabsTrigger>
               <TabsTrigger value="failures">Falhas</TabsTrigger>
-              <TabsTrigger value="report">Relatório</TabsTrigger>
             </TabsList>
+            <TabsContent value="report" className="m-0"><RunReportOverview suite={props.suite} env={props.env} run={selectedRun} report={props.report} /></TabsContent>
             <TabsContent value="timeline" className="m-0"><RunTimelinePanel run={selectedRun} report={props.report} /></TabsContent>
             <TabsContent value="history" className="m-0"><SuiteRunHistory runs={props.runs} suite={props.suite} env={props.env} selectedRunId={props.selectedRunId} canManageRuns={props.canManageRuns} busy={props.busy} onSelectRun={props.onSelectRun} onDeleteRun={props.onDeleteRun} /></TabsContent>
             <TabsContent value="health" className="m-0"><HealthMatrix suites={props.suites} envs={props.envs} runs={props.projectRuns} selectedSuiteId={props.suite.id} selectedEnvId={props.env?.id} onSelectCell={props.onSelectMatrixCell} /></TabsContent>
             <TabsContent value="failures" className="m-0"><FailureInbox runs={props.failureRuns} suites={props.suites} envs={props.envs} onSelectRun={props.onSelectRun} /></TabsContent>
-            <TabsContent value="report" className="m-0"><MarkdownReportBlock suite={props.suite} env={props.env} run={selectedRun} report={props.report} /></TabsContent>
           </Tabs>
         </CardContent>
       </Card>
@@ -1418,7 +1414,7 @@ function RunTimelinePanel({ run, report }: { run?: Run; report: RunReport | null
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle>Linha do tempo</CardTitle>
+        <CardTitle>Passos da execução</CardTitle>
         <CardDescription>{run ? `${shortId(run.id)} · ${runSummary(run)}` : 'Sem run selecionada.'}</CardDescription>
       </CardHeader>
       <CardContent>
@@ -1429,9 +1425,10 @@ function RunTimelinePanel({ run, report }: { run?: Run; report: RunReport | null
                 <span className={cn('mt-1 h-7 w-7 rounded-full border text-center font-mono text-xs leading-7', step.status === 'passed' ? 'border-[#1f7a50] bg-[#e8f5da] text-[#1f7a50]' : step.status === 'failed' || step.status === 'error' ? 'border-[#b43c2e] bg-[#fff0ed] text-[#b43c2e]' : 'border-[#d7d2c4] bg-white text-[#66705f]')}>{index + 1}</span>
                 <div className="rounded-lg border border-[#e1ddd1] bg-white p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold">{step.name}</p>
+                    <p className="font-semibold">{redactStepText(step.name)}</p>
                     <div className="flex gap-2">
                       <Status status={step.status} />
+                      {step.startedAt ? <Badge variant="outline">{formatDate(step.startedAt)}</Badge> : null}
                       {step.durationMs !== undefined ? <Badge variant="outline">{step.durationMs}ms</Badge> : null}
                     </div>
                   </div>
@@ -1446,6 +1443,63 @@ function RunTimelinePanel({ run, report }: { run?: Run; report: RunReport | null
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function RunReportOverview({ suite, env, run, report }: { suite: Suite; env?: Environment; run?: Run; report: RunReport | null }) {
+  const artifacts = collectArtifacts(report);
+  const videos = artifacts.filter((artifact) => artifact.type === 'video');
+  const steps = timelineRows(report, run);
+  const failingSteps = steps.filter((step) => step.status === 'failed' || step.status === 'error');
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>Relatório da execução</CardTitle>
+                <CardDescription>{run ? `${shortId(run.id)} · ${runSummary(run)}` : 'Selecione uma run para gerar relatório.'}</CardDescription>
+              </div>
+              {run ? <Status status={run.status} /> : <Badge variant="muted">Sem execução</Badge>}
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <div className="grid gap-2 md:grid-cols-4">
+              <InfoLine label="Suite" value={suite.name} />
+              <InfoLine label="Ambiente" value={env?.name ?? '-'} />
+              <InfoLine label="Início" value={formatDate(run?.startedAt ?? run?.createdAt)} />
+              <InfoLine label="Duração" value={run?.finishedAt && (run.startedAt || run.createdAt) ? `${Math.max(0, new Date(run.finishedAt).getTime() - new Date(run.startedAt ?? run.createdAt!).getTime())}ms` : '-'} />
+            </div>
+            {failingSteps.length > 0 ? (
+              <div className="rounded-lg border border-[#f0c5bd] bg-[#fff7f4] p-3">
+                <p className="text-sm font-bold text-[#9f1f16]">Falhas para investigar</p>
+                <div className="mt-2 grid gap-2">
+                  {failingSteps.slice(0, 3).map((step, index) => (
+                    <p key={`${step.name}-${index}`} className="truncate text-sm text-[#5a201b]">{redactStepText(step.name)}: {step.error ?? statusLabel(step.status)}</p>
+                  ))}
+                </div>
+              </div>
+            ) : <div className="rounded-lg border border-[#d9e7b8] bg-[#f4f8df] p-3 text-sm font-semibold text-[#1f7a50]">Sem falhas nesta execução.</div>}
+          </CardContent>
+        </Card>
+        <MarkdownReportBlock suite={suite} env={env} run={run} report={report} />
+      </div>
+      <Card className="self-start overflow-hidden">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2"><Film data-icon="inline-start" />Vídeos</CardTitle>
+          <CardDescription>{videos.length ? `${videos.length} evidência(s) em vídeo` : 'Sem vídeo para esta run.'}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {videos[0] ? (
+            <div className="overflow-hidden rounded-lg bg-black shadow-[0_18px_40px_rgba(0,0,0,0.2)]">
+              <video className="aspect-video w-full bg-black" src={artifactUrl(videos[0].path)} controls preload="metadata" />
+            </div>
+          ) : <DarkEmpty text="Vídeo indisponível para esta execução." />}
+          {videos.slice(1, 5).map((artifact) => <ArtifactLink key={artifact.path} label={artifact.label ?? 'Video'} path={artifact.path} type={artifact.type} compact />)}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -1932,35 +1986,61 @@ function SuitesWorkspace(props: {
 }) {
   return (
     <div className="grid gap-4">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <SuiteMenu {...props} />
-        <Card className="self-start">
-          <CardHeader className="pb-3">
-            <CardTitle>Import OpenAPI</CardTitle>
-            <CardDescription>Cria suite API no projeto selecionado.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            <Field label="Nome"><Input value={props.openApiDraft.name} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, name: event.target.value })} /></Field>
-            <Field label="Base URL"><Input value={props.openApiDraft.baseUrl} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, baseUrl: event.target.value })} placeholder="https://api.local" /></Field>
-            <Field label="Auth">
-              <Select value={props.openApiDraft.authTemplate} onValueChange={(value) => props.onOpenApiDraftChange({ ...props.openApiDraft, authTemplate: value as OpenApiDraft['authTemplate'] })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sem auth</SelectItem>
-                  <SelectItem value="bearer">Bearer API_TOKEN</SelectItem>
-                  <SelectItem value="apiKey">x-api-key</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Headers"><Textarea className="min-h-20 font-mono text-xs" value={props.openApiDraft.headers} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, headers: event.target.value })} placeholder="x-tenant=demo" /></Field>
-            <Field label="Tags"><Input value={props.openApiDraft.tags} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, tags: event.target.value })} placeholder="billing, smoke" /></Field>
-            <Field label="Endpoints"><Textarea className="min-h-20 font-mono text-xs" value={props.openApiDraft.selectedOperations} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, selectedOperations: event.target.value })} placeholder="GET /health&#10;createUser" /></Field>
-            <Field label="OpenAPI JSON"><Textarea className="min-h-52 font-mono text-xs" value={props.openApiDraft.spec} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, spec: event.target.value })} placeholder='{"openapi":"3.0.0","paths":{}}' /></Field>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.openApiDraft.includeBodyExamples} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, includeBodyExamples: event.target.checked })} /> Incluir body examples</label>
-            <Button onClick={props.onImportOpenApi} disabled={props.busy || !props.canWrite || !props.projectId || !props.openApiDraft.spec.trim()}><Upload data-icon="inline-start" />Importar</Button>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>Suites do projeto</CardTitle>
+              <CardDescription>Editor YAML e importação ficam separados para evitar ruído.</CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <MetricPill label="Suites" value={props.suites.length} tone="neutral" />
+              <MetricPill label="Validação" value={props.validation?.valid ? 1 : 0} tone={props.validation?.valid ? 'good' : 'neutral'} />
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+      <Tabs defaultValue="editor" className="grid gap-4">
+        <TabsList className="grid h-auto grid-cols-2 md:w-[420px]">
+          <TabsTrigger value="editor">Editor</TabsTrigger>
+          <TabsTrigger value="import">Import OpenAPI</TabsTrigger>
+        </TabsList>
+        <TabsContent value="editor" className="m-0"><SuiteMenu {...props} /></TabsContent>
+        <TabsContent value="import" className="m-0">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Import OpenAPI</CardTitle>
+              <CardDescription>Cria suite API no projeto selecionado.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+              <div className="grid gap-3 self-start">
+                <Field label="Nome"><Input value={props.openApiDraft.name} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, name: event.target.value })} /></Field>
+                <Field label="Base URL"><Input value={props.openApiDraft.baseUrl} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, baseUrl: event.target.value })} placeholder="https://api.local" /></Field>
+                <Field label="Auth">
+                  <Select value={props.openApiDraft.authTemplate} onValueChange={(value) => props.onOpenApiDraftChange({ ...props.openApiDraft, authTemplate: value as OpenApiDraft['authTemplate'] })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem auth</SelectItem>
+                      <SelectItem value="bearer">Bearer API_TOKEN</SelectItem>
+                      <SelectItem value="apiKey">x-api-key</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Headers"><Textarea className="min-h-24 font-mono text-xs" value={props.openApiDraft.headers} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, headers: event.target.value })} placeholder="x-tenant=demo" /></Field>
+                <Field label="Tags"><Input value={props.openApiDraft.tags} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, tags: event.target.value })} placeholder="billing, smoke" /></Field>
+                <Field label="Endpoints"><Textarea className="min-h-24 font-mono text-xs" value={props.openApiDraft.selectedOperations} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, selectedOperations: event.target.value })} placeholder="GET /health&#10;createUser" /></Field>
+              </div>
+              <div className="grid gap-3">
+                <Field label="OpenAPI JSON"><Textarea className="min-h-[420px] font-mono text-xs" value={props.openApiDraft.spec} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, spec: event.target.value })} placeholder='{"openapi":"3.0.0","paths":{}}' /></Field>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.openApiDraft.includeBodyExamples} onChange={(event) => props.onOpenApiDraftChange({ ...props.openApiDraft, includeBodyExamples: event.target.checked })} /> Incluir body examples</label>
+                  <Button onClick={props.onImportOpenApi} disabled={props.busy || !props.canWrite || !props.projectId || !props.openApiDraft.spec.trim()}><Upload data-icon="inline-start" />Importar</Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -1968,6 +2048,8 @@ function SuitesWorkspace(props: {
 function FlowLibraryWorkspace(props: {
   flowLibrary: FlowLibraryItem[];
   flowDraft: FlowDraft;
+  projects: Project[];
+  currentProjectId: string;
   busy: boolean;
   canWrite: boolean;
   onFlowDraftChange: (draft: FlowDraft) => void;
@@ -1976,61 +2058,241 @@ function FlowLibraryWorkspace(props: {
   onSaveFlow: () => void;
   onArchiveFlow: (flowId: string) => void;
 }) {
+  const [search, setSearch] = useState('');
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
+  const currentProjectFlows = props.currentProjectId
+    ? props.flowLibrary.filter((flow) => !flow.projectIds?.length || flow.projectIds.includes(props.currentProjectId))
+    : props.flowLibrary;
+  const visibleFlows = props.flowLibrary.filter((flow) => {
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+    return [flow.displayName, flow.name, flow.namespace, flow.description]
+      .filter(Boolean)
+      .some((value) => value!.toLowerCase().includes(query));
+  });
+  const flowDraftAllProjects = props.flowDraft.projectIds.length === 0;
+  const toggleProject = (projectId: string, checked: boolean) => {
+    const next = checked
+      ? [...new Set([...props.flowDraft.projectIds, projectId])]
+      : props.flowDraft.projectIds.filter((id) => id !== projectId);
+    props.onFlowDraftChange({ ...props.flowDraft, projectIds: next });
+  };
+  const selectedFlow = props.flowLibrary.find((flow) => flow.id === props.flowDraft.id);
+  const draftReference = flowUseReference(props.flowDraft.namespace, props.flowDraft.name);
+  const draftStepCount = roughYamlListCount(props.flowDraft.steps);
+  const draftParamCount = roughYamlListCount(props.flowDraft.params);
+  const canSaveFlow = !props.busy && props.canWrite && Boolean(props.flowDraft.displayName.trim() && props.flowDraft.namespace.trim() && props.flowDraft.name.trim() && props.flowDraft.steps.trim());
+  const requestSaveFlow = () => {
+    if (!canSaveFlow) return;
+    setScopeDialogOpen(true);
+  };
+  const confirmSaveFlow = () => {
+    setScopeDialogOpen(false);
+    props.onSaveFlow();
+  };
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_460px]">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>Flow Library</CardTitle>
-          <CardDescription>Flows web reutilizáveis da organização atual.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2">
-          {props.flowLibrary.map((flow) => (
-            <div key={flow.id} className="grid gap-3 rounded-lg border border-[#e1ddd1] bg-white p-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold">{flow.namespace}.{flow.name}</p>
-                  <p className="truncate text-xs text-[#66705f]">{flow.description || `${flow.steps.length} passos`}</p>
-                </div>
-                <Badge variant="success">ativo</Badge>
+    <div className="grid min-h-0 content-start gap-4">
+      <section className="rounded-xl border border-[#e8e6dc] bg-[#faf9f5] p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-[#788c5d]">Mesa de flows</p>
+            <h1 className="mt-1 truncate text-2xl font-black tracking-normal text-[#141413]">{props.flowDraft.id ? props.flowDraft.displayName || 'Flow selecionado' : 'Novo flow reutilizável'}</h1>
+            <p className="mt-1 text-sm text-[#66705f]">Escolha um flow, ajuste propriedades e mantenha o YAML na área principal.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <MetricPill label="Total" value={props.flowLibrary.length} tone="neutral" />
+            <MetricPill label="Projeto" value={currentProjectFlows.length} tone="good" />
+            <MetricPill label="Steps" value={draftStepCount || selectedFlow?.steps.length || 0} tone={draftStepCount > 0 || selectedFlow ? 'good' : 'warn'} />
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <Card className="overflow-hidden xl:sticky xl:top-4 xl:max-h-[calc(100vh-9rem)]">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>Biblioteca</CardTitle>
+                <CardDescription>{visibleFlows.length} visíveis · {currentProjectFlows.length} compatíveis</CardDescription>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => props.onEditFlow(flow)}>Editar</Button>
-                <Button variant="outline" size="sm" onClick={() => navigator.clipboard?.writeText(`use: ${flow.namespace}.${flow.name}`)}>
-                  <Copy data-icon="inline-start" />Copiar use
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => props.onArchiveFlow(flow.id)} disabled={props.busy || !props.canWrite}>
-                  <Trash2 data-icon="inline-start" />Arquivar
-                </Button>
+              <Button variant="outline" size="sm" onClick={props.onNewFlow}>Novo</Button>
+            </div>
+            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar flow" className={cn(controlClass, 'mt-2')} />
+          </CardHeader>
+          <CardContent className="max-h-[calc(100vh-17rem)] overflow-auto pr-3">
+            <div className="grid gap-2">
+              {visibleFlows.map((flow) => {
+                const outOfProject = Boolean(props.currentProjectId && flow.projectIds?.length && !flow.projectIds.includes(props.currentProjectId));
+                return (
+                  <article key={flow.id} className={cn('grid gap-2 rounded-lg border bg-white p-3 transition', props.flowDraft.id === flow.id ? 'border-[#151915] shadow-[inset_4px_0_0_#c7d957]' : 'border-[#e1ddd1] hover:border-[#9fb25a]')}>
+                    <button type="button" className="grid min-w-0 gap-1 text-left" onClick={() => props.onEditFlow(flow)}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="truncate text-base font-extrabold" title={flow.displayName || flow.name}>{flow.displayName || flow.name}</h2>
+                          <p className="truncate font-mono text-xs text-[#66705f]">use: {flow.namespace}.{flow.name}</p>
+                        </div>
+                        <Badge variant={outOfProject ? 'muted' : 'success'}>{flowProjectLabel(flow, props.projects)}</Badge>
+                      </div>
+                      <p className="line-clamp-2 text-xs text-[#66705f]">{flow.description || `${flow.steps.length} passo(s)`}</p>
+                    </button>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-[#66705f]">{flow.steps.length} passo(s)</span>
+                      <span className="flex shrink-0 gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="outline" size="icon" aria-label="Copiar referência" onClick={() => navigator.clipboard?.writeText(`use: ${flow.namespace}.${flow.name}`)}>
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Copiar use</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="outline" size="icon" aria-label="Arquivar flow" onClick={() => props.onArchiveFlow(flow.id)} disabled={props.busy || !props.canWrite}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Arquivar</TooltipContent>
+                        </Tooltip>
+                      </span>
+                    </div>
+                  </article>
+                );
+              })}
+              {visibleFlows.length === 0 ? <DarkEmpty text="Nenhum flow encontrado." /> : null}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-[#e8e6dc] bg-[#faf9f5] pb-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#788c5d]">{props.flowDraft.id ? 'Flow selecionado' : 'Novo flow'}</p>
+                <CardTitle className="mt-1 truncate text-2xl text-[#141413]">{props.flowDraft.displayName || 'Sem nome'}</CardTitle>
+                <CardDescription className="mt-1">{props.flowDraft.description || 'Propriedades à esquerda. YAML à direita.'}</CardDescription>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {flowDraftAllProjects ? (
+                    <Badge variant="success">todos os projetos</Badge>
+                  ) : props.flowDraft.projectIds.length > 0 ? (
+                    props.flowDraft.projectIds.map((projectId) => (
+                      <Badge key={projectId} variant="outline">{props.projects.find((project) => project.id === projectId)?.name ?? 'Projeto'}</Badge>
+                    ))
+                  ) : (
+                    <Badge variant="warning">sem escopo selecionado</Badge>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <code className="rounded-md border border-[#e8e6dc] bg-white px-3 py-2 font-mono text-sm font-bold text-[#141413]">use: {draftReference}</code>
+                <Button variant="outline" onClick={props.onNewFlow}>Limpar</Button>
+                <Button onClick={requestSaveFlow} disabled={!canSaveFlow}>{props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}Salvar flow</Button>
               </div>
             </div>
-          ))}
-          {props.flowLibrary.length === 0 ? <DarkEmpty text="Nenhum flow cadastrado." /> : null}
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="grid min-h-[720px] lg:grid-cols-[340px_minmax(0,1fr)]">
+              <aside className="grid content-start gap-5 border-b border-[#e8e6dc] bg-[#faf9f5] p-4 lg:border-b-0 lg:border-r">
+                <section className="grid gap-3">
+                  <FlowStepHeader index={1} title="Identidade" description="Nome e referência técnica." />
+                  <Field label="Nome do flow"><Input value={props.flowDraft.displayName} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, displayName: event.target.value })} placeholder="Login com senha" /></Field>
+                  <Field label="Namespace"><Input value={props.flowDraft.namespace} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, namespace: event.target.value })} placeholder="auth" /></Field>
+                  <Field label="Chave YAML"><Input value={props.flowDraft.name} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, name: event.target.value })} placeholder="login" /></Field>
+                  <Field label="Descrição"><Input value={props.flowDraft.description} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, description: event.target.value })} placeholder="Opcional" /></Field>
+                </section>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>{props.flowDraft.id ? 'Editar flow' : 'Novo flow'}</CardTitle>
-          <CardDescription>{props.flowDraft.namespace && props.flowDraft.name ? `Referência: use: ${props.flowDraft.namespace}.${props.flowDraft.name}` : 'Namespace + nome viram a referência YAML.'}</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Namespace"><Input value={props.flowDraft.namespace} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, namespace: event.target.value })} placeholder="auth" /></Field>
-            <Field label="Nome"><Input value={props.flowDraft.name} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, name: event.target.value })} placeholder="login" /></Field>
+                <Separator />
+
+                <section className="grid gap-3">
+                  <FlowStepHeader index={2} title="Resumo" description="Antes de salvar." />
+                  <div className="rounded-lg border border-[#e8e6dc] bg-white p-3">
+                    <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#66705f]">use</p>
+                    <code className="mt-1 block truncate font-mono text-sm font-bold">use: {draftReference}</code>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <MetricPill label="Params" value={draftParamCount} tone="neutral" />
+                    <MetricPill label="Steps" value={draftStepCount} tone={draftStepCount > 0 ? 'good' : 'warn'} />
+                  </div>
+                </section>
+              </aside>
+
+              <section className="grid content-start gap-4 bg-white p-4">
+                <div className="rounded-lg border border-[#e8e6dc] bg-[#141413] p-4 text-[#faf9f5]">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-[#b0aea5]">Contrato do flow</p>
+                      <p className="mt-1 text-lg font-black">{props.flowDraft.displayName || 'Sem nome'}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Badge variant="outline" className="border-[#b0aea5] text-[#faf9f5]">{draftParamCount} params</Badge>
+                      <Badge variant="outline" className="border-[#b0aea5] text-[#faf9f5]">{draftStepCount} steps</Badge>
+                    </div>
+                  </div>
+                  <code className="mt-3 block truncate rounded-md bg-black/30 px-3 py-2 font-mono text-sm text-[#faf9f5]">use: {draftReference}</code>
+                </div>
+
+                <Field label="Params YAML">
+                  <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} height="150px" />
+                </Field>
+                <Field label="Steps YAML">
+                  <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, steps: value })} validateSpec={false} height="520px" />
+                </Field>
+              </section>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      <Dialog open={scopeDialogOpen} onOpenChange={setScopeDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Definir escopo do flow</DialogTitle>
+            <DialogDescription>Escolha onde este flow vai aparecer antes de salvar.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <button
+              type="button"
+              onClick={() => props.onFlowDraftChange({ ...props.flowDraft, projectIds: [] })}
+              className={cn('rounded-lg border p-3 text-left transition', flowDraftAllProjects ? 'border-[#788c5d] bg-[#eef2dd] shadow-[inset_4px_0_0_#788c5d]' : 'border-[#e8e6dc] bg-white hover:border-[#788c5d]')}
+            >
+              <p className="font-semibold">Todos os projetos</p>
+              <p className="mt-1 text-sm text-[#66705f]">Disponível para qualquer suite da organização.</p>
+            </button>
+            <div className="grid gap-2 rounded-lg border border-[#e8e6dc] bg-[#faf9f5] p-3">
+              <div>
+                <p className="font-semibold">Projetos selecionados</p>
+                <p className="mt-1 text-sm text-[#66705f]">{props.flowDraft.projectIds.length} projeto(s) vinculados.</p>
+              </div>
+              {props.projects.map((project) => (
+                <label key={project.id} className={cn('flex min-h-11 items-center gap-2 rounded-md border p-2.5 text-sm', props.flowDraft.projectIds.includes(project.id) ? 'border-[#788c5d] bg-[#eef2dd]' : 'border-[#e8e6dc] bg-white')}>
+                  <input
+                    type="checkbox"
+                    checked={props.flowDraft.projectIds.includes(project.id)}
+                    onChange={(event) => toggleProject(project.id, event.target.checked)}
+                  />
+                  <span className="truncate">{project.name}</span>
+                </label>
+              ))}
+              {props.projects.length === 0 ? <DarkEmpty text="Nenhum projeto disponível para restringir." /> : null}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" onClick={() => setScopeDialogOpen(false)}>Cancelar</Button>
+              <Button onClick={confirmSaveFlow} disabled={!canSaveFlow}>{props.busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}Salvar flow</Button>
+            </div>
           </div>
-          <Field label="Descrição"><Input value={props.flowDraft.description} onChange={(event) => props.onFlowDraftChange({ ...props.flowDraft, description: event.target.value })} placeholder="Opcional" /></Field>
-          <Field label="Params YAML">
-            <YamlEditor value={props.flowDraft.params} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft, params: value })} validateSpec={false} height="140px" />
-          </Field>
-          <Field label="Steps YAML">
-            <YamlEditor value={props.flowDraft.steps} onChange={(value) => props.onFlowDraftChange({ ...props.flowDraft,  steps: value })} validateSpec={false} height="360px" />
-          </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={props.onSaveFlow} disabled={props.busy || !props.canWrite || !props.flowDraft.namespace.trim() || !props.flowDraft.name.trim() || !props.flowDraft.steps.trim()}>Salvar flow</Button>
-            <Button variant="outline" onClick={props.onNewFlow}>Novo</Button>
-          </div>
-        </CardContent>
-      </Card>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function FlowStepHeader({ index, title, description }: { index: number; title: string; description: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[#e8e6dc] bg-white text-sm font-black text-[#141413]">{index}</span>
+      <div className="min-w-0">
+        <h2 className="text-base font-extrabold text-[#141413]">{title}</h2>
+        <p className="text-sm text-[#66705f]">{description}</p>
+      </div>
     </div>
   );
 }
@@ -3195,7 +3457,7 @@ function SuiteMenu(props: {
   onApprovedAiPatchChange?: (value: boolean) => void;
 }) {
   return (
-    <div className="grid min-h-0 flex-1 gap-4 px-5 pb-5 md:grid-cols-[340px_minmax(0,1fr)]">
+    <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[340px_minmax(0,1fr)]">
       <Card className="min-h-0">
         <CardHeader className="pb-3">
           <CardTitle>Biblioteca</CardTitle>
@@ -4043,6 +4305,54 @@ function ArtifactLink({ label, path, type, compact }: { label: string; path: str
   );
 }
 
+function UserSidebarMenu({ me, role, busy, onLogout }: { me: AuthMe | null; role: Role; busy: boolean; onLogout: () => void }) {
+  if (!me) {
+    return (
+      <Button asChild variant="outline" size="icon" className="rounded-lg border-white/15 bg-transparent text-[#f7f6f0] hover:bg-white/10">
+        <Link href="/settings" aria-label="Sessão">
+          <Settings2 data-icon="inline-start" />
+        </Link>
+      </Button>
+    );
+  }
+  const label = me.user.name || me.user.email;
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label="Menu do usuário" className="grid rounded-full ring-1 ring-white/15 transition hover:ring-[#d7e35f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7e35f]">
+              <Avatar className="h-11 w-11 border border-white/10 bg-[#d7e35f] text-[#111611]">
+                <AvatarFallback className="bg-[#d7e35f] font-bold text-[#111611]">{initials(label)}</AvatarFallback>
+              </Avatar>
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right" sideOffset={10}>{label}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent side="right" align="end" sideOffset={12} className="w-72">
+        <DropdownMenuLabel>
+          <span className="block truncate">{label}</span>
+          <span className="block truncate font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{me.organization.name} · {role}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem asChild>
+            <Link href="/settings">
+              <Settings2 data-icon="inline-start" />
+              Perfil e sistema
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onLogout} disabled={busy} variant="destructive">
+            {busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <LogOut data-icon="inline-start" />}
+            Sair
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function RailIcon({ icon: Icon, active, label, onClick }: { icon: LucideIcon; active?: boolean; label: string; onClick: () => void }) {
   return (
     <Tooltip>
@@ -4121,7 +4431,7 @@ function statusDotClass(status: RunStatus): string {
   return 'bg-[#9da596]';
 }
 
-type TimelineRow = { name: string; status: RunStatus; durationMs?: number; error?: string; artifacts: Artifact[] };
+type TimelineRow = { name: string; status: RunStatus; startedAt?: string; durationMs?: number; error?: string; artifacts: Artifact[] };
 
 function timelineRows(report: RunReport | null, run?: Run): TimelineRow[] {
   const rows = (report?.results ?? []).flatMap((result) => {
@@ -4130,6 +4440,7 @@ function timelineRows(report: RunReport | null, run?: Run): TimelineRow[] {
       return [{
         name: result.name,
         status: result.status,
+        startedAt: result.startedAt,
         durationMs: result.durationMs,
         error: result.error,
         artifacts: result.artifacts ?? [],
@@ -4138,6 +4449,7 @@ function timelineRows(report: RunReport | null, run?: Run): TimelineRow[] {
     return resultSteps.map((step) => ({
       name: `${result.name} / ${step.name}`,
       status: step.status,
+      startedAt: step.startedAt ?? result.startedAt,
       durationMs: step.durationMs,
       error: step.error,
       artifacts: step.artifacts ?? result.artifacts ?? [],
@@ -4162,43 +4474,94 @@ function timelineRows(report: RunReport | null, run?: Run): TimelineRow[] {
 }
 
 function buildRunMarkdown({ suite, env, run, report }: { suite: Suite; env?: Environment; run?: Run; report: RunReport | null }): string {
+  const results = report?.results ?? [];
+  const failedResults = results.filter((result) => result.status === 'failed' || result.status === 'error');
+  const artifacts = collectArtifacts(report);
+  const artifactCounts = countArtifactsByType(artifacts);
   const lines = [
     `# Relatório de execução - ${suite.name}`,
     '',
-    `- Suite: ${suite.name}`,
-    `- Tipo: ${suiteTypeLabel(suite.type)}`,
-    `- Dono: ${inferredOwner(suite)}`,
-    `- Criticidade: ${inferredCriticality(suite)}`,
-    `- Ambiente: ${env ? `${env.name} (${env.baseUrl})` : 'não selecionado'}`,
-    `- Run: ${run ? run.id : 'sem run'}`,
     `- Status: ${run ? statusLabel(run.status) : 'sem execução'}`,
-    `- Criada em: ${run ? formatDate(run.createdAt) : '-'}`,
-    `- Finalizada em: ${run ? formatDate(run.finishedAt) : '-'}`,
+    `- Resultado: ${run ? runSummary(run) : 'sem execução selecionada'}`,
+    `- Ambiente: ${env ? `${env.name} (${env.baseUrl})` : 'não selecionado'}`,
+    `- Início: ${run ? formatDate(run.startedAt ?? run.createdAt) : '-'}`,
+    `- Fim: ${run ? formatDate(run.finishedAt) : '-'}`,
+    `- Run: ${run ? run.id : 'sem run'}`,
     '',
     '## Resumo',
     '',
-    run ? `- ${runSummary(run)}` : '- Sem execução selecionada.',
+    `- Suite: ${suite.name} (${suiteTypeLabel(suite.type)})`,
+    `- Dono: ${inferredOwner(suite)}`,
+    `- Criticidade: ${inferredCriticality(suite)}`,
+    `- Cenários: ${results.length || run?.summary?.total || 0}`,
+    `- Evidências: ${formatArtifactCounts(artifactCounts)}`,
     '',
-    '## Passos',
+    '## Cenários',
     '',
   ];
-  const rows = timelineRows(report, run);
-  if (rows.length === 0) {
-    lines.push('- Timeline indisponível.');
+  if (results.length === 0) {
+    lines.push('- Cenários indisponíveis enquanto o relatório final não existe.');
   } else {
-    rows.forEach((row, index) => {
-      lines.push(`${index + 1}. ${row.name}`);
-      lines.push(`   - Status: ${statusLabel(row.status)}`);
-      if (row.durationMs !== undefined) lines.push(`   - Duração: ${row.durationMs}ms`);
-      if (row.error) lines.push(`   - Erro: ${row.error}`);
-      if (row.artifacts.length > 0) lines.push(`   - Evidências: ${row.artifacts.map((artifact) => artifact.label ?? shortPath(artifact.path)).join(', ')}`);
+    results.forEach((result, index) => {
+      const resultArtifacts = dedupeArtifacts(result.artifacts ?? []);
+      lines.push(`${index + 1}. ${result.name}`);
+      lines.push(`   - Status: ${statusLabel(result.status)}`);
+      if (result.startedAt) lines.push(`   - Início: ${formatDate(result.startedAt)}`);
+      if (result.durationMs !== undefined) lines.push(`   - Duração: ${result.durationMs}ms`);
+      lines.push(`   - Passos: ${result.steps?.length ?? 0}`);
+      if (resultArtifacts.length > 0) lines.push(`   - Evidências: ${formatArtifactCounts(countArtifactsByType(resultArtifacts))}`);
+      if (result.error) lines.push(`   - Erro: ${redactStepText(result.error)}`);
+    });
+  }
+  lines.push('', '## Falhas e passos relevantes', '');
+  if (failedResults.length === 0) {
+    lines.push('- Nenhuma falha. Passo a passo completo disponível na aba Passos e nas evidências brutas.');
+  } else {
+    failedResults.forEach((result) => {
+      lines.push(`- ${result.name}: ${redactStepText(result.error ?? statusLabel(result.status))}`);
+      result.steps
+        ?.filter((step) => step.status === 'failed' || step.status === 'error')
+        .slice(0, 5)
+        .forEach((step) => lines.push(`  - ${redactStepText(step.name)}: ${redactStepText(step.error ?? statusLabel(step.status))}`));
     });
   }
   lines.push('', '## Artefatos', '');
-  const artifacts = collectArtifacts(report);
-  if (artifacts.length === 0) lines.push('- Nenhum artefato disponível.');
-  else artifacts.forEach((artifact) => lines.push(`- ${artifact.type}: ${artifact.label ?? shortPath(artifact.path)} (${artifact.path})`));
+  if (artifacts.length === 0) {
+    lines.push('- Nenhum artefato disponível.');
+  } else {
+    lines.push(`- ${formatArtifactCounts(artifactCounts)}`);
+    const reportArtifacts = artifacts.filter((artifact) => artifact.type === 'html' || artifact.type === 'json' || artifact.type === 'xml');
+    reportArtifacts.forEach((artifact) => lines.push(`- ${artifact.type}: ${artifact.label ?? shortPath(artifact.path)}`));
+  }
   return lines.join('\n');
+}
+
+function countArtifactsByType(artifacts: Artifact[]): Record<string, number> {
+  return artifacts.reduce<Record<string, number>>((counts, artifact) => {
+    counts[artifact.type] = (counts[artifact.type] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function formatArtifactCounts(counts: Record<string, number>): string {
+  const entries = Object.entries(counts);
+  if (entries.length === 0) return 'nenhuma';
+  return entries.map(([type, count]) => `${count} ${artifactTypeLabel(type)}`).join(' · ');
+}
+
+function artifactTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    html: 'HTML',
+    json: 'JSON',
+    xml: 'JUnit',
+    log: 'log(s)',
+    video: 'vídeo(s)',
+    trace: 'trace(s)',
+    screenshot: 'screenshot(s)',
+    request: 'request(s)',
+    response: 'response(s)',
+  };
+  return labels[type] ?? type;
 }
 
 function collectArtifacts(report: RunReport | null): Artifact[] {
@@ -4279,8 +4642,80 @@ function suiteTypeLabel(type: Suite['type']): string {
   return type === 'web' ? 'Frontend' : 'API';
 }
 
+function flowProjectLabel(flow: FlowLibraryItem, projects: Project[]): string {
+  if (!flow.projectIds?.length) return 'todos';
+  const names = flow.projectIds
+    .map((id) => projects.find((project) => project.id === id)?.name)
+    .filter(Boolean);
+  if (names.length === 0) return `${flow.projectIds.length} projeto(s)`;
+  if (names.length === 1) return names[0]!;
+  return `${names.length} projetos`;
+}
+
+function flowUseReference(namespace: string, name: string): string {
+  const safeNamespace = namespace.trim() || 'namespace';
+  const safeName = name.trim() || 'chave';
+  return `${safeNamespace}.${safeName}`;
+}
+
+function roughYamlListCount(value: string): number {
+  return value.split('\n').filter((line) => /^\s*-\s+/.test(line)).length;
+}
+
+function flowDraftProjectNames(draft: FlowDraft, projects: Project[]): string {
+  const names = draft.projectIds
+    .map((id) => projects.find((project) => project.id === id)?.name)
+    .filter(Boolean);
+  if (names.length === 0) return `${draft.projectIds.length} projeto(s)`;
+  if (names.length <= 2) return names.join(', ');
+  return `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+}
+
+function redactStepText(value: string): string {
+  return value.split(' / ').map((segment) => {
+    const separatorIndex = segment.indexOf(': ');
+    if (separatorIndex === -1) return segment;
+    const prefix = segment.slice(0, separatorIndex + 2);
+    const payload = segment.slice(separatorIndex + 2);
+    if (!payload.trim().startsWith('{')) return redactPlainSensitive(payload, prefix);
+    try {
+      return `${prefix}${JSON.stringify(redactStepPayload(JSON.parse(payload)))}`;
+    } catch {
+      return redactPlainSensitive(segment, '');
+    }
+  }).join(' / ');
+}
+
+function redactStepPayload(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactStepPayload);
+  if (!value || typeof value !== 'object') return value;
+  const input = value as Record<string, unknown>;
+  const descriptor = [input.by, input.target, input.name, input.label, input.selector, input.text]
+    .filter((item): item is string => typeof item === 'string')
+    .join(' ');
+  return Object.fromEntries(Object.entries(input).map(([key, nestedValue]) => {
+    if (key === 'value' && isSensitiveDescriptor(descriptor)) return [key, '[REDACTED]'];
+    if (isSensitiveDescriptor(key)) return [key, '[REDACTED]'];
+    return [key, redactStepPayload(nestedValue)];
+  }));
+}
+
+function redactPlainSensitive(value: string, prefix: string): string {
+  if (!isSensitiveDescriptor(`${prefix} ${value}`)) return `${prefix}${value}`;
+  return `${prefix}[REDACTED]`;
+}
+
+function isSensitiveDescriptor(value: string): boolean {
+  return /(authorization|cookie|set-cookie|token|secret|password|senha|api[-_ ]?key)/i.test(value);
+}
+
 function artifactUrl(path: string): string {
   return `${apiBase}/artifacts?path=${encodeURIComponent(path)}`;
+}
+
+function initials(value: string): string {
+  const parts = value.split(/[\s@._-]+/).filter(Boolean);
+  return (parts[0]?.[0] ?? 'U').concat(parts[1]?.[0] ?? '').toUpperCase();
 }
 
 function parseVars(input: string): Record<string, string> {

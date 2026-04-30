@@ -61,6 +61,8 @@ describe('web runner', () => {
     };
     const results = await runWebSpec(spec, runDir);
     expect(results[0]?.status).toBe('passed');
+    expect(results[0]?.startedAt).toEqual(expect.any(String));
+    expect(results[0]?.steps?.[0]?.startedAt).toEqual(expect.any(String));
   });
 
   it('runs reusable flows and web extract variables', async () => {
@@ -102,7 +104,7 @@ describe('web runner', () => {
     expect(results[0]?.steps.map((step) => step.name)).toEqual([
       'login / goto: /',
       'login / fill: {"by":"label","target":"Email","value":"qa@example.com"}',
-      'login / fill: {"selector":"input[type=\\"password\\"]","value":"override-secret"}',
+      'login / fill: {"selector":"input[type=\\"password\\"]","value":"[REDACTED]"}',
       'login / click: {"by":"role","role":"button","name":"Login"}',
       'extract: {"as":"ORDER_ID","from":{"by":"testId","target":"order-id"},"property":"text"}',
       'expectText: ORD-123',
@@ -147,7 +149,7 @@ describe('web runner', () => {
     expect(results[0]?.steps.map((step) => step.name)).toEqual([
       'auth.login / goto: /',
       'auth.login / fill: {"by":"label","target":"Email","value":"qa@example.com"}',
-      'auth.login / fill: {"selector":"input[type=\\"password\\"]","value":"shared-secret"}',
+      'auth.login / fill: {"selector":"input[type=\\"password\\"]","value":"[REDACTED]"}',
       'expectText: TestHub',
     ]);
   });

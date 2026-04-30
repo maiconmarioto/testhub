@@ -20,7 +20,8 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
   await store.updateRun(runId, { status: 'running', startedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() });
   const envFile = path.join(store.runsDir, `${runId}.env`);
   const variables = await store.getEnvironmentVariables(run.environmentId);
-  const flowLibrary = project ? await store.listFlowsForOrganization(project.organizationId) : [];
+  const flowLibrary = project ? (await store.listFlowsForOrganization(project.organizationId))
+    .filter((flow) => !flow.projectIds?.length || flow.projectIds.includes(project.id)) : [];
   const externalFlows = Object.fromEntries(flowLibrary.map((flow) => [`${flow.namespace}.${flow.name}`, { params: flow.params, steps: flow.steps }]));
   fs.writeFileSync(envFile, Object.entries(variables).map(([key, value]) => `${key}=${value}`).join('\n'), 'utf8');
   const persistProgress = createProgressPersister(store, runId);
