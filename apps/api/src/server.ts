@@ -29,7 +29,6 @@ import {
   readAudit,
   writeAudit,
 } from '../../../packages/db/src/audit.js';
-import { createRunQueue } from '../../../packages/shared/src/jobs.js';
 import { openApiToSuite } from '../../../packages/spec/src/openapi-import.js';
 import {
   parseSpecContent,
@@ -37,7 +36,6 @@ import {
 } from '../../../packages/spec/src/spec.js';
 import { redactDeep } from '../../../packages/shared/src/redact.js';
 import type { WebFlow } from '../../../packages/shared/src/types.js';
-import { executeRun } from '../../worker/src/run-executor.js';
 import { maskVariables } from '../../../packages/db/src/secrets.js';
 import {
   actorFromAuthorization,
@@ -363,7 +361,6 @@ const openApiDocument = {
 
 export function createApp() {
   const store = createStore();
-  const runQueue = createRunQueue();
   const app = Fastify({ logger: true });
 
   app.register(cookie);
@@ -2053,8 +2050,6 @@ export function createApp() {
         );
         return reply.code(202).send(failedRun);
       }
-      if (runQueue) await runQueue.add('run', { runId: createdRun.id });
-      else void executeRun(store, createdRun.id);
       return reply.code(202).send(createdRun);
     },
   );
@@ -2066,18 +2061,6 @@ export function createApp() {
       const run = await getRunInActorOrg(params.id, req.actor);
       if (!run) return reply.code(404).send({ error: 'Run não encontrada' });
       if (!['queued', 'running'].includes(run.status)) return run;
-      if (runQueue) {
-        const jobs = await runQueue.getJobs([
-          'waiting',
-          'delayed',
-          'prioritized',
-        ]);
-        await Promise.all(
-          jobs
-            .filter(job => job.data.runId === params.id)
-            .map(job => job.remove()),
-        );
-      }
       return store.updateRun(params.id, {
         status: 'canceled',
         finishedAt: new Date().toISOString(),
@@ -2091,18 +2074,6 @@ export function createApp() {
       const params = z.object({ id: z.string() }).parse(req.params);
       const run = await getRunInActorOrg(params.id, req.actor);
       if (!run) return reply.code(404).send({ error: 'Run não encontrada' });
-      if (runQueue && ['queued', 'running'].includes(run.status)) {
-        const jobs = await runQueue.getJobs([
-          'waiting',
-          'delayed',
-          'prioritized',
-        ]);
-        await Promise.all(
-          jobs
-            .filter(job => job.data.runId === params.id)
-            .map(job => job.remove()),
-        );
-      }
       await store.updateRun(params.id, {
         status: 'deleted',
         finishedAt: run.finishedAt ?? new Date().toISOString(),

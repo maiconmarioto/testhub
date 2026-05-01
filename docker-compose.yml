@@ -10,11 +10,6 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - '6379:6379'
-
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -44,16 +39,11 @@ services:
       S3_BUCKET: ${S3_BUCKET}
 
   api:
-    build: .
-    command:
-      [
-        'sh',
-        '-lc',
-        'node dist/packages/db/src/migrate.js && node dist/apps/cli/src/cli.js server --port 4321',
-      ]
+    build:
+      context: .
+      dockerfile: Dockerfile.api-go
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
       TESTHUB_SECRET_KEY: ${TESTHUB_SECRET_KEY}
       TESTHUB_AUTH_MODE: ${TESTHUB_AUTH_MODE:-local}
       TESTHUB_TOKEN: ${TESTHUB_TOKEN:-}
@@ -72,7 +62,6 @@ services:
       - testhub-data:/app/.testhub-data
     depends_on:
       - postgres
-      - redis
       - minio
       - createbuckets
 
@@ -81,7 +70,6 @@ services:
     command: ['node', 'dist/apps/worker/src/worker.js']
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
       TESTHUB_SECRET_KEY: ${TESTHUB_SECRET_KEY}
       TESTHUB_AUTH_MODE: ${TESTHUB_AUTH_MODE:-local}
       S3_BUCKET: ${S3_BUCKET}
@@ -93,7 +81,6 @@ services:
       - testhub-data:/app/.testhub-data
     depends_on:
       - api
-      - redis
 
   web:
     build:
