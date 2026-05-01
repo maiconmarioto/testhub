@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { Field, InfoLine } from '../shared';
+import { Field, InfoLine } from '../shared/ui';
 
 export function DocumentationWorkspace() {
   const docs = useMemo(() => ([

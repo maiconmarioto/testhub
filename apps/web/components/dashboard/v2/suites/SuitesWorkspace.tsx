@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { OpenApiDraft, Suite, ValidationResult } from '../types';
-import { DarkEmpty, Field, MetricPill, Signal, shortId, suiteTypeLabel } from '../shared';
+import { shortId, suiteTypeLabel } from '../shared/runUtils';
+import { DarkEmpty, Field, MetricPill, Signal } from '../shared/ui';
 import { YamlEditor } from '../yaml/YamlEditor';
 
 export function SuitesWorkspace(props: {

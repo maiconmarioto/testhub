@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { Suite, WizardDraft } from '../types';
-import { Field, RunFact, suiteTypeLabel } from '../shared';
+import { suiteTypeLabel } from '../shared/runUtils';
+import { Field, RunFact } from '../shared/ui';
 import { YamlEditor } from '../yaml/YamlEditor';
 
 export function WizardDialog(props: {

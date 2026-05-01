@@ -37,7 +37,7 @@ import type {
   UserManagementItem,
   ValidationResult,
 } from '../types';
-import { collectArtifacts, summarize } from '../shared';
+import { collectArtifacts, summarize } from '../shared/runUtils';
 
 export type V2ConsoleContextValue = {
   projects: Project[];

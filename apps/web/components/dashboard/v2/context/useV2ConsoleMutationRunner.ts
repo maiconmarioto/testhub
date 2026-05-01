@@ -3,7 +3,7 @@
 import { type Dispatch, type SetStateAction } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../query/queryKeys';
-import { messageOf } from '../shared';
+import { messageOf } from '../shared/formUtils';
 
 export function useV2ConsoleMutationRunner(input: {
   setBusy: Dispatch<SetStateAction<boolean>>;

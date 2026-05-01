@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import YAML from 'yaml';
 import type { YamlValidationMode } from '../types';
-import { messageOf } from '../shared';
+import { messageOf } from '../shared/formUtils';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 

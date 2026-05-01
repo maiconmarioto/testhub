@@ -22,12 +22,14 @@ import type {
 } from '../types';
 import {
   latestRun,
-  messageOf,
-  parseVars,
   runSummary,
   shortId,
+} from '../shared/runUtils';
+import {
+  messageOf,
+  parseVars,
   splitList,
-} from '../shared';
+} from '../shared/formUtils';
 
 export function V2ConsoleProvider({
   section,

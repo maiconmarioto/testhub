@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { DarkEmpty } from '../shared';
+import { DarkEmpty } from '../shared/ui';
 import type { FlowPreviewRow } from './flowBuilderTypes';
 
 export function FlowStepHeader({ index, title, description }: { index: number; title: string; description: string }) {

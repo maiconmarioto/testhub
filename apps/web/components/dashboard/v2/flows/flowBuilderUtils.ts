@@ -1,5 +1,5 @@
 import YAML from 'yaml';
-import { redactPlainSensitive } from '../shared';
+import { redactPlainSensitive } from '../shared/runUtils';
 import type { FlowPreviewRow, FlowSelectorMode, FlowStepAction, FlowStepTemplate } from './flowBuilderTypes';
 
 export const flowStepTemplates: FlowStepTemplate[] = [

@@ -23,7 +23,7 @@ import type {
   UserManagementItem,
   ValidationResult,
 } from '../types';
-import { mergeMembershipEdit, messageOf } from '../shared';
+import { mergeMembershipEdit, messageOf } from '../shared/formUtils';
 
 export function useV2ConsoleEffects(input: {
   section: ConsoleSection;

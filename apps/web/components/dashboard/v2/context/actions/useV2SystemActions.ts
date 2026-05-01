@@ -11,7 +11,7 @@ import type {
   RunReport,
   Suite,
 } from '../../types';
-import { formatDate } from '../../shared';
+import { formatDate } from '../../shared/runUtils';
 
 export function useV2SystemActions(input: {
   aiDraft: AiDraft;

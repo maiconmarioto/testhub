@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import type { Run } from '../types';
-import { formatDate } from '../shared';
+import { formatDate } from '../shared/runUtils';
 
 export function LiveProgress({ run }: { run: Run }) {
   const progress = run.progress;

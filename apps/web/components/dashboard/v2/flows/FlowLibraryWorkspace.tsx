@@ -14,7 +14,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { controlClass } from '../constants';
 import type { FlowDraft, FlowLibraryItem, Project } from '../types';
-import { DarkEmpty, Field, MetricPill, flowProjectLabel, flowUseReference, roughYamlListCount } from '../shared';
+import { flowProjectLabel, flowUseReference, roughYamlListCount } from '../shared/flowUtils';
+import { DarkEmpty, Field, MetricPill } from '../shared/ui';
 import { YamlEditor } from '../yaml/YamlEditor';
 import { FlowHumanPreview, FlowStepHeader } from './FlowBuilderPreview';
 import { FlowStepInspector } from './FlowStepInspector';

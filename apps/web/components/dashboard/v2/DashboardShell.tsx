@@ -29,14 +29,9 @@ import {
 } from '@/components/ui/sheet';
 import { darkSelectClass } from './constants';
 import { EvidenceColumn } from './evidence/EvidenceSheet';
-import {
-  Field,
-  RailLink,
-  Signal,
-  UserSidebarMenu,
-  runSummary,
-  shortId,
-} from './shared';
+import { RailLink, UserSidebarMenu } from './shared/navigation';
+import { runSummary, shortId } from './shared/runUtils';
+import { Field, Signal } from './shared/ui';
 import { useV2Console } from './context/V2ConsoleProvider';
 import { SuitePreviewDialog } from './suites/SuitePreviewDialog';
 import type { ConsoleSection } from './types';

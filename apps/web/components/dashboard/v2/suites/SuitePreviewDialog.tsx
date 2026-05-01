@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { SuiteWithContent } from '../types';
-import { shortId, suiteTypeLabel } from '../shared';
+import { shortId, suiteTypeLabel } from '../shared/runUtils';
 import { YamlEditor } from '../yaml/YamlEditor';
 
 export function SuitePreviewDialog({ open, suite, projectId, onOpenChange }: { open: boolean; suite: SuiteWithContent | null; projectId: string; onOpenChange: (open: boolean) => void }) {

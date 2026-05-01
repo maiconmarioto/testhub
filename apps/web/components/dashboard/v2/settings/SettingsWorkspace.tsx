@@ -12,7 +12,8 @@ import { apiBase } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { roles } from '../constants';
 import type { AiConnection, AuditEntry, AuthMe, MembershipEdit, Organization, OrganizationMember, PersonalAccessToken, Role, SecurityStatus, UserManagementItem } from '../types';
-import { DarkEmpty, Field, InfoLine, Signal, formatDate, shortId } from '../shared';
+import { formatDate, shortId } from '../shared/runUtils';
+import { DarkEmpty, Field, InfoLine, Signal } from '../shared/ui';
 
 export function SettingsWorkspace(props: {
   me: AuthMe | null;

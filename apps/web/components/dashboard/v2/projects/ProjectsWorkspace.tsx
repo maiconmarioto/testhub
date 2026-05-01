@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { Environment, Project, Run, Suite } from '../types';
-import { DarkEmpty, Field, shortId, suiteTypeLabel } from '../shared';
+import { shortId, suiteTypeLabel } from '../shared/runUtils';
+import { DarkEmpty, Field } from '../shared/ui';
 
 export function ProjectsWorkspace(props: {
   projects: Project[];

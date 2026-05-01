@@ -11,7 +11,10 @@ import { cn } from '@/lib/utils';
 import type { Artifact, Environment, EvidenceTab, Run, RunReport, Suite } from '../types';
 import { useArtifactJsonQuery } from '../query/useArtifactQueries';
 import { LiveProgress } from '../run/LiveProgress';
-import { ArtifactLink, DarkEmpty, MetricPill, Score, Status, artifactUrl, dedupeArtifacts, formatDate, groupHttpArtifacts, messageOf, runSummary, shortId, shortPath, summarize, timelineRows } from '../shared';
+import { ArtifactLink } from '../shared/artifacts';
+import { messageOf } from '../shared/formUtils';
+import { artifactUrl, dedupeArtifacts, formatDate, groupHttpArtifacts, runSummary, shortId, shortPath, summarize, timelineRows } from '../shared/runUtils';
+import { DarkEmpty, MetricPill, Score, Status } from '../shared/ui';
 
 export function EvidenceColumn(props: {
   runs: Run[];

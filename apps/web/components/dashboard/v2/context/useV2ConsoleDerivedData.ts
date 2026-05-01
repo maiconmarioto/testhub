@@ -5,8 +5,32 @@ import { useAuthQueries } from '../query/useAuthQueries';
 import { useFlowQueries } from '../query/useFlowQueries';
 import { useProjectQueries, useRunReportQuery } from '../query/useProjectQueries';
 import { useSystemQueries } from '../query/useSystemQueries';
-import type { Environment, Run, Suite } from '../types';
-import { collectArtifacts, summarize } from '../shared';
+import type {
+  AiConnection,
+  AuditEntry,
+  Environment,
+  FlowLibraryItem,
+  Organization,
+  OrganizationMember,
+  PersonalAccessToken,
+  Project,
+  Run,
+  Suite,
+  UserManagementItem,
+} from '../types';
+import { collectArtifacts, summarize } from '../shared/runUtils';
+
+const emptyMembers: OrganizationMember[] = [];
+const emptyTokens: PersonalAccessToken[] = [];
+const emptyProjects: Project[] = [];
+const emptyEnvs: Environment[] = [];
+const emptySuites: Suite[] = [];
+const emptyRuns: Run[] = [];
+const emptyFlows: FlowLibraryItem[] = [];
+const emptyAiConnections: AiConnection[] = [];
+const emptyAudit: AuditEntry[] = [];
+const emptyOrganizations: Organization[] = [];
+const emptyUsers: UserManagementItem[] = [];
 
 export function useV2ConsoleDerivedData(input: {
   projectId: string;
@@ -20,16 +44,16 @@ export function useV2ConsoleDerivedData(input: {
   const systemQueries = useSystemQueries();
 
   const me = authQueries.me.data ?? null;
-  const members = authQueries.members.data ?? [];
-  const personalTokens = authQueries.personalTokens.data ?? [];
-  const projects = projectQueries.projects.data ?? [];
-  const envs = projectQueries.environments.data ?? [];
-  const suites = projectQueries.suites.data ?? [];
-  const runs = projectQueries.runs.data ?? [];
-  const flowLibrary = flowQueries.flows.data ?? [];
-  const aiConnections = systemQueries.aiConnections.data ?? [];
+  const members = authQueries.members.data ?? emptyMembers;
+  const personalTokens = authQueries.personalTokens.data ?? emptyTokens;
+  const projects = projectQueries.projects.data ?? emptyProjects;
+  const envs = projectQueries.environments.data ?? emptyEnvs;
+  const suites = projectQueries.suites.data ?? emptySuites;
+  const runs = projectQueries.runs.data ?? emptyRuns;
+  const flowLibrary = flowQueries.flows.data ?? emptyFlows;
+  const aiConnections = systemQueries.aiConnections.data ?? emptyAiConnections;
   const security = systemQueries.security.data ?? null;
-  const audit = systemQueries.audit.data ?? [];
+  const audit = systemQueries.audit.data ?? emptyAudit;
 
   const projectEnvs = useMemo(
     () => envs.filter((env: Environment) => env.projectId === input.projectId),
@@ -69,9 +93,9 @@ export function useV2ConsoleDerivedData(input: {
   const canWrite = role === 'admin' || role === 'editor';
   const canAdmin = role === 'admin';
   const organizations = canAdmin
-    ? (authQueries.organizations.data ?? [])
-    : (me?.organizations ?? []);
-  const managedUsers = canAdmin ? (authQueries.users.data ?? []) : [];
+    ? (authQueries.organizations.data ?? emptyOrganizations)
+    : (me?.organizations ?? emptyOrganizations);
+  const managedUsers = canAdmin ? (authQueries.users.data ?? emptyUsers) : emptyUsers;
   const stats = summarize(scopedRuns);
   const artifacts = collectArtifacts(report);
   const videos = artifacts.filter((artifact) => artifact.type === 'video');
