@@ -92,8 +92,9 @@ test('suites page imports OpenAPI with advanced options and saves Monaco YAML', 
 });
 
 test('settings cover AI connection, retention cleanup and audit export link', async ({ page }) => {
-  await login(page);
-  await page.goto('/settings');
+  const token = await login(page);
+  const fixture = await seedWorkspace(token, 'settings-flow');
+  await page.goto(`/settings?project=${fixture.project.id}`);
   await expect(page.getByRole('heading', { name: 'Sistema' })).toBeVisible();
 
   await page.getByRole('tab', { name: 'AI' }).click();
@@ -201,6 +202,7 @@ async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
     await expect(page).toHaveURL(/\/v2/);
     const token = await page.evaluate(() => window.localStorage.getItem('testhub.token'));
     if (!token) throw new Error('Login did not persist testhub.token');
+    await page.goto('about:blank');
     return token;
   }
   await page.getByRole('button', { name: 'Criar conta' }).click();
@@ -223,6 +225,7 @@ async function login(page: Page, email = uniqueEmail('web')): Promise<string> {
   const token = await page.evaluate(() => window.localStorage.getItem('testhub.token'));
   if (!token) throw new Error('Login did not persist testhub.token');
   setBootstrapUser(token);
+  await page.goto('about:blank');
   return token;
 }
 

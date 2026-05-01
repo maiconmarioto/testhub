@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const e2eDataDir = '.testhub-e2e';
+const e2eDatabaseUrl = process.env.DATABASE_URL ?? 'postgres://testhub:testhub@localhost:55432/testhub';
+const e2eSecretKey = process.env.TESTHUB_SECRET_KEY ?? 'testhub-e2e-secret';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -15,7 +17,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `rm -rf ${e2eDataDir} && TESTHUB_DATA_DIR=${e2eDataDir} PORT=44321 npm run server`,
+      command: `sh -c 'rm -rf ${e2eDataDir} && TESTHUB_DATA_DIR=${e2eDataDir} DATABASE_URL=${e2eDatabaseUrl} TESTHUB_SECRET_KEY=${e2eSecretKey} TESTHUB_AUTH_MODE=local TESTHUB_ALLOW_PUBLIC_SIGNUP=true PORT=44321 npm run api-go & TESTHUB_DATA_DIR=${e2eDataDir} DATABASE_URL=${e2eDatabaseUrl} TESTHUB_SECRET_KEY=${e2eSecretKey} npm run worker'`,
       url: 'http://127.0.0.1:44321/api/health',
       reuseExistingServer: false,
       timeout: 20_000,

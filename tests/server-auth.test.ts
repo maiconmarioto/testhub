@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../apps/api/src/server.js';
+import { resetPostgresTestDatabase, setRunReportPath } from './postgres-test-helper.js';
 
 const originalDataDir = process.env.TESTHUB_DATA_DIR;
 const originalAuthMode = process.env.TESTHUB_AUTH_MODE;
@@ -12,8 +13,13 @@ const originalWebUrl = process.env.TESTHUB_WEB_URL;
 const originalCorsOrigins = process.env.TESTHUB_CORS_ORIGINS;
 const apps: ReturnType<typeof createApp>[] = [];
 
+beforeEach(async () => {
+  await resetPostgresTestDatabase();
+});
+
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
+  await resetPostgresTestDatabase();
   restoreEnv();
 });
 
@@ -1030,10 +1036,7 @@ describe('server local auth', () => {
     fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
     fs.writeFileSync(reportPath, JSON.stringify({ ok: true }), 'utf8');
     fs.writeFileSync(screenshotPath, 'fake-png', 'utf8');
-    const dbPath = path.join(dataDir, 'db.json');
-    const db = JSON.parse(fs.readFileSync(dbPath, 'utf8')) as { runs: Array<{ id: string; reportPath?: string }> };
-    db.runs = db.runs.map((item) => item.id === run.id ? { ...item, reportPath } : item);
-    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+    await setRunReportPath(run.id, reportPath);
 
     const aReport = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(reportPath)}`, headers: authA });
     expect(aReport.statusCode).toBe(200);
@@ -1043,8 +1046,10 @@ describe('server local auth', () => {
     expect(aChildArtifact.statusCode).toBe(200);
     expect(aChildArtifact.payload).toBe('fake-png');
 
-    const aDb = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(dbPath)}`, headers: authA });
-    expect(aDb.statusCode).toBe(403);
+    const outsidePath = path.join(dataDir, 'outside.json');
+    fs.writeFileSync(outsidePath, '{}', 'utf8');
+    const outsideArtifact = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(outsidePath)}`, headers: authA });
+    expect(outsideArtifact.statusCode).toBe(403);
 
     const bReport = await app.inject({ method: 'GET', url: `/artifacts?path=${encodeURIComponent(reportPath)}`, headers: authB });
     expect(bReport.statusCode).toBe(403);

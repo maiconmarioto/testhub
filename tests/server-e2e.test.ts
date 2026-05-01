@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../apps/api/src/server.js';
+import { resetPostgresTestDatabase } from './postgres-test-helper.js';
 
 const originalDataDir = process.env.TESTHUB_DATA_DIR;
 const originalAuthMode = process.env.TESTHUB_AUTH_MODE;
@@ -21,6 +22,7 @@ beforeAll(async () => {
   process.env.TESTHUB_AUTH_MODE = 'local';
   process.env.NODE_ENV = 'test';
   process.env.TESTHUB_ENV_HEALTH_TIMEOUT_MS = '100';
+  await resetPostgresTestDatabase();
   app = createApp();
   await app.ready();
 

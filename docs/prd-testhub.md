@@ -439,9 +439,9 @@ Prioridade: Could.
 
 - Monorepo `pnpm` + Turborepo.
 - Next.js para dashboard.
-- Fastify para API.
-- Drizzle + Postgres.
-- Redis + BullMQ.
+- Go para API.
+- GORM + Postgres.
+- Postgres job table.
 - MinIO/S3 para artifacts.
 - Pino + OpenTelemetry.
 - Docker.
@@ -690,7 +690,7 @@ Runner Worker
 
 ## Fase 3 - Worker/Queue
 
-- Redis/BullMQ;
+- Postgres job table;
 - worker separado;
 - heartbeat;
 - timeout;

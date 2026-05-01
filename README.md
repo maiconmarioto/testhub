@@ -65,7 +65,7 @@ Stack principal:
 - Fastify
 - Playwright
 - Postgres
-- Redis / BullMQ
+- Go API + Postgres job table
 - MinIO/S3
 - Monaco Editor
 - MCP SDK
