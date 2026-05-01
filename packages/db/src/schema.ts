@@ -92,6 +92,7 @@ export const suites = pgTable('suites', {
   name: text('name').notNull(),
   type: text('type').notNull(),
   specPath: text('spec_path').notNull(),
+  specContent: text('spec_content'),
   status: text('status').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
@@ -112,6 +113,21 @@ export const runs = pgTable('runs', {
   summary: jsonb('summary').$type<unknown>(),
   progress: jsonb('progress').$type<RunProgress | null>(),
   heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+});
+
+export const runJobs = pgTable('run_jobs', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull(),
+  type: text('type').notNull(),
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull(),
+  maxAttempts: integer('max_attempts').notNull(),
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  lockedBy: text('locked_by'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 });
 
 export const aiConnections = pgTable('ai_connections', {

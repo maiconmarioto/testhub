@@ -2,7 +2,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { RunOptions, RunReport, TestHubSpec } from '../../shared/src/types.js';
 import { ensureDir } from '../../shared/src/fs-utils.js';
-import { loadEnvFile, MissingVariableError, parseSpecFile, resolveVariables, SpecValidationError } from '../../spec/src/spec.js';
+import { loadEnvFile, MissingVariableError, parseSpecContent, parseSpecFile, resolveVariables, SpecValidationError } from '../../spec/src/spec.js';
 import { runApiSpec } from './api-runner.js';
 import { runWebSpec } from './web-runner.js';
 import { createRunReport } from './reporter.js';
@@ -22,7 +22,9 @@ export async function runSpec(options: RunOptions): Promise<RunReport> {
   const externalFlows = options.externalFlows
     ? resolveVariables(options.externalFlows, env, { allowMissing: true })
     : undefined;
-  const parsed = parseSpecFile(options.specPath, { externalFlows });
+  const parsed = options.specContent !== undefined
+    ? parseSpecContent(options.specContent, { externalFlows })
+    : parseSpecFile(requiredSpecPath(options.specPath), { externalFlows });
   const withOverride = applyBaseUrlOverride(parsed, options.baseUrl);
   const spec = resolveVariables(withOverride, env, { allowMissing: true });
   const filteredSpec = filterSpec(spec, options.tags);
@@ -38,7 +40,7 @@ export async function runSpec(options: RunOptions): Promise<RunReport> {
   const finishedAt = new Date();
   const report = createRunReport({
     id,
-    specPath: path.resolve(options.specPath),
+    specPath: options.specPath ? path.resolve(options.specPath) : 'postgres:spec_content',
     spec: filteredSpec,
     baseUrl: filteredSpec.baseUrl,
     startedAt,
@@ -54,6 +56,11 @@ export async function runSpec(options: RunOptions): Promise<RunReport> {
 
 export function validateSpec(specPath: string): TestHubSpec {
   return parseSpecFile(specPath);
+}
+
+function requiredSpecPath(specPath?: string): string {
+  if (!specPath) throw new SpecValidationError('Spec path ausente');
+  return specPath;
 }
 
 function applyBaseUrlOverride(spec: TestHubSpec, baseUrl?: string): TestHubSpec {

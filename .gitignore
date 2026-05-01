@@ -6,6 +6,7 @@ apps/web/.next/
 !.env.example
 .testhub-runs*
 .testhub-data/
+.testhub-e2e/
 playwright-report/
 test-results/
 .playwright-mcp/

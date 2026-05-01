@@ -5,7 +5,7 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { and, desc, eq, gt, isNull, lt, ne, sql } from 'drizzle-orm';
 import { ensureDir } from '../../shared/src/fs-utils.js';
-import { aiConnections, environments, flowLibrary, memberships, organizations, passwordResetTokens, personalAccessTokens, projects, runs, sessions, suites, users } from './schema.js';
+import { aiConnections, environments, flowLibrary, memberships, organizations, passwordResetTokens, personalAccessTokens, projects, runJobs, runs, sessions, suites, users } from './schema.js';
 import type { FlowLibraryItem, WebStep } from '../../shared/src/types.js';
 import type { AiConnection, AuthSession, Database, Environment, MembershipRole, Organization, OrganizationMembership, PasswordResetToken, PersonalAccessToken, Project, RunRecord, Store, Suite, User } from './store.js';
 import { decryptSecret, decryptVariables, encryptSecret, encryptVariables, maskVariables } from './secrets.js';
@@ -20,7 +20,6 @@ export class PgStore implements Store {
 
   constructor(connectionString = process.env.DATABASE_URL!, rootDir = process.env.TESTHUB_DATA_DIR ?? '.testhub-data') {
     this.rootDir = path.resolve(rootDir);
-    ensureDir(this.suitesDir);
     ensureDir(this.runsDir);
     this.pool = new Pool({ connectionString });
     this.db = drizzle(this.pool);
@@ -447,9 +446,8 @@ export class PgStore implements Store {
 
   async createSuite(input: { projectId: string; name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite> {
     const now = new Date();
-    const specPath = path.join(this.suitesDir, `${input.name.replace(/[^a-zA-Z0-9._-]/g, '_')}-${Date.now()}.yaml`);
-    fs.writeFileSync(specPath, input.specContent, 'utf8');
-    const suite = { id: randomUUID(), projectId: input.projectId, name: input.name, type: input.type, specPath, status: 'active', createdAt: now, updatedAt: now };
+    const id = randomUUID();
+    const suite = { id, projectId: input.projectId, name: input.name, type: input.type, specPath: `postgres:${id}`, specContent: input.specContent, status: 'active', createdAt: now, updatedAt: now };
     await this.db.insert(suites).values(suite);
     return rowToSuite(suite);
   }
@@ -457,27 +455,53 @@ export class PgStore implements Store {
   async getSuiteContent(id: string): Promise<(Suite & { specContent: string }) | undefined> {
     const [suite] = await this.db.select().from(suites).where(and(eq(suites.id, id), ne(suites.status, 'inactive')));
     if (!suite) return undefined;
+    const specContent = await this.resolveSuiteSpecContent(suite);
     return {
       ...rowToSuite(suite),
-      specContent: fs.existsSync(suite.specPath) ? fs.readFileSync(suite.specPath, 'utf8') : '',
+      specContent,
     };
   }
 
   async updateSuite(id: string, input: { name: string; type: 'web' | 'api'; specContent: string }): Promise<Suite | undefined> {
     const [current] = await this.db.select().from(suites).where(and(eq(suites.id, id), ne(suites.status, 'inactive')));
     if (!current) return undefined;
-    fs.writeFileSync(current.specPath, input.specContent, 'utf8');
     const [suite] = await this.db.update(suites)
-      .set({ name: input.name, type: input.type, updatedAt: new Date() })
+      .set({ name: input.name, type: input.type, specContent: input.specContent, updatedAt: new Date() })
       .where(eq(suites.id, id))
       .returning();
     return suite ? rowToSuite(suite) : undefined;
   }
 
+  private async resolveSuiteSpecContent(suite: typeof suites.$inferSelect): Promise<string> {
+    if (suite.specContent) return suite.specContent;
+    if (!suite.specPath || suite.specPath.startsWith('postgres:')) return '';
+    if (!fs.existsSync(suite.specPath)) return '';
+    const content = fs.readFileSync(suite.specPath, 'utf8');
+    if (content) {
+      await this.db.update(suites)
+        .set({ specContent: content })
+        .where(and(eq(suites.id, suite.id), sql`(${suites.specContent} is null or ${suites.specContent} = '')`));
+    }
+    return content;
+  }
+
   async createRun(input: { projectId: string; environmentId: string; suiteId: string }): Promise<RunRecord> {
     const now = new Date();
     const run = { id: randomUUID(), projectId: input.projectId, environmentId: input.environmentId, suiteId: input.suiteId, status: 'queued', createdAt: now };
-    await this.db.insert(runs).values(run);
+    await this.db.transaction(async (tx) => {
+      await tx.insert(runs).values(run);
+      await tx.insert(runJobs).values({
+        id: randomUUID(),
+        runId: run.id,
+        type: 'run',
+        status: 'queued',
+        attempts: 0,
+        maxAttempts: 3,
+        availableAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
     return rowToRun(run);
   }
 
@@ -494,6 +518,11 @@ export class PgStore implements Store {
     if (patch.finishedAt !== undefined) values.finishedAt = new Date(patch.finishedAt);
     const [row] = await this.db.update(runs).set(values).where(eq(runs.id, id)).returning();
     if (!row) throw new Error(`Run nao encontrada: ${id}`);
+    if (patch.status === 'canceled' || patch.status === 'deleted') {
+      await this.db.update(runJobs)
+        .set({ status: patch.status, updatedAt: new Date() })
+        .where(and(eq(runJobs.runId, id), ne(runJobs.status, 'completed'), ne(runJobs.status, 'failed')));
+    }
     return rowToRun(row);
   }
 
@@ -680,8 +709,8 @@ function rowToEnvironmentSafe(row: { id: string; projectId: string; name: string
   return { id: row.id, projectId: row.projectId, name: row.name, baseUrl: row.baseUrl, status: row.status as Environment['status'], variables: maskVariables(row.variables ?? undefined), createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
 }
 
-function rowToSuite(row: { id: string; projectId: string; name: string; type: string; specPath: string; status: string; createdAt: Date | string; updatedAt: Date | string }): Suite {
-  return { id: row.id, projectId: row.projectId, name: row.name, type: row.type as Suite['type'], specPath: row.specPath, status: row.status as Suite['status'], createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
+function rowToSuite(row: { id: string; projectId: string; name: string; type: string; specPath: string; specContent?: string | null; status: string; createdAt: Date | string; updatedAt: Date | string }): Suite {
+  return { id: row.id, projectId: row.projectId, name: row.name, type: row.type as Suite['type'], specPath: row.specPath, specContent: row.specContent ?? undefined, status: row.status as Suite['status'], createdAt: toIso(row.createdAt), updatedAt: toIso(row.updatedAt) };
 }
 
 function rowToRun(row: Record<string, unknown>): RunRecord {

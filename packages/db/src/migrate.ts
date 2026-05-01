@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -21,11 +22,13 @@ const statements = [
   `create table if not exists personal_access_tokens (id text primary key, user_id text not null, name text not null, token_hash text not null, token text not null, token_preview text not null, organization_ids jsonb, default_organization_id text not null, status text not null, created_at timestamptz not null, updated_at timestamptz not null, last_used_at timestamptz)`,
   `create unique index if not exists personal_access_tokens_hash_unique on personal_access_tokens (token_hash)`,
   `create table if not exists environments (id text primary key, project_id text not null, name text not null, base_url text not null, status text not null, variables jsonb, created_at timestamptz not null, updated_at timestamptz not null)`,
-  `create table if not exists suites (id text primary key, project_id text not null, name text not null, type text not null, spec_path text not null, status text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
+  `create table if not exists suites (id text primary key, project_id text not null, name text not null, type text not null, spec_path text not null, spec_content text, status text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create table if not exists runs (id text primary key, project_id text not null, environment_id text not null, suite_id text not null, status text not null, report_path text, report_html_path text, error text, created_at timestamptz not null, started_at timestamptz, finished_at timestamptz, summary jsonb, progress jsonb, heartbeat_at timestamptz)`,
   `create table if not exists ai_connections (id text primary key, organization_id text not null, name text not null, provider text not null, api_key text, model text not null, base_url text, enabled text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create table if not exists flow_library (id text primary key, organization_id text not null, namespace text not null, name text not null, description text, params jsonb, steps jsonb not null, status text not null, created_at timestamptz not null, updated_at timestamptz not null)`,
   `create unique index if not exists flow_library_org_namespace_name_unique on flow_library (organization_id, namespace, name) where status <> 'inactive'`,
+  `create table if not exists run_jobs (id text primary key, run_id text not null unique, type text not null, status text not null, attempts integer not null default 0, max_attempts integer not null default 3, available_at timestamptz not null, locked_at timestamptz, locked_by text, last_error text, created_at timestamptz not null, updated_at timestamptz not null)`,
+  `create index if not exists run_jobs_status_available_idx on run_jobs (status, available_at, created_at)`,
 ];
 
 for (const statement of statements) await pool.query(statement);
@@ -39,7 +42,19 @@ await pool.query(`update ai_connections set organization_id = 'legacy-local' whe
 await pool.query(`alter table ai_connections alter column organization_id set not null`);
 await pool.query(`alter table runs add column if not exists progress jsonb`);
 await pool.query(`alter table runs add column if not exists heartbeat_at timestamptz`);
+await pool.query(`alter table suites add column if not exists spec_content text`);
 await pool.query(`alter table flow_library add column if not exists display_name text`);
 await pool.query(`alter table flow_library add column if not exists project_ids jsonb`);
+const legacySuites = await pool.query<{ id: string; spec_path: string }>(
+  `select id, spec_path from suites where (spec_content is null or spec_content = '') and spec_path <> ''`,
+);
+for (const suite of legacySuites.rows) {
+  try {
+    const content = await fs.readFile(suite.spec_path, 'utf8');
+    if (content) await pool.query(`update suites set spec_content = $2 where id = $1 and (spec_content is null or spec_content = '')`, [suite.id, content]);
+  } catch {
+    // Legacy spec files may not exist in all environments. Runtime keeps a read fallback.
+  }
+}
 await pool.end();
 console.log('migrations ok');

@@ -17,7 +17,8 @@ export interface RunProgress {
 export type RunProgressCallback = (progress: RunProgress) => void | Promise<void>;
 
 export interface RunOptions {
-  specPath: string;
+  specPath?: string;
+  specContent?: string;
   baseUrl?: string;
   reportDir: string;
   envFile?: string;
