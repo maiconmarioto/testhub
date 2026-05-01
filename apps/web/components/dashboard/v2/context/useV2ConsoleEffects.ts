@@ -30,6 +30,7 @@ export function useV2ConsoleEffects(input: {
   me: AuthMe | null;
   projects: Project[];
   projectId: string;
+  setProjectId: Dispatch<SetStateAction<string>>;
   environmentId: string;
   projectEnvs: Environment[];
   projectSuites: Suite[];
@@ -80,6 +81,24 @@ export function useV2ConsoleEffects(input: {
       cleanupArtifacts: Boolean(current?.cleanupArtifacts),
     });
   }, [input.projectId, input.projects, input.security?.retention.days, input.setProjectDraft]);
+
+  useEffect(() => {
+    if (input.projects.length === 0) return;
+    input.setProjectId((current) => {
+      if (current && input.projects.some((project) => project.id === current))
+        return current;
+      const queryProject =
+        typeof window === 'undefined'
+          ? ''
+          : new URLSearchParams(window.location.search).get('project');
+      if (
+        queryProject &&
+        input.projects.some((project) => project.id === queryProject)
+      )
+        return queryProject;
+      return input.projects[0]?.id ?? '';
+    });
+  }, [input.projects, input.setProjectId]);
 
   useEffect(() => {
     if (input.security?.retention.days)
