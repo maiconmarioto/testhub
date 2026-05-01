@@ -18,10 +18,7 @@ import (
 )
 
 func TestTenantIsolationForUsersAndPATs(t *testing.T) {
-	dsn := os.Getenv("TESTHUB_GO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TESTHUB_GO_TEST_DATABASE_URL not set")
-	}
+	dsn := isolatedTestDatabaseURL(t)
 	t.Setenv("TESTHUB_AUTH_MODE", "local")
 	t.Setenv("TESTHUB_SECRET_KEY", "test-secret")
 
@@ -83,10 +80,7 @@ func TestTenantIsolationForUsersAndPATs(t *testing.T) {
 }
 
 func TestPublicRegisterCannotJoinExistingOrgByID(t *testing.T) {
-	dsn := os.Getenv("TESTHUB_GO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TESTHUB_GO_TEST_DATABASE_URL not set")
-	}
+	dsn := isolatedTestDatabaseURL(t)
 	t.Setenv("TESTHUB_AUTH_MODE", "local")
 	t.Setenv("TESTHUB_ALLOW_PUBLIC_SIGNUP", "true")
 
@@ -111,10 +105,7 @@ func TestPublicRegisterCannotJoinExistingOrgByID(t *testing.T) {
 }
 
 func TestHTTPGuardsAndSensitiveDomainEdges(t *testing.T) {
-	dsn := os.Getenv("TESTHUB_GO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TESTHUB_GO_TEST_DATABASE_URL not set")
-	}
+	dsn := isolatedTestDatabaseURL(t)
 	t.Setenv("TESTHUB_AUTH_MODE", "local")
 	t.Setenv("TESTHUB_SECRET_KEY", "test-secret")
 
@@ -208,10 +199,7 @@ func TestHTTPGuardsAndSensitiveDomainEdges(t *testing.T) {
 }
 
 func TestRunCreationCreatesJobAndCancelUpdatesJob(t *testing.T) {
-	dsn := os.Getenv("TESTHUB_GO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TESTHUB_GO_TEST_DATABASE_URL not set")
-	}
+	dsn := isolatedTestDatabaseURL(t)
 	t.Setenv("TESTHUB_AUTH_MODE", "local")
 	t.Setenv("TESTHUB_SECRET_KEY", "test-secret")
 
@@ -278,6 +266,23 @@ func TestRunCreationCreatesJobAndCancelUpdatesJob(t *testing.T) {
 	if job.Status != "canceled" {
 		t.Fatalf("job status after cancel = %q", job.Status)
 	}
+}
+
+func isolatedTestDatabaseURL(t *testing.T) string {
+	t.Helper()
+	dsn := os.Getenv("TESTHUB_GO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TESTHUB_GO_TEST_DATABASE_URL not set")
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("invalid TESTHUB_GO_TEST_DATABASE_URL: %v", err)
+	}
+	dbName := strings.TrimPrefix(u.Path, "/")
+	if !strings.HasSuffix(dbName, "_test") && os.Getenv("TESTHUB_ALLOW_DESTRUCTIVE_GO_TESTS") != "true" {
+		t.Skip("integration tests truncate tables; use a database ending in _test or set TESTHUB_ALLOW_DESTRUCTIVE_GO_TESTS=true")
+	}
+	return dsn
 }
 
 func truncateSecurityTables(t *testing.T, db *gorm.DB) {
