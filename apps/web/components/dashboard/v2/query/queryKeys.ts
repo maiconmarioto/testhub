@@ -1,0 +1,16 @@
+export const queryKeys = {
+  authMe: ['auth', 'me'] as const,
+  members: ['auth', 'members'] as const,
+  personalTokens: ['auth', 'tokens'] as const,
+  organizations: ['auth', 'organizations'] as const,
+  users: ['auth', 'users'] as const,
+  projects: ['projects'] as const,
+  environments: ['environments'] as const,
+  suites: ['suites'] as const,
+  runs: ['runs'] as const,
+  runReport: (runId: string) => ['runs', runId, 'report'] as const,
+  flows: ['flows'] as const,
+  security: ['system', 'security'] as const,
+  audit: ['audit'] as const,
+  aiConnections: ['ai', 'connections'] as const,
+};

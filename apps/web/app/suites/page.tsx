@@ -1,5 +1,5 @@
-import { V2Console } from '@/components/dashboard/v2-console';
+import { SuitesConsole } from '@/components/dashboard/v2/suites/SuitesConsole';
 
 export default function SuitesPage() {
-  return <V2Console view="suites" />;
+  return <SuitesConsole />;
 }

@@ -1,5 +1,5 @@
-import { V2Console } from '@/components/dashboard/v2-console';
+import { DocsConsole } from '@/components/dashboard/v2/docs/DocsConsole';
 
 export default function DocsPage() {
-  return <V2Console view="docs" />;
+  return <DocsConsole />;
 }

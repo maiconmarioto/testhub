@@ -1,5 +1,5 @@
-import { V2Console } from '@/components/dashboard/v2-console';
+import { ProjectsConsole } from '@/components/dashboard/v2/projects/ProjectsConsole';
 
 export default function ProjectsPage() {
-  return <V2Console view="projects" />;
+  return <ProjectsConsole />;
 }

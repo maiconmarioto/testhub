@@ -1,5 +1,5 @@
-import { V2Console } from '@/components/dashboard/v2-console';
+import { SettingsConsole } from '@/components/dashboard/v2/settings/SettingsConsole';
 
 export default function SettingsPage() {
-  return <V2Console view="settings" />;
+  return <SettingsConsole />;
 }

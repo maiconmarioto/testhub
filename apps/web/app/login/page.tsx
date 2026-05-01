@@ -3,36 +3,27 @@
 import type React from 'react';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { errorMessage, useLoginMutation } from '@/components/auth/auth-query';
 import { AuthShell } from '@/components/auth/auth-shell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { api } from '@/lib/api';
-
-type AuthResponse = { token?: string };
 
 export default function LoginPage() {
   const router = useRouter();
+  const loginMutation = useLoginMutation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
     setError('');
     try {
-      const result = await api<AuthResponse>('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      if (result.token) window.localStorage.setItem('testhub.token', result.token);
+      await loginMutation.mutateAsync({ email, password });
       router.replace('/v2');
     } catch (nextError) {
-      setError(messageOf(nextError));
-    } finally {
-      setBusy(false);
+      setError(errorMessage(nextError));
     }
   }
 
@@ -53,7 +44,7 @@ export default function LoginPage() {
           <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
         </AuthField>
         {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
-        <Button type="submit" disabled={busy || !email || !password}>{busy ? 'Entrando...' : 'Entrar'}</Button>
+        <Button type="submit" disabled={loginMutation.isPending || !email || !password}>{loginMutation.isPending ? 'Entrando...' : 'Entrar'}</Button>
       </form>
     </AuthShell>
   );
@@ -66,9 +57,4 @@ function AuthField({ id, label, children }: { id: string; label: string; childre
       {children}
     </div>
   );
-}
-
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

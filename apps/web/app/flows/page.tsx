@@ -1,5 +1,5 @@
-import { V2Console } from '@/components/dashboard/v2-console';
+import { FlowsConsole } from '@/components/dashboard/v2/flows/FlowsConsole';
 
 export default function FlowsPage() {
-  return <V2Console view="flows" />;
+  return <FlowsConsole />;
 }

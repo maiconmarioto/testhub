@@ -1,5 +1,5 @@
-import { V2Console } from '@/components/dashboard/v2-console';
+import { RunConsole } from '@/components/dashboard/v2/run/RunConsole';
 
 export default function OverviewPage() {
-  return <V2Console view="run" />;
+  return <RunConsole />;
 }
