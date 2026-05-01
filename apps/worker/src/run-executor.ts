@@ -11,7 +11,7 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
   if (!run) return;
   if (run.status === 'canceled' || run.status === 'deleted') return;
   const environment = db.environments.find((item) => item.id === run.environmentId);
-  const suite = db.suites.find((item) => item.id === run.suiteId);
+  const suite = await store.getSuiteContent(run.suiteId);
   const project = db.projects.find((item) => item.id === run.projectId);
   if (!environment || !suite || environment.status === 'inactive' || suite.status === 'inactive') {
     await store.updateRun(runId, { status: 'error', error: 'Environment ou suite nao encontrado', finishedAt: new Date().toISOString() });
@@ -19,6 +19,7 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
   }
   await store.updateRun(runId, { status: 'running', startedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() });
   const envFile = path.join(store.runsDir, `${runId}.env`);
+  fs.mkdirSync(store.runsDir, { recursive: true });
   const variables = await store.getEnvironmentVariables(run.environmentId);
   const flowLibrary = project ? (await store.listFlowsForOrganization(project.organizationId))
     .filter((flow) => !flow.projectIds?.length || flow.projectIds.includes(project.id)) : [];
@@ -28,6 +29,7 @@ export async function executeRun(store: Store, runId: string): Promise<void> {
   try {
     const report = await withRunTimeout(runSpec({
       specPath: suite.specPath,
+      specContent: suite.specContent,
       baseUrl: environment.baseUrl,
       reportDir: path.join(store.runsDir, runId),
       envFile,
