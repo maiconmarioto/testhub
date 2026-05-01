@@ -2,9 +2,6 @@ package app
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -49,9 +46,8 @@ func (a *App) createSuite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	specPath := filepath.Join(a.suitesDir(), sanitizeFile(input.Name)+"-"+strconv.FormatInt(now.UnixMilli(), 10)+".yaml")
-	_ = os.WriteFile(specPath, []byte(input.SpecContent), 0o600)
-	s := Suite{ID: uuid.NewString(), ProjectID: input.ProjectID, Name: input.Name, Type: input.Type, SpecPath: specPath, Status: "active", CreatedAt: now, UpdatedAt: now}
+	id := uuid.NewString()
+	s := Suite{ID: id, ProjectID: input.ProjectID, Name: input.Name, Type: input.Type, SpecPath: "postgres:" + id, SpecContent: input.SpecContent, Status: "active", CreatedAt: now, UpdatedAt: now}
 	a.db.Create(&s)
 	writeJSON(w, 201, s)
 }
@@ -61,7 +57,7 @@ func (a *App) getSuite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	content, _ := os.ReadFile(s.SpecPath)
+	content := a.suiteSpecContent(s)
 	writeJSON(w, 200, mapWith(s, "specContent", string(content)))
 }
 
@@ -83,8 +79,7 @@ func (a *App) updateSuite(w http.ResponseWriter, r *http.Request) {
 		httpError(w, 400, err.Error())
 		return
 	}
-	_ = os.WriteFile(s.SpecPath, []byte(input.SpecContent), 0o600)
-	a.db.Model(&s).Updates(map[string]any{"name": input.Name, "type": input.Type, "updated_at": time.Now().UTC()})
+	a.db.Model(&s).Updates(map[string]any{"name": input.Name, "type": input.Type, "spec_content": input.SpecContent, "updated_at": time.Now().UTC()})
 	a.db.First(&s, "id = ?", s.ID)
 	writeJSON(w, 200, s)
 }
@@ -136,9 +131,8 @@ func (a *App) importOpenAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	specPath := filepath.Join(a.suitesDir(), sanitizeFile(input.Name)+"-"+strconv.FormatInt(now.UnixMilli(), 10)+".yaml")
-	_ = os.WriteFile(specPath, []byte(spec), 0o600)
-	s := Suite{ID: uuid.NewString(), ProjectID: input.ProjectID, Name: input.Name, Type: "api", SpecPath: specPath, Status: "active", CreatedAt: now, UpdatedAt: now}
+	id := uuid.NewString()
+	s := Suite{ID: id, ProjectID: input.ProjectID, Name: input.Name, Type: "api", SpecPath: "postgres:" + id, SpecContent: spec, Status: "active", CreatedAt: now, UpdatedAt: now}
 	a.db.Create(&s)
 	writeJSON(w, 201, s)
 }

@@ -146,14 +146,15 @@ type Environment struct {
 }
 
 type Suite struct {
-	ID        string    `gorm:"primaryKey" json:"id"`
-	ProjectID string    `gorm:"not null;index" json:"projectId"`
-	Name      string    `gorm:"not null" json:"name"`
-	Type      string    `gorm:"not null" json:"type"`
-	SpecPath  string    `gorm:"not null" json:"specPath"`
-	Status    string    `gorm:"not null;index" json:"status"`
-	CreatedAt time.Time `gorm:"not null" json:"createdAt"`
-	UpdatedAt time.Time `gorm:"not null" json:"updatedAt"`
+	ID          string    `gorm:"primaryKey" json:"id"`
+	ProjectID   string    `gorm:"not null;index" json:"projectId"`
+	Name        string    `gorm:"not null" json:"name"`
+	Type        string    `gorm:"not null" json:"type"`
+	SpecPath    string    `gorm:"not null" json:"specPath"`
+	SpecContent string    `gorm:"type:text" json:"-"`
+	Status      string    `gorm:"not null;index" json:"status"`
+	CreatedAt   time.Time `gorm:"not null" json:"createdAt"`
+	UpdatedAt   time.Time `gorm:"not null" json:"updatedAt"`
 }
 
 type RunRecord struct {
@@ -276,11 +277,27 @@ func (a *App) migrate() error {
 	if !a.db.Migrator().HasTable(&RunJob{}) {
 		return a.db.AutoMigrate(&RunJob{})
 	}
+	return a.migrateSuiteSpecContent()
+}
+
+func (a *App) migrateSuiteSpecContent() error {
+	var rows []Suite
+	if err := a.db.Where("(spec_content IS NULL OR spec_content = '') AND spec_path <> ''").Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, suite := range rows {
+		content, err := os.ReadFile(suite.SpecPath)
+		if err != nil || len(content) == 0 {
+			continue
+		}
+		if err := a.db.Model(&Suite{}).Where("id = ? AND (spec_content IS NULL OR spec_content = '')", suite.ID).Update("spec_content", string(content)).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (a *App) ensureDirs() {
-	_ = os.MkdirAll(a.suitesDir(), 0o755)
 	_ = os.MkdirAll(a.runsDir(), 0o755)
 }
 
@@ -634,6 +651,23 @@ func (a *App) runInOrg(w http.ResponseWriter, r *http.Request, id string) (RunRe
 		return run, false
 	}
 	return run, true
+}
+
+func (a *App) suiteSpecContent(s Suite) string {
+	if s.SpecContent != "" {
+		return s.SpecContent
+	}
+	if s.SpecPath == "" || strings.HasPrefix(s.SpecPath, "postgres:") {
+		return ""
+	}
+	content, err := os.ReadFile(s.SpecPath)
+	if err != nil {
+		return ""
+	}
+	if len(content) > 0 {
+		_ = a.db.Model(&Suite{}).Where("id = ? AND (spec_content IS NULL OR spec_content = '')", s.ID).Update("spec_content", string(content)).Error
+	}
+	return string(content)
 }
 
 func (a *App) writeAudit(r *http.Request, action string, actor *Actor, status string, detail map[string]any, target *string) {

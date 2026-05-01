@@ -178,6 +178,19 @@ func TestHTTPGuardsAndSensitiveDomainEdges(t *testing.T) {
 		t.Fatalf("cleanup invalid days status=%d body=%s", status, body)
 	}
 
+	spec := "version: 1\ntype: api\nname: DB Suite\ntests:\n  - name: health\n    request:\n      method: GET\n      path: /health\n    expect:\n      status: 200\n"
+	body, status = apiRequest(t, server.URL, http.MethodPost, "/api/suites", tokenA, map[string]any{"projectId": project.ID, "name": "DB Suite", "type": "api", "specContent": spec})
+	if status != 201 {
+		t.Fatalf("create suite status=%d body=%s", status, body)
+	}
+	matches, err := filepath.Glob(filepath.Join(rootDir, "suites", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) > 0 {
+		t.Fatalf("suite creation wrote persistent yaml files: %v", matches)
+	}
+
 	body, status = apiRequest(t, server.URL, http.MethodPost, "/api/ai/explain-failure", tokenA, map[string]any{"connectionId": ai.ID, "context": map[string]any{"runId": "r1"}})
 	if status != 400 {
 		t.Fatalf("disabled AI by id status=%d body=%s", status, body)
@@ -230,7 +243,7 @@ func TestRunCreationCreatesJobAndCancelUpdatesJob(t *testing.T) {
 	}
 	project := Project{ID: uuid.NewString(), OrganizationID: orgA.ID, Name: "Project", Status: "active", CreatedAt: now, UpdatedAt: now}
 	envr := Environment{ID: uuid.NewString(), ProjectID: project.ID, Name: "Local", BaseURL: target.URL, Status: "active", CreatedAt: now, UpdatedAt: now}
-	suite := Suite{ID: uuid.NewString(), ProjectID: project.ID, Name: "Suite", Type: "api", SpecPath: filepath.Join(t.TempDir(), "suite.yaml"), Status: "active", CreatedAt: now, UpdatedAt: now}
+	suite := Suite{ID: uuid.NewString(), ProjectID: project.ID, Name: "Suite", Type: "api", SpecPath: "postgres:test", SpecContent: "version: 1\ntype: api\nname: Suite\ntests:\n  - name: health\n    request:\n      method: GET\n      path: /\n    expect:\n      status: 204\n", Status: "active", CreatedAt: now, UpdatedAt: now}
 	if err := db.Create(&project).Error; err != nil {
 		t.Fatal(err)
 	}

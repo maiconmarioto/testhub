@@ -148,8 +148,7 @@ func (a *App) applyTestFix(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_ = os.WriteFile(s.SpecPath, []byte(input.SpecContent), 0o600)
-	a.db.Model(&s).Updates(map[string]any{"name": input.Name, "type": input.Type, "updated_at": time.Now().UTC()})
+	a.db.Model(&s).Updates(map[string]any{"name": input.Name, "type": input.Type, "spec_content": input.SpecContent, "updated_at": time.Now().UTC()})
 	a.db.First(&s, "id = ?", s.ID)
 	writeJSON(w, 200, s)
 }
